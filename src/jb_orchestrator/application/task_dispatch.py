@@ -66,6 +66,9 @@ class TaskDispatchService:
                 workflow_version=execution.snapshot.definition_version,
                 instructions=definition.instructions,
                 configuration=dict(definition.configuration),
+                skills=tuple(
+                    execution.snapshot.skill(reference) for reference in definition.skills
+                ),
             )
             await unit_of_work.workflow_executions.save(execution)
             await self._append_event(

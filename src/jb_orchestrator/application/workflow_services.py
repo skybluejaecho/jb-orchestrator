@@ -7,6 +7,7 @@ from uuid import UUID
 from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNotFound
 from jb_orchestrator.application.unit_of_work import UnitOfWork
 from jb_orchestrator.domain import DomainEvent
+from jb_orchestrator.skills import SkillDefinition
 from jb_orchestrator.workflows import (
     NodeOutcome,
     WorkflowDefinition,
@@ -34,6 +35,7 @@ class WorkflowService:
                 raise ResourceConflict(
                     f"workflow definition already exists: {definition.key}@{definition.version}"
                 )
+            await self._resolve_skills(unit_of_work, definition)
             await unit_of_work.workflow_definitions.add(definition)
             await unit_of_work.events.append(
                 DomainEvent(
@@ -59,8 +61,10 @@ class WorkflowService:
                 suffix = f"@{version}" if version is not None else ""
                 raise ResourceNotFound(f"workflow definition not found: {definition_key}{suffix}")
 
+            skills = await self._resolve_skills(unit_of_work, definition)
+
             execution = WorkflowExecution.create(
-                WorkflowSnapshot.from_definition(definition, run_id=run_id)
+                WorkflowSnapshot.from_definition(definition, run_id=run_id, skills=skills)
             )
             self._engine.start(execution)
             await unit_of_work.workflow_executions.add(execution)
@@ -170,3 +174,16 @@ class WorkflowService:
                 payload={"status": execution.status.value, **payload},
             )
         )
+
+    @staticmethod
+    async def _resolve_skills(
+        unit_of_work: UnitOfWork, definition: WorkflowDefinition
+    ) -> tuple[SkillDefinition, ...]:
+        references = {reference for node in definition.nodes for reference in node.skills}
+        resolved: list[SkillDefinition] = []
+        for reference in sorted(references, key=lambda item: (item.key, item.version)):
+            skill = await unit_of_work.skills.get(reference.key, reference.version)
+            if skill is None:
+                raise ResourceNotFound(f"skill not found: {reference.key}@{reference.version}")
+            resolved.append(skill)
+        return tuple(resolved)

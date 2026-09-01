@@ -4,6 +4,8 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+from jb_orchestrator.skills import SkillReference
+from jb_orchestrator.skills.serialization import skill_from_dict, skill_to_dict
 from jb_orchestrator.workflows.models import (
     EdgeDefinition,
     NodeDefinition,
@@ -26,6 +28,9 @@ def node_to_dict(node: NodeDefinition) -> dict[str, Any]:
         "executor_key": node.executor_key,
         "instructions": node.instructions,
         "configuration": node.configuration,
+        "skills": [
+            {"key": reference.key, "version": reference.version} for reference in node.skills
+        ],
     }
 
 
@@ -41,6 +46,10 @@ def node_from_dict(data: dict[str, Any]) -> NodeDefinition:
         executor_key=str(data["executor_key"]) if data.get("executor_key") else None,
         instructions=str(data["instructions"]) if data.get("instructions") else None,
         configuration=dict(data.get("configuration", {})),
+        skills=tuple(
+            SkillReference(key=str(reference["key"]), version=int(reference["version"]))
+            for reference in data.get("skills", [])
+        ),
     )
 
 
@@ -89,6 +98,7 @@ def snapshot_to_dict(snapshot: WorkflowSnapshot) -> dict[str, Any]:
         "nodes": [node_to_dict(node) for node in snapshot.nodes],
         "edges": [edge_to_dict(edge) for edge in snapshot.edges],
         "created_at": snapshot.created_at.isoformat(),
+        "skills": [skill_to_dict(skill) for skill in snapshot.skills],
     }
 
 
@@ -103,4 +113,5 @@ def snapshot_from_dict(data: dict[str, Any]) -> WorkflowSnapshot:
         nodes=tuple(node_from_dict(node) for node in data["nodes"]),
         edges=tuple(edge_from_dict(edge) for edge in data["edges"]),
         created_at=datetime.fromisoformat(str(data["created_at"])),
+        skills=tuple(skill_from_dict(skill) for skill in data.get("skills", [])),
     )

@@ -87,6 +87,7 @@ async def test_registry_rejects_unregistered_claim() -> None:
         workflow_version=claim.workflow_version,
         instructions=claim.instructions,
         configuration=claim.configuration,
+        skills=claim.skills,
     )
 
     with pytest.raises(ExecutorNotFoundError, match="not registered"):

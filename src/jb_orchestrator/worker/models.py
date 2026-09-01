@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 from uuid import UUID
 
+from jb_orchestrator.skills import SkillDefinition
 from jb_orchestrator.workflows import NodeOutcome
 
 
@@ -25,6 +26,7 @@ class TaskClaim:
     workflow_version: int
     instructions: str | None
     configuration: dict[str, Any]
+    skills: tuple[SkillDefinition, ...]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

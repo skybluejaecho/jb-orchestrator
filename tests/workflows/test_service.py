@@ -2,9 +2,10 @@ from uuid import uuid4
 
 import pytest
 
-from jb_orchestrator.application import WorkflowService
+from jb_orchestrator.application import SkillCatalogService, WorkflowService
 from jb_orchestrator.application.exceptions import ResourceConflict
 from jb_orchestrator.domain import Run
+from jb_orchestrator.skills import SkillDefinition, SkillReference, SkillSourceKind
 from jb_orchestrator.workflows import (
     EdgeDefinition,
     NodeDefinition,
@@ -71,3 +72,50 @@ async def test_service_allows_only_one_execution_per_run() -> None:
 
     with pytest.raises(ResourceConflict, match="already exists"):
         await service.start(run.id, "simple")
+
+
+async def test_workflow_snapshot_resolves_exact_skill_versions() -> None:
+    store = MemoryStore()
+    run = Run(request_id=uuid4())
+    store.runs[run.id] = run
+
+    def unit_of_work_factory() -> MemoryUnitOfWork:
+        return MemoryUnitOfWork(store)
+
+    skill_service = SkillCatalogService(unit_of_work_factory)
+    workflow_service = WorkflowService(unit_of_work_factory)
+    digest = "sha256:" + "b" * 64
+    for version in (1, 2):
+        await skill_service.register(
+            SkillDefinition(
+                key="review",
+                version=version,
+                name="Review",
+                description="Review code",
+                source_kind=SkillSourceKind.GIT,
+                source_uri="https://example.com/review.git",
+                content_digest=digest,
+                source_revision="abc123",
+            )
+        )
+    definition = WorkflowDefinition(
+        key="skilled",
+        version=1,
+        entry_node="work",
+        nodes=(
+            NodeDefinition(
+                key="work",
+                kind=NodeKind.TASK,
+                skills=(SkillReference(key="review", version=1),),
+            ),
+            NodeDefinition(
+                key="done", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.SUCCEEDED
+            ),
+        ),
+        edges=(EdgeDefinition(source="work", outcome=NodeOutcome.SUCCESS, target="done"),),
+    )
+
+    await workflow_service.register_definition(definition)
+    execution = await workflow_service.start(run.id, "skilled")
+
+    assert [(skill.key, skill.version) for skill in execution.snapshot.skills] == [("review", 1)]
