@@ -45,6 +45,23 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: jb_orchestrator
+          POSTGRES_USER: jb_orchestrator
+          POSTGRES_PASSWORD: jb_orchestrator
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U jb_orchestrator -d jb_orchestrator"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JB_ENVIRONMENT: test
+      JB_DATABASE_URL: postgresql+asyncpg://jb_orchestrator:jb_orchestrator@localhost:5432/jb_orchestrator
     steps:
       - name: Check out repository
         uses: actions/checkout@v7.0.1
@@ -56,6 +73,9 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --extra dev --frozen
+
+      - name: Apply database migrations
+        run: uv run alembic upgrade head
 
       - name: Run tests
         run: uv run pytest --cov=jb_orchestrator --cov-report=term-missing
