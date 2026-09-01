@@ -4,15 +4,23 @@
 It stores execution state in PostgreSQL and exposes the same application behavior through
 API, worker, CLI, and later MCP adapters.
 
-## Current milestone
+## Implemented foundations
 
-ORCH-001 establishes the repository foundation:
+ORCH-001 established the repository foundation:
 
 - FastAPI application with health endpoints
 - worker and administration CLI entry points
 - PostgreSQL development service
 - lint, type-check, test, and GitHub Actions CI configuration
 - modular-monolith package boundaries
+
+ORCH-002 adds the initial durable domain:
+
+- Project, UserRequest, and Run domain entities
+- guarded request and run lifecycle transitions
+- SQLAlchemy persistence records and repository ports
+- Alembic initial PostgreSQL migration
+- optimistic concurrency versioning for runs
 
 ## Prerequisites
 
@@ -26,6 +34,7 @@ ORCH-001 establishes the repository foundation:
 Copy-Item .env.example .env
 uv sync --extra dev
 docker compose up -d postgres
+uv run alembic upgrade head
 ```
 
 ## Run
