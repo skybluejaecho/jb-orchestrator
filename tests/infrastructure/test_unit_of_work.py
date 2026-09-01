@@ -5,10 +5,12 @@ from jb_orchestrator.application import (
     CreateUserRequest,
     OrchestrationService,
     RegisterProject,
+    TaskDispatchService,
     WorkflowService,
 )
 from jb_orchestrator.domain import RequestStatus, RunStatus
 from jb_orchestrator.infrastructure.database import Base, EventRecord, SqlAlchemyUnitOfWork
+from jb_orchestrator.worker.models import TaskResult
 from jb_orchestrator.workflows import (
     EdgeDefinition,
     NodeDefinition,
@@ -60,14 +62,21 @@ async def test_application_service_round_trip_with_sqlalchemy() -> None:
     )
     await workflow_service.register_definition(definition)
     execution = await workflow_service.start(created.run.id, "delivery")
-    await workflow_service.begin_task(execution.id, "implement")
-    completed_execution = await workflow_service.complete_task(
-        execution.id, "implement", NodeOutcome.SUCCESS, {"commit": "abc123"}
+    dispatch = TaskDispatchService(lambda: SqlAlchemyUnitOfWork(session_factory))
+    claim = await dispatch.claim_next("integration-worker")
+    assert claim is not None
+    leased_execution = await workflow_service.get(execution.id)
+    assert leased_execution.nodes["implement"].worker_id == "integration-worker"
+    assert leased_execution.nodes["implement"].lease_token == claim.lease_token
+    completed_execution = await dispatch.complete(
+        claim,
+        TaskResult(outcome=NodeOutcome.SUCCESS, output={"commit": "abc123"}),
     )
     stored_execution = await workflow_service.get(execution.id)
     assert stored_execution.status is WorkflowStatus.SUCCEEDED
     assert stored_execution.nodes["implement"].status is NodeExecutionStatus.SUCCEEDED
     assert stored_execution.nodes["implement"].output == {"commit": "abc123"}
+    assert stored_execution.nodes["implement"].lease_token is None
     assert stored_execution.version == completed_execution.version
 
     cancelled = await service.cancel_run(created.run.id)
@@ -82,8 +91,8 @@ async def test_application_service_round_trip_with_sqlalchemy() -> None:
             "request.created",
             "workflow.definition_registered",
             "workflow.started",
-            "workflow.node_started",
-            "workflow.node_completed",
+            "task.claimed",
+            "task.completed",
             "run.cancelled",
         ]
     )

@@ -191,9 +191,20 @@ class NodeExecution:
     attempt_count: int = 0
     outcome: NodeOutcome | None = None
     output: dict[str, Any] | None = None
+    worker_id: str | None = None
+    lease_token: UUID | None = None
+    lease_expires_at: datetime | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class WorkflowTaskCandidate:
+    """A locked READY node returned inside a repository transaction."""
+
+    execution: "WorkflowExecution"
+    node_key: str
 
 
 @dataclass(slots=True, kw_only=True)

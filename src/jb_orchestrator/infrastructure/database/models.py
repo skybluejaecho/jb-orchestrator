@@ -15,6 +15,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -192,6 +193,12 @@ class NodeExecutionRecord(Base):
             name="uq_node_executions_workflow_node",
         ),
         Index("ix_node_executions_status_updated", "status", "updated_at"),
+        Index(
+            "ix_node_executions_lease_expiry",
+            "status",
+            "lease_expires_at",
+            postgresql_where=text("lease_expires_at IS NOT NULL"),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
@@ -208,6 +215,9 @@ class NodeExecutionRecord(Base):
         string_enum(NodeOutcome, "node_outcome"), nullable=True
     )
     output: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    worker_id: Mapped[str | None] = mapped_column(String(255))
+    lease_token: Mapped[UUID | None] = mapped_column(Uuid)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

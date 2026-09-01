@@ -1,1 +1,1 @@
-"""Background worker process."""
+"""Background worker process and executor contracts."""

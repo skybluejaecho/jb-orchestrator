@@ -1,12 +1,19 @@
 """In-memory application adapters used by tests."""
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from types import TracebackType
 from typing import Self
 from uuid import UUID
 
 from jb_orchestrator.domain import DomainEvent, Project, Run, UserRequest
-from jb_orchestrator.workflows import WorkflowDefinition, WorkflowExecution
+from jb_orchestrator.workflows import (
+    NodeExecutionStatus,
+    WorkflowDefinition,
+    WorkflowExecution,
+    WorkflowStatus,
+    WorkflowTaskCandidate,
+)
 
 
 @dataclass
@@ -108,6 +115,37 @@ class MemoryWorkflowExecutionRepository:
             ),
             None,
         )
+
+    async def get_ready_for_update(self) -> WorkflowTaskCandidate | None:
+        candidates = [
+            (execution, node)
+            for execution in self._store.workflow_executions.values()
+            if execution.status is WorkflowStatus.RUNNING
+            for node in execution.nodes.values()
+            if node.status is NodeExecutionStatus.READY
+        ]
+        if not candidates:
+            return None
+        execution, node = min(candidates, key=lambda item: (item[1].updated_at, item[1].id))
+        return WorkflowTaskCandidate(execution=execution, node_key=node.node_key)
+
+    async def get_expired_for_update(self, at: datetime) -> WorkflowTaskCandidate | None:
+        candidates = [
+            (execution, node)
+            for execution in self._store.workflow_executions.values()
+            if execution.status is WorkflowStatus.RUNNING
+            for node in execution.nodes.values()
+            if node.status is NodeExecutionStatus.RUNNING
+            and node.lease_expires_at is not None
+            and node.lease_expires_at <= at
+        ]
+        if not candidates:
+            return None
+        execution, node = min(
+            candidates,
+            key=lambda item: (item[1].lease_expires_at or at, item[1].id),
+        )
+        return WorkflowTaskCandidate(execution=execution, node_key=node.node_key)
 
     async def save(self, execution: WorkflowExecution) -> None:
         self._store.workflow_executions[execution.id] = execution

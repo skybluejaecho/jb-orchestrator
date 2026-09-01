@@ -1,9 +1,14 @@
 """Persistence ports for workflow definitions and executions."""
 
+from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
-from jb_orchestrator.workflows.models import WorkflowDefinition, WorkflowExecution
+from jb_orchestrator.workflows.models import (
+    WorkflowDefinition,
+    WorkflowExecution,
+    WorkflowTaskCandidate,
+)
 
 
 class WorkflowDefinitionRepository(Protocol):
@@ -18,5 +23,9 @@ class WorkflowExecutionRepository(Protocol):
     async def get(self, execution_id: UUID) -> WorkflowExecution | None: ...
 
     async def get_by_run(self, run_id: UUID) -> WorkflowExecution | None: ...
+
+    async def get_ready_for_update(self) -> WorkflowTaskCandidate | None: ...
+
+    async def get_expired_for_update(self, at: datetime) -> WorkflowTaskCandidate | None: ...
 
     async def save(self, execution: WorkflowExecution) -> None: ...
