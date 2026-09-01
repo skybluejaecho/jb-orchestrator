@@ -46,6 +46,14 @@ ORCH-005 adds the distributed worker runtime:
 - executor ports for later Codex, Orca, OpenClaw, MCP, or local adapters
 - one-shot and continuous polling runtime with timeout and retry handling
 
+ORCH-006 adds installable executor routing:
+
+- immutable task `executor_key`, instructions, and JSON configuration
+- worker capability filtering before PostgreSQL task claim
+- runtime executor registry with duplicate and contract validation
+- adapter discovery through the `jb_orchestrator.executors` Python entry-point group
+- worker CLI startup checks and installed-executor listing
+
 ## Prerequisites
 
 - Python 3.12
@@ -66,8 +74,20 @@ uv run alembic upgrade head
 ```powershell
 uv run jb-api
 uv run jb doctor
+uv run jb-worker --list-executors
+# After installing at least one executor adapter:
 uv run jb-worker --once
 ```
+
+Executor adapter packages expose a no-argument factory in their `pyproject.toml`:
+
+```toml
+[project.entry-points."jb_orchestrator.executors"]
+codex = "jb_codex_executor:create_executor"
+```
+
+The factory returns an object implementing the async `TaskExecutor.execute(claim)` contract.
+Its entry-point name must match the workflow node's `executor_key`.
 
 The API exposes:
 
