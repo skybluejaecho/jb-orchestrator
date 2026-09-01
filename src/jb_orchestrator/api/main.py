@@ -10,6 +10,7 @@ from jb_orchestrator import __version__
 from jb_orchestrator.api.routes import router
 from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNotFound
 from jb_orchestrator.application.services import OrchestrationService
+from jb_orchestrator.application.skill_services import SkillCatalogService
 from jb_orchestrator.config import get_settings
 from jb_orchestrator.domain.exceptions import DomainValidationError, InvalidStateTransition
 from jb_orchestrator.infrastructure.database import SqlAlchemyUnitOfWork, create_session_factory
@@ -17,14 +18,21 @@ from jb_orchestrator.infrastructure.database import SqlAlchemyUnitOfWork, create
 SERVICE_NAME: Final = "jb-orchestrator"
 
 
-def create_app(service: OrchestrationService | None = None) -> FastAPI:
+def create_app(
+    service: OrchestrationService | None = None,
+    skill_service: SkillCatalogService | None = None,
+) -> FastAPI:
     """Build the API application."""
 
     app = FastAPI(title=SERVICE_NAME, version=__version__)
-    if service is None:
+    if service is None or skill_service is None:
         session_factory = create_session_factory()
+    if service is None:
         service = OrchestrationService(lambda: SqlAlchemyUnitOfWork(session_factory))
+    if skill_service is None:
+        skill_service = SkillCatalogService(lambda: SqlAlchemyUnitOfWork(session_factory))
     app.state.orchestration_service = service
+    app.state.skill_catalog_service = skill_service
 
     @app.get("/health/live", tags=["health"])
     async def live() -> dict[str, str]:
