@@ -62,6 +62,14 @@ ORCH-007 adds the versioned skill catalog:
 - resolved skill metadata copied into each workflow execution snapshot and task claim
 - explicit separation between skills, executor adapters, and MCP tool servers
 
+ORCH-008 adds verified skill materialization:
+
+- safe local, pinned Git, and size-limited archive source fetchers
+- canonical directory SHA-256 verification before executor invocation
+- atomic content-addressed cache with verification on every reuse
+- configured remote-host allowlists and path, symlink, and archive traversal defenses
+- verified skill entrypoint paths delivered through each task claim
+
 ## Prerequisites
 
 - Python 3.12
@@ -82,6 +90,7 @@ uv run alembic upgrade head
 ```powershell
 uv run jb-api
 uv run jb doctor
+uv run jb skill digest skills/my-skill
 uv run jb-worker --list-executors
 # After installing at least one executor adapter:
 uv run jb-worker --once
@@ -96,6 +105,12 @@ codex = "jb_codex_executor:create_executor"
 
 The factory returns an object implementing the async `TaskExecutor.execute(claim)` contract.
 Its entry-point name must match the workflow node's `executor_key`.
+
+Skill registration stores immutable metadata; workers fetch and verify the files only when a
+referencing task is claimed. Local sources must be below `JB_SKILL_LOCAL_ROOT`. Remote Git and
+archive hosts must be explicitly listed in the JSON array `JB_SKILL_ALLOWED_REMOTE_HOSTS`.
+Verified packages are stored below `JB_SKILL_CACHE_DIR`, and executors receive only their
+verified entrypoint paths.
 
 The API exposes:
 

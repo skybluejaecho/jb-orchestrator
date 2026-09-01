@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -24,6 +25,28 @@ def test_doctor_command() -> None:
     payload = json.loads(result.stdout)
     assert payload["service"] == "jb-orchestrator"
     assert payload["database_configured"] is True
+
+
+def test_skill_digest_command(tmp_path: Path) -> None:
+    skill = tmp_path / "review"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text("# Review\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["skill", "digest", str(skill)])
+
+    assert result.exit_code == 0
+    assert result.stdout.strip().startswith("sha256:")
+    assert len(result.stdout.strip()) == 71
+
+
+def test_skill_digest_rejects_a_file(tmp_path: Path) -> None:
+    skill_file = tmp_path / "SKILL.md"
+    skill_file.write_text("# Review\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["skill", "digest", str(skill_file)])
+
+    assert result.exit_code == 1
+    assert "cannot digest skill" in result.stderr
 
 
 def test_project_register_calls_control_plane(monkeypatch: MonkeyPatch) -> None:
