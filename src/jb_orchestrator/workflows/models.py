@@ -1,5 +1,6 @@
 """Workflow definition, snapshot, and execution state."""
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -49,6 +50,9 @@ class NodeDefinition:
     max_visits: int = 1
     timeout_seconds: int = 600
     terminal_status: WorkflowStatus | None = None
+    executor_key: str | None = None
+    instructions: str | None = None
+    configuration: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.key.strip():
@@ -64,6 +68,17 @@ class NodeDefinition:
             raise WorkflowDefinitionError("terminal node requires succeeded or failed status")
         if self.kind is not NodeKind.TERMINAL and self.terminal_status is not None:
             raise WorkflowDefinitionError("only terminal nodes may define terminal_status")
+        if self.executor_key is not None:
+            if self.kind is not NodeKind.TASK:
+                raise WorkflowDefinitionError("only task nodes may define executor_key")
+            if not self.executor_key.strip():
+                raise WorkflowDefinitionError("node executor_key must not be empty")
+        if self.instructions is not None and not self.instructions.strip():
+            raise WorkflowDefinitionError("node instructions must not be empty")
+        if self.kind is not NodeKind.TASK and (self.instructions or self.configuration):
+            raise WorkflowDefinitionError(
+                "only task nodes may define instructions or configuration"
+            )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -163,7 +178,7 @@ class WorkflowSnapshot:
             definition_key=definition.key,
             definition_version=definition.version,
             entry_node=definition.entry_node,
-            nodes=definition.nodes,
+            nodes=deepcopy(definition.nodes),
             edges=definition.edges,
         )
 
@@ -185,6 +200,7 @@ class WorkflowSnapshot:
 class NodeExecution:
     workflow_execution_id: UUID
     node_key: str
+    executor_key: str = "default"
     id: UUID = field(default_factory=uuid4)
     status: NodeExecutionStatus = NodeExecutionStatus.PENDING
     visit_count: int = 0
@@ -223,7 +239,11 @@ class WorkflowExecution:
     def create(cls, snapshot: WorkflowSnapshot) -> "WorkflowExecution":
         execution = cls(snapshot=snapshot)
         execution.nodes = {
-            node.key: NodeExecution(workflow_execution_id=execution.id, node_key=node.key)
+            node.key: NodeExecution(
+                workflow_execution_id=execution.id,
+                node_key=node.key,
+                executor_key=node.executor_key or "default",
+            )
             for node in snapshot.nodes
         }
         return execution
