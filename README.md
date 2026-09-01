@@ -38,6 +38,14 @@ ORCH-004 adds the deterministic workflow core:
 - transactional workflow services and append-only transition events
 - PostgreSQL migrations and in-memory/SQLAlchemy round-trip tests
 
+ORCH-005 adds the distributed worker runtime:
+
+- atomic READY-node claiming with PostgreSQL `FOR UPDATE SKIP LOCKED`
+- expiring worker leases, token validation, heartbeat renewal, and crash recovery
+- stable per-node-visit idempotency keys for at-least-once execution
+- executor ports for later Codex, Orca, OpenClaw, MCP, or local adapters
+- one-shot and continuous polling runtime with timeout and retry handling
+
 ## Prerequisites
 
 - Python 3.12

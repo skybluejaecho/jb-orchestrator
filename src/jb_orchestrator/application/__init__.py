@@ -2,6 +2,7 @@
 
 from jb_orchestrator.application.commands import CreateUserRequest, RegisterProject
 from jb_orchestrator.application.services import CreatedRequest, OrchestrationService
+from jb_orchestrator.application.task_dispatch import TaskDispatchService
 from jb_orchestrator.application.workflow_services import WorkflowService
 
 __all__ = [
@@ -9,5 +10,6 @@ __all__ = [
     "CreatedRequest",
     "OrchestrationService",
     "RegisterProject",
+    "TaskDispatchService",
     "WorkflowService",
 ]
