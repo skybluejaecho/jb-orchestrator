@@ -11,7 +11,7 @@ ORCH-001 establishes the repository foundation:
 - FastAPI application with health endpoints
 - worker and administration CLI entry points
 - PostgreSQL development service
-- lint, type-check, test, and GitLab CI configuration
+- lint, type-check, test, and GitHub Actions CI configuration
 - modular-monolith package boundaries
 
 ## Prerequisites
@@ -65,4 +65,3 @@ feat(workflow): add node state transitions
 test(api): cover request lifecycle
 docs(adr): record job queue decision
 ```
-
