@@ -5,6 +5,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    JSON,
     DateTime,
     Enum,
     ForeignKey,
@@ -117,3 +118,17 @@ class RunRecord(TimestampMixin, Base):
     request: Mapped[UserRequestRecord] = relationship(back_populates="runs")
 
     __mapper_args__ = {"version_id_col": version}  # noqa: RUF012
+
+
+class EventRecord(Base):
+    """Append-only event emitted by a committed application use case."""
+
+    __tablename__ = "events"
+    __table_args__ = (Index("ix_events_aggregate_occurred", "aggregate_id", "occurred_at"),)
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    aggregate_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    aggregate_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
