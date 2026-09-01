@@ -23,7 +23,14 @@ def test_definition_and_snapshot_json_round_trip() -> None:
         version=3,
         entry_node="task",
         nodes=(
-            NodeDefinition(key="task", kind=NodeKind.TASK, max_attempts=2),
+            NodeDefinition(
+                key="task",
+                kind=NodeKind.TASK,
+                max_attempts=2,
+                executor_key="codex",
+                instructions="Implement the approved task.",
+                configuration={"reasoning_effort": "medium"},
+            ),
             NodeDefinition(
                 key="done", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.SUCCEEDED
             ),

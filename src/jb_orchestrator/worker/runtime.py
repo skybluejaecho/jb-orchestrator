@@ -4,7 +4,7 @@ import asyncio
 from contextlib import suppress
 
 from jb_orchestrator.application.task_dispatch import TaskDispatchService
-from jb_orchestrator.worker.models import TaskExecutor
+from jb_orchestrator.worker.registry import ExecutorRegistry
 
 
 class WorkerRuntime:
@@ -14,7 +14,7 @@ class WorkerRuntime:
         self,
         worker_id: str,
         dispatch: TaskDispatchService,
-        executor: TaskExecutor,
+        executors: ExecutorRegistry,
         *,
         poll_interval_seconds: float = 1.0,
     ) -> None:
@@ -24,17 +24,17 @@ class WorkerRuntime:
             raise ValueError("poll_interval_seconds must be greater than zero")
         self._worker_id = worker_id
         self._dispatch = dispatch
-        self._executor = executor
+        self._executors = executors
         self._poll_interval_seconds = poll_interval_seconds
 
     async def run_once(self) -> bool:
         await self._dispatch.recover_expired()
-        claim = await self._dispatch.claim_next(self._worker_id)
+        claim = await self._dispatch.claim_next(self._worker_id, self._executors.supported_keys)
         if claim is None:
             return False
         try:
             result = await asyncio.wait_for(
-                self._executor.execute(claim), timeout=claim.timeout_seconds
+                self._executors.execute(claim), timeout=claim.timeout_seconds
             )
         except TimeoutError:
             await self._dispatch.fail(claim, "executor timed out")

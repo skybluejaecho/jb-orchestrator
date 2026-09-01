@@ -1,6 +1,6 @@
 """Transactional task claiming and lease coordination."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -28,10 +28,16 @@ class TaskDispatchService:
         self._engine = engine or WorkflowEngine()
         self._lease_grace_seconds = lease_grace_seconds
 
-    async def claim_next(self, worker_id: str, *, at: datetime | None = None) -> TaskClaim | None:
+    async def claim_next(
+        self,
+        worker_id: str,
+        executor_keys: Collection[str] | None = None,
+        *,
+        at: datetime | None = None,
+    ) -> TaskClaim | None:
         changed_at = at or datetime.now(UTC)
         async with self._unit_of_work_factory() as unit_of_work:
-            candidate = await unit_of_work.workflow_executions.get_ready_for_update()
+            candidate = await unit_of_work.workflow_executions.get_ready_for_update(executor_keys)
             if candidate is None:
                 return None
             execution = candidate.execution
@@ -49,6 +55,7 @@ class TaskDispatchService:
                 execution_id=execution.id,
                 run_id=execution.snapshot.run_id,
                 node_key=node.node_key,
+                executor_key=node.executor_key,
                 worker_id=worker_id,
                 lease_token=node.lease_token,
                 idempotency_key=f"{execution.id}:{node.node_key}:{node.visit_count}",
@@ -57,6 +64,8 @@ class TaskDispatchService:
                 timeout_seconds=definition.timeout_seconds,
                 workflow_key=execution.snapshot.definition_key,
                 workflow_version=execution.snapshot.definition_version,
+                instructions=definition.instructions,
+                configuration=dict(definition.configuration),
             )
             await unit_of_work.workflow_executions.save(execution)
             await self._append_event(

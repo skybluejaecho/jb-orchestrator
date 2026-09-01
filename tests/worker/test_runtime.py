@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from jb_orchestrator.application import TaskDispatchService
 from jb_orchestrator.worker.models import TaskClaim, TaskResult
+from jb_orchestrator.worker.registry import ExecutorRegistry
 from jb_orchestrator.worker.runtime import WorkerRuntime
 from jb_orchestrator.workflows import (
     EdgeDefinition,
@@ -33,14 +34,20 @@ class FakeExecutor:
         return result
 
 
-def running_execution(*, max_attempts: int = 2) -> WorkflowExecution:
+def running_execution(*, max_attempts: int = 2, executor_key: str = "fake") -> WorkflowExecution:
     definition = WorkflowDefinition(
         key="worker-flow",
         version=1,
         entry_node="work",
         nodes=(
             NodeDefinition(
-                key="work", kind=NodeKind.TASK, max_attempts=max_attempts, timeout_seconds=10
+                key="work",
+                kind=NodeKind.TASK,
+                max_attempts=max_attempts,
+                timeout_seconds=10,
+                executor_key=executor_key,
+                instructions="Produce the requested artifact.",
+                configuration={"model": "test-model"},
             ),
             NodeDefinition(
                 key="done", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.SUCCEEDED
@@ -63,13 +70,15 @@ async def test_worker_executes_claim_and_persists_result() -> None:
     executor = FakeExecutor(
         [TaskResult(outcome=NodeOutcome.SUCCESS, output={"artifact": "result.md"})]
     )
-    runtime = WorkerRuntime("worker-a", dispatch, executor)
+    runtime = WorkerRuntime("worker-a", dispatch, ExecutorRegistry({"fake": executor}))
 
     assert await runtime.run_once() is True
     assert execution.status is WorkflowStatus.SUCCEEDED
     assert execution.nodes["work"].output == {"artifact": "result.md"}
     assert executor.claims[0].lease_token is not None
     assert executor.claims[0].idempotency_key == f"{execution.id}:work:1"
+    assert executor.claims[0].instructions == "Produce the requested artifact."
+    assert executor.claims[0].configuration == {"model": "test-model"}
     assert [event.event_type for event in store.events] == ["task.claimed", "task.completed"]
 
 
@@ -87,6 +96,17 @@ async def test_competing_workers_cannot_claim_running_node() -> None:
     assert execution.nodes["work"].worker_id == "worker-a"
 
 
+async def test_worker_does_not_claim_an_unsupported_executor() -> None:
+    store = MemoryStore()
+    execution = running_execution(executor_key="codex")
+    store.workflow_executions[execution.id] = execution
+    dispatch = TaskDispatchService(lambda: MemoryUnitOfWork(store))
+    runtime = WorkerRuntime("worker-a", dispatch, ExecutorRegistry())
+
+    assert await runtime.run_once() is False
+    assert execution.nodes["work"].status is NodeExecutionStatus.READY
+
+
 async def test_executor_failure_retries_on_next_poll() -> None:
     store = MemoryStore()
     execution = running_execution(max_attempts=2)
@@ -98,7 +118,7 @@ async def test_executor_failure_retries_on_next_poll() -> None:
             TaskResult(outcome=NodeOutcome.SUCCESS),
         ]
     )
-    runtime = WorkerRuntime("worker-a", dispatch, executor)
+    runtime = WorkerRuntime("worker-a", dispatch, ExecutorRegistry({"fake": executor}))
 
     await runtime.run_once()
     assert execution.nodes["work"].status is NodeExecutionStatus.READY

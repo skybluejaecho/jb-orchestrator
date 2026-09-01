@@ -23,6 +23,9 @@ def node_to_dict(node: NodeDefinition) -> dict[str, Any]:
         "max_visits": node.max_visits,
         "timeout_seconds": node.timeout_seconds,
         "terminal_status": node.terminal_status.value if node.terminal_status else None,
+        "executor_key": node.executor_key,
+        "instructions": node.instructions,
+        "configuration": node.configuration,
     }
 
 
@@ -35,6 +38,9 @@ def node_from_dict(data: dict[str, Any]) -> NodeDefinition:
         max_visits=int(data["max_visits"]),
         timeout_seconds=int(data["timeout_seconds"]),
         terminal_status=WorkflowStatus(str(terminal)) if terminal else None,
+        executor_key=str(data["executor_key"]) if data.get("executor_key") else None,
+        instructions=str(data["instructions"]) if data.get("instructions") else None,
+        configuration=dict(data.get("configuration", {})),
     )
 
 

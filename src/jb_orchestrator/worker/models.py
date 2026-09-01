@@ -1,7 +1,7 @@
 """Worker/executor boundary models."""
 
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 from uuid import UUID
 
 from jb_orchestrator.workflows import NodeOutcome
@@ -14,6 +14,7 @@ class TaskClaim:
     execution_id: UUID
     run_id: UUID
     node_key: str
+    executor_key: str
     worker_id: str
     lease_token: UUID
     idempotency_key: str
@@ -22,6 +23,8 @@ class TaskClaim:
     timeout_seconds: int
     workflow_key: str
     workflow_version: int
+    instructions: str | None
+    configuration: dict[str, Any]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -36,6 +39,7 @@ class TaskResult:
             raise ValueError("task result outcome must be success or failure")
 
 
+@runtime_checkable
 class TaskExecutor(Protocol):
     """Adapter contract implemented by Codex, Orca, OpenClaw, or test executors."""
 

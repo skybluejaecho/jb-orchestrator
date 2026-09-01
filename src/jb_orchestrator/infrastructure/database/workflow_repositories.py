@@ -1,5 +1,6 @@
 """SQLAlchemy workflow persistence adapters."""
 
+from collections.abc import Collection
 from datetime import datetime
 from uuid import UUID
 
@@ -32,6 +33,7 @@ def node_record(node: NodeExecution) -> NodeExecutionRecord:
         id=node.id,
         workflow_execution_id=node.workflow_execution_id,
         node_key=node.node_key,
+        executor_key=node.executor_key,
         status=node.status,
         visit_count=node.visit_count,
         attempt_count=node.attempt_count,
@@ -51,6 +53,7 @@ def node_from_record(record: NodeExecutionRecord) -> NodeExecution:
         id=record.id,
         workflow_execution_id=record.workflow_execution_id,
         node_key=record.node_key,
+        executor_key=record.executor_key,
         status=record.status,
         visit_count=record.visit_count,
         attempt_count=record.attempt_count,
@@ -119,14 +122,21 @@ class SqlAlchemyWorkflowExecutionRepository:
         )
         return await self._to_execution(record)
 
-    async def get_ready_for_update(self) -> WorkflowTaskCandidate | None:
+    async def get_ready_for_update(
+        self, executor_keys: Collection[str] | None = None
+    ) -> WorkflowTaskCandidate | None:
+        if executor_keys is not None and not executor_keys:
+            return None
+        filters = [
+            NodeExecutionRecord.status == NodeExecutionStatus.READY,
+            WorkflowExecutionRecord.status == WorkflowStatus.RUNNING,
+        ]
+        if executor_keys is not None:
+            filters.append(NodeExecutionRecord.executor_key.in_(executor_keys))
         node = await self._session.scalar(
             select(NodeExecutionRecord)
             .join(WorkflowExecutionRecord)
-            .where(
-                NodeExecutionRecord.status == NodeExecutionStatus.READY,
-                WorkflowExecutionRecord.status == WorkflowStatus.RUNNING,
-            )
+            .where(*filters)
             .order_by(NodeExecutionRecord.updated_at, NodeExecutionRecord.id)
             .with_for_update(skip_locked=True, of=NodeExecutionRecord)
             .limit(1)
@@ -205,6 +215,7 @@ class SqlAlchemyWorkflowExecutionRepository:
                 self._session.add(node_record(node))
                 continue
             node_state.status = node.status
+            node_state.executor_key = node.executor_key
             node_state.visit_count = node.visit_count
             node_state.attempt_count = node.attempt_count
             node_state.outcome = node.outcome

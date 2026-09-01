@@ -199,6 +199,12 @@ class NodeExecutionRecord(Base):
             "lease_expires_at",
             postgresql_where=text("lease_expires_at IS NOT NULL"),
         ),
+        Index(
+            "ix_node_executions_executor_ready",
+            "executor_key",
+            "status",
+            "updated_at",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
@@ -206,6 +212,7 @@ class NodeExecutionRecord(Base):
         ForeignKey("workflow_executions.id", ondelete="CASCADE"), nullable=False, index=True
     )
     node_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    executor_key: Mapped[str] = mapped_column(String(128), nullable=False, default="default")
     status: Mapped[NodeExecutionStatus] = mapped_column(
         string_enum(NodeExecutionStatus, "node_execution_status"), nullable=False
     )
