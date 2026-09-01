@@ -13,6 +13,7 @@ from jb_orchestrator.workflows.models import (
     WorkflowExecution,
     WorkflowSnapshot,
     WorkflowStatus,
+    WorkflowTaskCandidate,
 )
 
 __all__ = [
@@ -29,4 +30,5 @@ __all__ = [
     "WorkflowExecutionError",
     "WorkflowSnapshot",
     "WorkflowStatus",
+    "WorkflowTaskCandidate",
 ]

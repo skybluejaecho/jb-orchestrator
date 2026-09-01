@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -167,3 +168,64 @@ def test_cancel_stops_active_node_and_is_not_repeatable() -> None:
     assert execution.nodes["plan"].status is NodeExecutionStatus.CANCELLED
     with pytest.raises(WorkflowExecutionError, match="terminal"):
         engine.cancel(execution)
+
+
+def test_task_lease_requires_matching_unexpired_token() -> None:
+    engine = WorkflowEngine()
+    execution = build_delivery_execution()
+    started_at = datetime(2026, 9, 1, tzinfo=UTC)
+    engine.start(execution, at=started_at)
+    node = engine.claim_task(
+        execution,
+        "plan",
+        worker_id="worker-1",
+        lease_seconds=30,
+        at=started_at,
+    )
+    assert node.lease_token is not None
+
+    with pytest.raises(WorkflowExecutionError, match="does not match"):
+        engine.complete_task(
+            execution,
+            "plan",
+            NodeOutcome.SUCCESS,
+            lease_token=uuid4(),
+            at=started_at + timedelta(seconds=1),
+        )
+    with pytest.raises(WorkflowExecutionError, match="expired"):
+        engine.complete_task(
+            execution,
+            "plan",
+            NodeOutcome.SUCCESS,
+            lease_token=node.lease_token,
+            at=started_at + timedelta(seconds=30),
+        )
+
+
+def test_expired_lease_consumes_attempt_and_returns_to_ready() -> None:
+    definition = WorkflowDefinition(
+        key="leased-retry",
+        version=1,
+        entry_node="task",
+        nodes=(
+            NodeDefinition(key="task", kind=NodeKind.TASK, max_attempts=2),
+            NodeDefinition(
+                key="done", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.SUCCEEDED
+            ),
+        ),
+        edges=(EdgeDefinition(source="task", outcome=NodeOutcome.SUCCESS, target="done"),),
+    )
+    execution = WorkflowExecution.create(
+        WorkflowSnapshot.from_definition(definition, run_id=uuid4())
+    )
+    engine = WorkflowEngine()
+    started_at = datetime(2026, 9, 1, tzinfo=UTC)
+    engine.start(execution, at=started_at)
+    engine.claim_task(execution, "task", worker_id="worker-1", lease_seconds=10, at=started_at)
+
+    engine.expire_task(execution, "task", at=started_at + timedelta(seconds=10))
+
+    node = execution.nodes["task"]
+    assert node.status is NodeExecutionStatus.READY
+    assert node.attempt_count == 1
+    assert node.lease_token is None
