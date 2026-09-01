@@ -9,6 +9,7 @@ from jb_orchestrator.domain.repositories import (
     RunRepository,
     UserRequestRepository,
 )
+from jb_orchestrator.skills.repositories import SkillRepository
 from jb_orchestrator.workflows.repositories import (
     WorkflowDefinitionRepository,
     WorkflowExecutionRepository,
@@ -29,6 +30,9 @@ class UnitOfWork(Protocol):
 
     @property
     def events(self) -> EventRepository: ...
+
+    @property
+    def skills(self) -> SkillRepository: ...
 
     @property
     def workflow_definitions(self) -> WorkflowDefinitionRepository: ...

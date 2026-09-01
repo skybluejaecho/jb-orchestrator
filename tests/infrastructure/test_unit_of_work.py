@@ -5,11 +5,13 @@ from jb_orchestrator.application import (
     CreateUserRequest,
     OrchestrationService,
     RegisterProject,
+    SkillCatalogService,
     TaskDispatchService,
     WorkflowService,
 )
 from jb_orchestrator.domain import RequestStatus, RunStatus
 from jb_orchestrator.infrastructure.database import Base, EventRecord, SqlAlchemyUnitOfWork
+from jb_orchestrator.skills import SkillDefinition, SkillReference, SkillSourceKind
 from jb_orchestrator.worker.models import TaskResult
 from jb_orchestrator.workflows import (
     EdgeDefinition,
@@ -48,12 +50,29 @@ async def test_application_service_round_trip_with_sqlalchemy() -> None:
     assert (await service.get_project(project.id)).default_branch == "develop"
 
     workflow_service = WorkflowService(lambda: SqlAlchemyUnitOfWork(session_factory))
+    skill_service = SkillCatalogService(lambda: SqlAlchemyUnitOfWork(session_factory))
+    skill = await skill_service.register(
+        SkillDefinition(
+            key="implementation",
+            version=1,
+            name="Implementation",
+            description="Implement an approved task.",
+            source_kind=SkillSourceKind.LOCAL,
+            source_uri="skills/implementation",
+            content_digest="sha256:" + "c" * 64,
+        )
+    )
     definition = WorkflowDefinition(
         key="delivery",
         version=1,
         entry_node="implement",
         nodes=(
-            NodeDefinition(key="implement", kind=NodeKind.TASK, executor_key="integration"),
+            NodeDefinition(
+                key="implement",
+                kind=NodeKind.TASK,
+                executor_key="integration",
+                skills=(SkillReference(key=skill.key, version=skill.version),),
+            ),
             NodeDefinition(
                 key="done", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.SUCCEEDED
             ),
@@ -69,6 +88,7 @@ async def test_application_service_round_trip_with_sqlalchemy() -> None:
     leased_execution = await workflow_service.get(execution.id)
     assert leased_execution.nodes["implement"].worker_id == "integration-worker"
     assert leased_execution.nodes["implement"].lease_token == claim.lease_token
+    assert [(item.key, item.version) for item in claim.skills] == [("implementation", 1)]
     completed_execution = await dispatch.complete(
         claim,
         TaskResult(outcome=NodeOutcome.SUCCESS, output={"commit": "abc123"}),
@@ -91,6 +111,7 @@ async def test_application_service_round_trip_with_sqlalchemy() -> None:
             "project.registered",
             "request.created",
             "workflow.definition_registered",
+            "skill.registered",
             "workflow.started",
             "task.claimed",
             "task.completed",

@@ -7,6 +7,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
+from jb_orchestrator.skills import SkillDefinition, SkillReference
 from jb_orchestrator.workflows.exceptions import WorkflowDefinitionError
 
 
@@ -53,6 +54,7 @@ class NodeDefinition:
     executor_key: str | None = None
     instructions: str | None = None
     configuration: dict[str, Any] = field(default_factory=dict)
+    skills: tuple[SkillReference, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.key.strip():
@@ -79,6 +81,10 @@ class NodeDefinition:
             raise WorkflowDefinitionError(
                 "only task nodes may define instructions or configuration"
             )
+        if self.kind is not NodeKind.TASK and self.skills:
+            raise WorkflowDefinitionError("only task nodes may reference skills")
+        if len(set(self.skills)) != len(self.skills):
+            raise WorkflowDefinitionError("node skill references must be unique")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -167,11 +173,26 @@ class WorkflowSnapshot:
     entry_node: str
     nodes: tuple[NodeDefinition, ...]
     edges: tuple[EdgeDefinition, ...]
+    skills: tuple[SkillDefinition, ...] = ()
     id: UUID = field(default_factory=uuid4)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
+    def __post_init__(self) -> None:
+        skills_by_ref = {skill.reference: skill for skill in self.skills}
+        if len(skills_by_ref) != len(self.skills):
+            raise WorkflowDefinitionError("snapshot skills must be unique by key and version")
+        required = {reference for node in self.nodes for reference in node.skills}
+        if required != set(skills_by_ref):
+            raise WorkflowDefinitionError("snapshot skills must exactly resolve node references")
+
     @classmethod
-    def from_definition(cls, definition: WorkflowDefinition, *, run_id: UUID) -> "WorkflowSnapshot":
+    def from_definition(
+        cls,
+        definition: WorkflowDefinition,
+        *,
+        run_id: UUID,
+        skills: tuple[SkillDefinition, ...] = (),
+    ) -> "WorkflowSnapshot":
         return cls(
             run_id=run_id,
             definition_id=definition.id,
@@ -180,6 +201,7 @@ class WorkflowSnapshot:
             entry_node=definition.entry_node,
             nodes=deepcopy(definition.nodes),
             edges=definition.edges,
+            skills=deepcopy(skills),
         )
 
     def node(self, key: str) -> NodeDefinition:
@@ -194,6 +216,9 @@ class WorkflowSnapshot:
             ),
             None,
         )
+
+    def skill(self, reference: SkillReference) -> SkillDefinition:
+        return next(skill for skill in self.skills if skill.reference == reference)
 
 
 @dataclass(slots=True, kw_only=True)

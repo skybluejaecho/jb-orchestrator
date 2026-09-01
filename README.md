@@ -54,6 +54,14 @@ ORCH-006 adds installable executor routing:
 - adapter discovery through the `jb_orchestrator.executors` Python entry-point group
 - worker CLI startup checks and installed-executor listing
 
+ORCH-007 adds the versioned skill catalog:
+
+- immutable local, Git, and archive skill metadata with SHA-256 content identity
+- REST registration, latest-version listing, and exact-version lookup
+- multiple exact skill references per workflow task node
+- resolved skill metadata copied into each workflow execution snapshot and task claim
+- explicit separation between skills, executor adapters, and MCP tool servers
+
 ## Prerequisites
 
 - Python 3.12
@@ -99,6 +107,9 @@ The API exposes:
 - `GET /v1/runs/{run_id}`
 - `POST /v1/runs/{run_id}/approve`
 - `POST /v1/runs/{run_id}/cancel`
+- `POST /v1/skills`
+- `GET /v1/skills`
+- `GET /v1/skills/{key}?version={version}`
 
 ## Quality checks
 

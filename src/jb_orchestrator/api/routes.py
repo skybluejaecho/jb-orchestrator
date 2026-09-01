@@ -5,19 +5,28 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
 
-from jb_orchestrator.api.dependencies import get_orchestration_service
+from jb_orchestrator.api.dependencies import get_orchestration_service, get_skill_catalog_service
 from jb_orchestrator.api.schemas import (
     CreatedRequestResponse,
     ProjectCreate,
     ProjectResponse,
     RunResponse,
+    SkillCreate,
+    SkillResponse,
     UserRequestCreate,
     UserRequestResponse,
 )
-from jb_orchestrator.application import CreateUserRequest, OrchestrationService, RegisterProject
+from jb_orchestrator.application import (
+    CreateUserRequest,
+    OrchestrationService,
+    RegisterProject,
+    SkillCatalogService,
+)
+from jb_orchestrator.skills import SkillDefinition
 
 router = APIRouter(prefix="/v1")
 Service = Annotated[OrchestrationService, Depends(get_orchestration_service)]
+SkillService = Annotated[SkillCatalogService, Depends(get_skill_catalog_service)]
 
 
 @router.post("/projects", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
@@ -73,3 +82,19 @@ async def approve_run(run_id: UUID, service: Service) -> RunResponse:
 @router.post("/runs/{run_id}/cancel", response_model=RunResponse)
 async def cancel_run(run_id: UUID, service: Service) -> RunResponse:
     return RunResponse.model_validate(await service.cancel_run(run_id))
+
+
+@router.post("/skills", response_model=SkillResponse, status_code=status.HTTP_201_CREATED)
+async def register_skill(payload: SkillCreate, service: SkillService) -> SkillResponse:
+    skill = await service.register(SkillDefinition(**payload.model_dump()))
+    return SkillResponse.model_validate(skill)
+
+
+@router.get("/skills", response_model=list[SkillResponse])
+async def list_skills(service: SkillService) -> list[SkillResponse]:
+    return [SkillResponse.model_validate(skill) for skill in await service.list_latest()]
+
+
+@router.get("/skills/{key}", response_model=SkillResponse)
+async def get_skill(key: str, service: SkillService, version: int | None = None) -> SkillResponse:
+    return SkillResponse.model_validate(await service.get(key, version))

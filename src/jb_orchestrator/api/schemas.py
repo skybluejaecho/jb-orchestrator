@@ -1,11 +1,13 @@
 """HTTP request and response schemas."""
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 from jb_orchestrator.domain import ProjectStatus, RequestStatus, RunStatus
+from jb_orchestrator.skills import SkillSourceKind
 
 
 class ProjectCreate(BaseModel):
@@ -63,6 +65,36 @@ class RunResponse(BaseModel):
 class CreatedRequestResponse(BaseModel):
     request: UserRequestResponse
     run: RunResponse
+
+
+class SkillCreate(BaseModel):
+    key: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$", max_length=128)
+    version: int = Field(ge=1)
+    name: str = Field(min_length=1, max_length=255)
+    description: str = Field(min_length=1)
+    source_kind: SkillSourceKind
+    source_uri: str = Field(min_length=1, max_length=2048)
+    content_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    source_revision: str | None = Field(default=None, min_length=1, max_length=255)
+    entrypoint: str = Field(default="SKILL.md", min_length=1, max_length=1024)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SkillResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    key: str
+    version: int
+    name: str
+    description: str
+    source_kind: SkillSourceKind
+    source_uri: str
+    content_digest: str
+    source_revision: str | None
+    entrypoint: str
+    metadata: dict[str, Any]
+    created_at: datetime
 
 
 class ProblemDetail(BaseModel):

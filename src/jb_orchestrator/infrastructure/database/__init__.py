@@ -6,6 +6,7 @@ from jb_orchestrator.infrastructure.database.models import (
     NodeExecutionRecord,
     ProjectRecord,
     RunRecord,
+    SkillDefinitionRecord,
     UserRequestRecord,
     WorkflowDefinitionRecord,
     WorkflowExecutionRecord,
@@ -17,6 +18,7 @@ from jb_orchestrator.infrastructure.database.repositories import (
     SqlAlchemyUserRequestRepository,
 )
 from jb_orchestrator.infrastructure.database.session import create_session_factory
+from jb_orchestrator.infrastructure.database.skill_repositories import SqlAlchemySkillRepository
 from jb_orchestrator.infrastructure.database.unit_of_work import SqlAlchemyUnitOfWork
 from jb_orchestrator.infrastructure.database.workflow_repositories import (
     SqlAlchemyWorkflowDefinitionRepository,
@@ -29,9 +31,11 @@ __all__ = [
     "NodeExecutionRecord",
     "ProjectRecord",
     "RunRecord",
+    "SkillDefinitionRecord",
     "SqlAlchemyEventRepository",
     "SqlAlchemyProjectRepository",
     "SqlAlchemyRunRepository",
+    "SqlAlchemySkillRepository",
     "SqlAlchemyUnitOfWork",
     "SqlAlchemyUserRequestRepository",
     "SqlAlchemyWorkflowDefinitionRepository",
