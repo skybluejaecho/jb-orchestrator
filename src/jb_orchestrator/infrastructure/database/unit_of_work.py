@@ -11,6 +11,7 @@ from jb_orchestrator.infrastructure.database.repositories import (
     SqlAlchemyRunRepository,
     SqlAlchemyUserRequestRepository,
 )
+from jb_orchestrator.infrastructure.database.skill_repositories import SqlAlchemySkillRepository
 from jb_orchestrator.infrastructure.database.workflow_repositories import (
     SqlAlchemyWorkflowDefinitionRepository,
     SqlAlchemyWorkflowExecutionRepository,
@@ -24,6 +25,7 @@ class SqlAlchemyUnitOfWork:
     requests: SqlAlchemyUserRequestRepository
     runs: SqlAlchemyRunRepository
     events: SqlAlchemyEventRepository
+    skills: SqlAlchemySkillRepository
     workflow_definitions: SqlAlchemyWorkflowDefinitionRepository
     workflow_executions: SqlAlchemyWorkflowExecutionRepository
 
@@ -37,6 +39,7 @@ class SqlAlchemyUnitOfWork:
         self.requests = SqlAlchemyUserRequestRepository(self._session)
         self.runs = SqlAlchemyRunRepository(self._session)
         self.events = SqlAlchemyEventRepository(self._session)
+        self.skills = SqlAlchemySkillRepository(self._session)
         self.workflow_definitions = SqlAlchemyWorkflowDefinitionRepository(self._session)
         self.workflow_executions = SqlAlchemyWorkflowExecutionRepository(self._session)
         return self

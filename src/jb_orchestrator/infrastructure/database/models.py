@@ -24,6 +24,7 @@ from jb_orchestrator.domain.projects import ProjectStatus
 from jb_orchestrator.domain.requests import RequestStatus
 from jb_orchestrator.domain.runs import RunStatus
 from jb_orchestrator.infrastructure.database.base import Base
+from jb_orchestrator.skills import SkillSourceKind
 from jb_orchestrator.workflows.models import NodeExecutionStatus, NodeOutcome, WorkflowStatus
 
 
@@ -134,6 +135,28 @@ class EventRecord(Base):
     event_type: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class SkillDefinitionRecord(Base):
+    """Immutable catalog entry for one skill version."""
+
+    __tablename__ = "skill_definitions"
+    __table_args__ = (UniqueConstraint("key", "version", name="uq_skill_definitions_key_version"),)
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    key: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    source_kind: Mapped[SkillSourceKind] = mapped_column(
+        string_enum(SkillSourceKind, "skill_source_kind"), nullable=False
+    )
+    source_uri: Mapped[str] = mapped_column(String(2048), nullable=False)
+    content_digest: Mapped[str] = mapped_column(String(71), nullable=False)
+    source_revision: Mapped[str | None] = mapped_column(String(255))
+    entrypoint: Mapped[str] = mapped_column(String(1024), nullable=False)
+    skill_metadata: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class WorkflowDefinitionRecord(Base):
