@@ -16,7 +16,15 @@ def test_metadata_creates_initial_domain_schema() -> None:
     Base.metadata.create_all(engine)
 
     inspector = inspect(engine)
-    assert set(inspector.get_table_names()) == {"events", "projects", "runs", "user_requests"}
+    assert set(inspector.get_table_names()) == {
+        "events",
+        "node_executions",
+        "projects",
+        "runs",
+        "user_requests",
+        "workflow_definitions",
+        "workflow_executions",
+    }
     assert {index["name"] for index in inspector.get_indexes("runs")} >= {
         "ix_runs_request_id",
         "ix_runs_status_created_at",

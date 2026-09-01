@@ -6,6 +6,7 @@ from typing import Self
 from uuid import UUID
 
 from jb_orchestrator.domain import DomainEvent, Project, Run, UserRequest
+from jb_orchestrator.workflows import WorkflowDefinition, WorkflowExecution
 
 
 @dataclass
@@ -14,6 +15,8 @@ class MemoryStore:
     requests: dict[UUID, UserRequest] = field(default_factory=dict)
     runs: dict[UUID, Run] = field(default_factory=dict)
     events: list[DomainEvent] = field(default_factory=list)
+    workflow_definitions: dict[tuple[str, int], WorkflowDefinition] = field(default_factory=dict)
+    workflow_executions: dict[UUID, WorkflowExecution] = field(default_factory=dict)
 
 
 class MemoryProjectRepository:
@@ -68,12 +71,56 @@ class MemoryEventRepository:
         self._store.events.append(event)
 
 
+class MemoryWorkflowDefinitionRepository:
+    def __init__(self, store: MemoryStore) -> None:
+        self._store = store
+
+    async def add(self, definition: WorkflowDefinition) -> None:
+        self._store.workflow_definitions[(definition.key, definition.version)] = definition
+
+    async def get(self, key: str, version: int | None = None) -> WorkflowDefinition | None:
+        if version is not None:
+            return self._store.workflow_definitions.get((key, version))
+        matches = [
+            definition
+            for (stored_key, _), definition in self._store.workflow_definitions.items()
+            if stored_key == key
+        ]
+        return max(matches, key=lambda definition: definition.version, default=None)
+
+
+class MemoryWorkflowExecutionRepository:
+    def __init__(self, store: MemoryStore) -> None:
+        self._store = store
+
+    async def add(self, execution: WorkflowExecution) -> None:
+        self._store.workflow_executions[execution.id] = execution
+
+    async def get(self, execution_id: UUID) -> WorkflowExecution | None:
+        return self._store.workflow_executions.get(execution_id)
+
+    async def get_by_run(self, run_id: UUID) -> WorkflowExecution | None:
+        return next(
+            (
+                execution
+                for execution in self._store.workflow_executions.values()
+                if execution.snapshot.run_id == run_id
+            ),
+            None,
+        )
+
+    async def save(self, execution: WorkflowExecution) -> None:
+        self._store.workflow_executions[execution.id] = execution
+
+
 class MemoryUnitOfWork:
     def __init__(self, store: MemoryStore) -> None:
         self.projects = MemoryProjectRepository(store)
         self.requests = MemoryUserRequestRepository(store)
         self.runs = MemoryRunRepository(store)
         self.events = MemoryEventRepository(store)
+        self.workflow_definitions = MemoryWorkflowDefinitionRepository(store)
+        self.workflow_executions = MemoryWorkflowExecutionRepository(store)
         self.committed = False
         self.rolled_back = False
 

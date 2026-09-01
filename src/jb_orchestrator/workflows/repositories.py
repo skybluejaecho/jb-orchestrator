@@ -1,0 +1,22 @@
+"""Persistence ports for workflow definitions and executions."""
+
+from typing import Protocol
+from uuid import UUID
+
+from jb_orchestrator.workflows.models import WorkflowDefinition, WorkflowExecution
+
+
+class WorkflowDefinitionRepository(Protocol):
+    async def add(self, definition: WorkflowDefinition) -> None: ...
+
+    async def get(self, key: str, version: int | None = None) -> WorkflowDefinition | None: ...
+
+
+class WorkflowExecutionRepository(Protocol):
+    async def add(self, execution: WorkflowExecution) -> None: ...
+
+    async def get(self, execution_id: UUID) -> WorkflowExecution | None: ...
+
+    async def get_by_run(self, run_id: UUID) -> WorkflowExecution | None: ...
+
+    async def save(self, execution: WorkflowExecution) -> None: ...

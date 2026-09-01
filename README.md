@@ -30,6 +30,14 @@ ORCH-003 exposes the first control-plane use cases:
 - administration CLI commands backed by the REST API
 - durable application events for request and run state changes
 
+ORCH-004 adds the deterministic workflow core:
+
+- validated, versioned workflow graph definitions
+- immutable per-run snapshots and durable node execution state
+- explicit task, approval, terminal, retry, and bounded repair-loop transitions
+- transactional workflow services and append-only transition events
+- PostgreSQL migrations and in-memory/SQLAlchemy round-trip tests
+
 ## Prerequisites
 
 - Python 3.12
