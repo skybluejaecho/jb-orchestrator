@@ -1,5 +1,6 @@
 """Persistence ports for workflow definitions and executions."""
 
+from collections.abc import Collection
 from datetime import datetime
 from typing import Protocol
 from uuid import UUID
@@ -24,7 +25,9 @@ class WorkflowExecutionRepository(Protocol):
 
     async def get_by_run(self, run_id: UUID) -> WorkflowExecution | None: ...
 
-    async def get_ready_for_update(self) -> WorkflowTaskCandidate | None: ...
+    async def get_ready_for_update(
+        self, executor_keys: Collection[str] | None = None
+    ) -> WorkflowTaskCandidate | None: ...
 
     async def get_expired_for_update(self, at: datetime) -> WorkflowTaskCandidate | None: ...
 

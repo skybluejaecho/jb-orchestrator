@@ -1,5 +1,6 @@
 """In-memory application adapters used by tests."""
 
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from datetime import datetime
 from types import TracebackType
@@ -116,13 +117,16 @@ class MemoryWorkflowExecutionRepository:
             None,
         )
 
-    async def get_ready_for_update(self) -> WorkflowTaskCandidate | None:
+    async def get_ready_for_update(
+        self, executor_keys: Collection[str] | None = None
+    ) -> WorkflowTaskCandidate | None:
         candidates = [
             (execution, node)
             for execution in self._store.workflow_executions.values()
             if execution.status is WorkflowStatus.RUNNING
             for node in execution.nodes.values()
             if node.status is NodeExecutionStatus.READY
+            and (executor_keys is None or node.executor_key in executor_keys)
         ]
         if not candidates:
             return None

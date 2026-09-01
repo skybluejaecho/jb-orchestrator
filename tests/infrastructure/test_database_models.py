@@ -30,6 +30,7 @@ def test_metadata_creates_initial_domain_schema() -> None:
         "ix_runs_status_created_at",
     }
     assert {index["name"] for index in inspector.get_indexes("node_executions")} >= {
+        "ix_node_executions_executor_ready",
         "ix_node_executions_lease_expiry",
         "ix_node_executions_status_updated",
     }

@@ -53,7 +53,7 @@ async def test_application_service_round_trip_with_sqlalchemy() -> None:
         version=1,
         entry_node="implement",
         nodes=(
-            NodeDefinition(key="implement", kind=NodeKind.TASK),
+            NodeDefinition(key="implement", kind=NodeKind.TASK, executor_key="integration"),
             NodeDefinition(
                 key="done", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.SUCCEEDED
             ),
@@ -63,8 +63,9 @@ async def test_application_service_round_trip_with_sqlalchemy() -> None:
     await workflow_service.register_definition(definition)
     execution = await workflow_service.start(created.run.id, "delivery")
     dispatch = TaskDispatchService(lambda: SqlAlchemyUnitOfWork(session_factory))
-    claim = await dispatch.claim_next("integration-worker")
+    claim = await dispatch.claim_next("integration-worker", {"integration"})
     assert claim is not None
+    assert claim.executor_key == "integration"
     leased_execution = await workflow_service.get(execution.id)
     assert leased_execution.nodes["implement"].worker_id == "integration-worker"
     assert leased_execution.nodes["implement"].lease_token == claim.lease_token
