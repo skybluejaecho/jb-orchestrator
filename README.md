@@ -22,6 +22,14 @@ ORCH-002 adds the initial durable domain:
 - Alembic initial PostgreSQL migration
 - optimistic concurrency versioning for runs
 
+ORCH-003 exposes the first control-plane use cases:
+
+- transactional SQLAlchemy repositories and Unit of Work
+- project registration and request/run REST endpoints
+- run approval and cancellation controls
+- administration CLI commands backed by the REST API
+- durable application events for request and run state changes
+
 ## Prerequisites
 
 - Python 3.12
@@ -49,6 +57,12 @@ The API exposes:
 
 - `GET /health/live`
 - `GET /health/ready`
+- `POST /v1/projects`
+- `POST /v1/projects/{project_id}/requests`
+- `GET /v1/requests/{request_id}`
+- `GET /v1/runs/{run_id}`
+- `POST /v1/runs/{run_id}/approve`
+- `POST /v1/runs/{run_id}/cancel`
 
 ## Quality checks
 
