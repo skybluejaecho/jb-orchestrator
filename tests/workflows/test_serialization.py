@@ -1,5 +1,13 @@
+from decimal import Decimal
 from uuid import uuid4
 
+from jb_orchestrator.model_routing import (
+    DeterministicModelRouter,
+    ModelProfile,
+    ModelRoutingRequest,
+    ModelTier,
+    NodeModelSelection,
+)
 from jb_orchestrator.workflows import (
     EdgeDefinition,
     NodeDefinition,
@@ -30,6 +38,10 @@ def test_definition_and_snapshot_json_round_trip() -> None:
                 executor_key="codex",
                 instructions="Implement the approved task.",
                 configuration={"reasoning_effort": "medium"},
+                model_routing=ModelRoutingRequest(
+                    required_capabilities=("coding",),
+                    max_cost_usd=Decimal("1.00"),
+                ),
             ),
             NodeDefinition(
                 key="done", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.SUCCEEDED
@@ -37,7 +49,27 @@ def test_definition_and_snapshot_json_round_trip() -> None:
         ),
         edges=(EdgeDefinition(source="task", outcome=NodeOutcome.SUCCESS, target="done"),),
     )
-    snapshot = WorkflowSnapshot.from_definition(definition, run_id=uuid4())
+    profile = ModelProfile(
+        key="codex-balanced",
+        version=2,
+        name="Codex Balanced",
+        provider="openai",
+        model_id="gpt-codex",
+        tier=ModelTier.BALANCED,
+        context_window=128_000,
+        input_cost_per_million=Decimal("1"),
+        output_cost_per_million=Decimal("4"),
+        capabilities=("coding",),
+        executor_keys=("codex",),
+    )
+    request = definition.node("task").model_routing
+    assert request is not None
+    selection = DeterministicModelRouter().route(request, (profile,), executor_key="codex")
+    snapshot = WorkflowSnapshot.from_definition(
+        definition,
+        run_id=uuid4(),
+        model_selections=(NodeModelSelection(node_key="task", selection=selection),),
+    )
 
     restored_definition = definition_from_dict(definition_to_dict(definition))
     restored_snapshot = snapshot_from_dict(snapshot_to_dict(snapshot))

@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 from uuid import UUID
 
+from jb_orchestrator.model_routing import ModelSelection
 from jb_orchestrator.skills import SkillDefinition
 from jb_orchestrator.workflows import NodeOutcome
 
@@ -27,6 +28,7 @@ class TaskClaim:
     instructions: str | None
     configuration: dict[str, Any]
     skills: tuple[SkillDefinition, ...]
+    model_selection: ModelSelection | None = None
     skill_paths: dict[str, str] = field(default_factory=dict)
 
 

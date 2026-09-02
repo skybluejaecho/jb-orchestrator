@@ -69,6 +69,7 @@ class TaskDispatchService:
                 skills=tuple(
                     execution.snapshot.skill(reference) for reference in definition.skills
                 ),
+                model_selection=execution.snapshot.model_selection(node.node_key),
             )
             await unit_of_work.workflow_executions.save(execution)
             await self._append_event(

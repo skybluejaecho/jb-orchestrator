@@ -4,6 +4,12 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+from jb_orchestrator.model_routing.serialization import (
+    node_selection_from_dict,
+    node_selection_to_dict,
+    request_from_dict,
+    request_to_dict,
+)
 from jb_orchestrator.skills import SkillReference
 from jb_orchestrator.skills.serialization import skill_from_dict, skill_to_dict
 from jb_orchestrator.workflows.models import (
@@ -31,11 +37,15 @@ def node_to_dict(node: NodeDefinition) -> dict[str, Any]:
         "skills": [
             {"key": reference.key, "version": reference.version} for reference in node.skills
         ],
+        "model_routing": (
+            request_to_dict(node.model_routing) if node.model_routing is not None else None
+        ),
     }
 
 
 def node_from_dict(data: dict[str, Any]) -> NodeDefinition:
     terminal = data.get("terminal_status")
+    model_routing = data.get("model_routing")
     return NodeDefinition(
         key=str(data["key"]),
         kind=NodeKind(str(data["kind"])),
@@ -49,6 +59,9 @@ def node_from_dict(data: dict[str, Any]) -> NodeDefinition:
         skills=tuple(
             SkillReference(key=str(reference["key"]), version=int(reference["version"]))
             for reference in data.get("skills", [])
+        ),
+        model_routing=(
+            request_from_dict(dict(model_routing)) if model_routing is not None else None
         ),
     )
 
@@ -99,6 +112,7 @@ def snapshot_to_dict(snapshot: WorkflowSnapshot) -> dict[str, Any]:
         "edges": [edge_to_dict(edge) for edge in snapshot.edges],
         "created_at": snapshot.created_at.isoformat(),
         "skills": [skill_to_dict(skill) for skill in snapshot.skills],
+        "model_selections": [node_selection_to_dict(value) for value in snapshot.model_selections],
     }
 
 
@@ -114,4 +128,7 @@ def snapshot_from_dict(data: dict[str, Any]) -> WorkflowSnapshot:
         edges=tuple(edge_from_dict(edge) for edge in data["edges"]),
         created_at=datetime.fromisoformat(str(data["created_at"])),
         skills=tuple(skill_from_dict(skill) for skill in data.get("skills", [])),
+        model_selections=tuple(
+            node_selection_from_dict(value) for value in data.get("model_selections", [])
+        ),
     )
