@@ -5,6 +5,9 @@ from typing import Self
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from jb_orchestrator.infrastructure.database.model_repositories import (
+    SqlAlchemyModelProfileRepository,
+)
 from jb_orchestrator.infrastructure.database.repositories import (
     SqlAlchemyEventRepository,
     SqlAlchemyProjectRepository,
@@ -26,6 +29,7 @@ class SqlAlchemyUnitOfWork:
     runs: SqlAlchemyRunRepository
     events: SqlAlchemyEventRepository
     skills: SqlAlchemySkillRepository
+    model_profiles: SqlAlchemyModelProfileRepository
     workflow_definitions: SqlAlchemyWorkflowDefinitionRepository
     workflow_executions: SqlAlchemyWorkflowExecutionRepository
 
@@ -40,6 +44,7 @@ class SqlAlchemyUnitOfWork:
         self.runs = SqlAlchemyRunRepository(self._session)
         self.events = SqlAlchemyEventRepository(self._session)
         self.skills = SqlAlchemySkillRepository(self._session)
+        self.model_profiles = SqlAlchemyModelProfileRepository(self._session)
         self.workflow_definitions = SqlAlchemyWorkflowDefinitionRepository(self._session)
         self.workflow_executions = SqlAlchemyWorkflowExecutionRepository(self._session)
         return self

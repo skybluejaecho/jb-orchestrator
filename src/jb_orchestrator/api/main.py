@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from jb_orchestrator import __version__
 from jb_orchestrator.api.routes import router
 from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNotFound
+from jb_orchestrator.application.model_services import ModelCatalogService
 from jb_orchestrator.application.services import OrchestrationService
 from jb_orchestrator.application.skill_services import SkillCatalogService
 from jb_orchestrator.config import get_settings
@@ -21,18 +22,22 @@ SERVICE_NAME: Final = "jb-orchestrator"
 def create_app(
     service: OrchestrationService | None = None,
     skill_service: SkillCatalogService | None = None,
+    model_service: ModelCatalogService | None = None,
 ) -> FastAPI:
     """Build the API application."""
 
     app = FastAPI(title=SERVICE_NAME, version=__version__)
-    if service is None or skill_service is None:
+    if service is None or skill_service is None or model_service is None:
         session_factory = create_session_factory()
     if service is None:
         service = OrchestrationService(lambda: SqlAlchemyUnitOfWork(session_factory))
     if skill_service is None:
         skill_service = SkillCatalogService(lambda: SqlAlchemyUnitOfWork(session_factory))
+    if model_service is None:
+        model_service = ModelCatalogService(lambda: SqlAlchemyUnitOfWork(session_factory))
     app.state.orchestration_service = service
     app.state.skill_catalog_service = skill_service
+    app.state.model_catalog_service = model_service
 
     @app.get("/health/live", tags=["health"])
     async def live() -> dict[str, str]:

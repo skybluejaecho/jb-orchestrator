@@ -5,9 +5,15 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
 
-from jb_orchestrator.api.dependencies import get_orchestration_service, get_skill_catalog_service
+from jb_orchestrator.api.dependencies import (
+    get_model_catalog_service,
+    get_orchestration_service,
+    get_skill_catalog_service,
+)
 from jb_orchestrator.api.schemas import (
     CreatedRequestResponse,
+    ModelProfileCreate,
+    ModelProfileResponse,
     ProjectCreate,
     ProjectResponse,
     RunResponse,
@@ -18,15 +24,18 @@ from jb_orchestrator.api.schemas import (
 )
 from jb_orchestrator.application import (
     CreateUserRequest,
+    ModelCatalogService,
     OrchestrationService,
     RegisterProject,
     SkillCatalogService,
 )
+from jb_orchestrator.model_routing import ModelProfile
 from jb_orchestrator.skills import SkillDefinition
 
 router = APIRouter(prefix="/v1")
 Service = Annotated[OrchestrationService, Depends(get_orchestration_service)]
 SkillService = Annotated[SkillCatalogService, Depends(get_skill_catalog_service)]
+ModelService = Annotated[ModelCatalogService, Depends(get_model_catalog_service)]
 
 
 @router.post("/projects", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
@@ -98,3 +107,23 @@ async def list_skills(service: SkillService) -> list[SkillResponse]:
 @router.get("/skills/{key}", response_model=SkillResponse)
 async def get_skill(key: str, service: SkillService, version: int | None = None) -> SkillResponse:
     return SkillResponse.model_validate(await service.get(key, version))
+
+
+@router.post("/models", response_model=ModelProfileResponse, status_code=status.HTTP_201_CREATED)
+async def register_model(
+    payload: ModelProfileCreate, service: ModelService
+) -> ModelProfileResponse:
+    profile = await service.register(ModelProfile(**payload.model_dump()))
+    return ModelProfileResponse.model_validate(profile)
+
+
+@router.get("/models", response_model=list[ModelProfileResponse])
+async def list_models(service: ModelService) -> list[ModelProfileResponse]:
+    return [ModelProfileResponse.model_validate(value) for value in await service.list_latest()]
+
+
+@router.get("/models/{key}", response_model=ModelProfileResponse)
+async def get_model(
+    key: str, service: ModelService, version: int | None = None
+) -> ModelProfileResponse:
+    return ModelProfileResponse.model_validate(await service.get(key, version))

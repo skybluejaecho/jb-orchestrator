@@ -4,6 +4,7 @@ from typing import cast
 
 from fastapi import Request
 
+from jb_orchestrator.application.model_services import ModelCatalogService
 from jb_orchestrator.application.services import OrchestrationService
 from jb_orchestrator.application.skill_services import SkillCatalogService
 
@@ -18,3 +19,9 @@ def get_skill_catalog_service(request: Request) -> SkillCatalogService:
     """Return the skill catalog service owned by this app instance."""
 
     return cast(SkillCatalogService, request.app.state.skill_catalog_service)
+
+
+def get_model_catalog_service(request: Request) -> ModelCatalogService:
+    """Return the model profile catalog service owned by this app instance."""
+
+    return cast(ModelCatalogService, request.app.state.model_catalog_service)
