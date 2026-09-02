@@ -8,6 +8,7 @@ from typing import Self
 from uuid import UUID
 
 from jb_orchestrator.domain import DomainEvent, Project, Run, UserRequest
+from jb_orchestrator.model_routing import ModelProfile
 from jb_orchestrator.skills import SkillDefinition
 from jb_orchestrator.workflows import (
     NodeExecutionStatus,
@@ -27,6 +28,7 @@ class MemoryStore:
     workflow_definitions: dict[tuple[str, int], WorkflowDefinition] = field(default_factory=dict)
     workflow_executions: dict[UUID, WorkflowExecution] = field(default_factory=dict)
     skills: dict[tuple[str, int], SkillDefinition] = field(default_factory=dict)
+    model_profiles: dict[tuple[str, int], ModelProfile] = field(default_factory=dict)
 
 
 class MemoryProjectRepository:
@@ -106,6 +108,38 @@ class MemorySkillRepository:
                     if stored_key == key
                 ),
                 key=lambda skill: skill.version,
+            )
+            for key in keys
+        ]
+
+
+class MemoryModelProfileRepository:
+    def __init__(self, store: MemoryStore) -> None:
+        self._store = store
+
+    async def add(self, profile: ModelProfile) -> None:
+        self._store.model_profiles[(profile.key, profile.version)] = profile
+
+    async def get(self, key: str, version: int | None = None) -> ModelProfile | None:
+        if version is not None:
+            return self._store.model_profiles.get((key, version))
+        matches = [
+            profile
+            for (stored_key, _), profile in self._store.model_profiles.items()
+            if stored_key == key
+        ]
+        return max(matches, key=lambda profile: profile.version, default=None)
+
+    async def list_latest(self) -> list[ModelProfile]:
+        keys = sorted({key for key, _ in self._store.model_profiles})
+        return [
+            max(
+                (
+                    profile
+                    for (stored_key, _), profile in self._store.model_profiles.items()
+                    if stored_key == key
+                ),
+                key=lambda profile: profile.version,
             )
             for key in keys
         ]
@@ -194,6 +228,7 @@ class MemoryUnitOfWork:
         self.runs = MemoryRunRepository(store)
         self.events = MemoryEventRepository(store)
         self.skills = MemorySkillRepository(store)
+        self.model_profiles = MemoryModelProfileRepository(store)
         self.workflow_definitions = MemoryWorkflowDefinitionRepository(store)
         self.workflow_executions = MemoryWorkflowExecutionRepository(store)
         self.committed = False

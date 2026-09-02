@@ -1,8 +1,12 @@
 """SQLAlchemy persistence adapters."""
 
 from jb_orchestrator.infrastructure.database.base import Base
+from jb_orchestrator.infrastructure.database.model_repositories import (
+    SqlAlchemyModelProfileRepository,
+)
 from jb_orchestrator.infrastructure.database.models import (
     EventRecord,
+    ModelProfileRecord,
     NodeExecutionRecord,
     ProjectRecord,
     RunRecord,
@@ -28,11 +32,13 @@ from jb_orchestrator.infrastructure.database.workflow_repositories import (
 __all__ = [
     "Base",
     "EventRecord",
+    "ModelProfileRecord",
     "NodeExecutionRecord",
     "ProjectRecord",
     "RunRecord",
     "SkillDefinitionRecord",
     "SqlAlchemyEventRepository",
+    "SqlAlchemyModelProfileRepository",
     "SqlAlchemyProjectRepository",
     "SqlAlchemyRunRepository",
     "SqlAlchemySkillRepository",

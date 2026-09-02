@@ -70,6 +70,14 @@ ORCH-008 adds verified skill materialization:
 - configured remote-host allowlists and path, symlink, and archive traversal defenses
 - verified skill entrypoint paths delivered through each task claim
 
+ORCH-009 adds deterministic model routing:
+
+- immutable, versioned model profiles with provider, tier, context, price, and capabilities
+- explicit complexity, risk, quality, context, capability, and maximum-cost requirements
+- fail-closed filtering followed by deterministic cheapest-sufficient model selection
+- routing policy version, reasons, and estimated cost pinned in workflow snapshots
+- selected provider and model identity delivered to executor task claims
+
 ## Prerequisites
 
 - Python 3.12
@@ -125,6 +133,9 @@ The API exposes:
 - `POST /v1/skills`
 - `GET /v1/skills`
 - `GET /v1/skills/{key}?version={version}`
+- `POST /v1/models`
+- `GET /v1/models`
+- `GET /v1/models/{key}?version={version}`
 
 ## Quality checks
 

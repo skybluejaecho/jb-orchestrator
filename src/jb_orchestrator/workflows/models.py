@@ -7,6 +7,11 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
+from jb_orchestrator.model_routing import (
+    ModelRoutingRequest,
+    ModelSelection,
+    NodeModelSelection,
+)
 from jb_orchestrator.skills import SkillDefinition, SkillReference
 from jb_orchestrator.workflows.exceptions import WorkflowDefinitionError
 
@@ -55,6 +60,7 @@ class NodeDefinition:
     instructions: str | None = None
     configuration: dict[str, Any] = field(default_factory=dict)
     skills: tuple[SkillReference, ...] = ()
+    model_routing: ModelRoutingRequest | None = None
 
     def __post_init__(self) -> None:
         if not self.key.strip():
@@ -83,6 +89,8 @@ class NodeDefinition:
             )
         if self.kind is not NodeKind.TASK and self.skills:
             raise WorkflowDefinitionError("only task nodes may reference skills")
+        if self.kind is not NodeKind.TASK and self.model_routing is not None:
+            raise WorkflowDefinitionError("only task nodes may define model routing")
         if len(set(self.skills)) != len(self.skills):
             raise WorkflowDefinitionError("node skill references must be unique")
 
@@ -174,6 +182,7 @@ class WorkflowSnapshot:
     nodes: tuple[NodeDefinition, ...]
     edges: tuple[EdgeDefinition, ...]
     skills: tuple[SkillDefinition, ...] = ()
+    model_selections: tuple[NodeModelSelection, ...] = ()
     id: UUID = field(default_factory=uuid4)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
@@ -184,6 +193,14 @@ class WorkflowSnapshot:
         required = {reference for node in self.nodes for reference in node.skills}
         if required != set(skills_by_ref):
             raise WorkflowDefinitionError("snapshot skills must exactly resolve node references")
+        selections_by_node = {value.node_key: value for value in self.model_selections}
+        if len(selections_by_node) != len(self.model_selections):
+            raise WorkflowDefinitionError("snapshot model selections must be unique by node")
+        required_nodes = {node.key for node in self.nodes if node.model_routing is not None}
+        if required_nodes != set(selections_by_node):
+            raise WorkflowDefinitionError(
+                "snapshot model selections must exactly resolve node routing requests"
+            )
 
     @classmethod
     def from_definition(
@@ -192,6 +209,7 @@ class WorkflowSnapshot:
         *,
         run_id: UUID,
         skills: tuple[SkillDefinition, ...] = (),
+        model_selections: tuple[NodeModelSelection, ...] = (),
     ) -> "WorkflowSnapshot":
         return cls(
             run_id=run_id,
@@ -202,6 +220,7 @@ class WorkflowSnapshot:
             nodes=deepcopy(definition.nodes),
             edges=definition.edges,
             skills=deepcopy(skills),
+            model_selections=deepcopy(model_selections),
         )
 
     def node(self, key: str) -> NodeDefinition:
@@ -219,6 +238,12 @@ class WorkflowSnapshot:
 
     def skill(self, reference: SkillReference) -> SkillDefinition:
         return next(skill for skill in self.skills if skill.reference == reference)
+
+    def model_selection(self, node_key: str) -> ModelSelection | None:
+        return next(
+            (value.selection for value in self.model_selections if value.node_key == node_key),
+            None,
+        )
 
 
 @dataclass(slots=True, kw_only=True)

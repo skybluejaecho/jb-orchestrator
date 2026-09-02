@@ -1,10 +1,22 @@
+from decimal import Decimal
 from uuid import uuid4
 
 import pytest
 
-from jb_orchestrator.application import SkillCatalogService, WorkflowService
+from jb_orchestrator.application import (
+    ModelCatalogService,
+    SkillCatalogService,
+    TaskDispatchService,
+    WorkflowService,
+)
 from jb_orchestrator.application.exceptions import ResourceConflict
 from jb_orchestrator.domain import Run
+from jb_orchestrator.model_routing import (
+    ModelProfile,
+    ModelRoutingRequest,
+    ModelTier,
+    RequirementLevel,
+)
 from jb_orchestrator.skills import SkillDefinition, SkillReference, SkillSourceKind
 from jb_orchestrator.workflows import (
     EdgeDefinition,
@@ -119,3 +131,63 @@ async def test_workflow_snapshot_resolves_exact_skill_versions() -> None:
     execution = await workflow_service.start(run.id, "skilled")
 
     assert [(skill.key, skill.version) for skill in execution.snapshot.skills] == [("review", 1)]
+
+
+async def test_workflow_snapshot_pins_model_routing_decision_in_task_claim() -> None:
+    store = MemoryStore()
+    run = Run(request_id=uuid4())
+    store.runs[run.id] = run
+
+    def unit_of_work_factory() -> MemoryUnitOfWork:
+        return MemoryUnitOfWork(store)
+
+    await ModelCatalogService(unit_of_work_factory).register(
+        ModelProfile(
+            key="codex-advanced",
+            version=1,
+            name="Codex Advanced",
+            provider="openai",
+            model_id="gpt-codex-advanced",
+            tier=ModelTier.ADVANCED,
+            context_window=128_000,
+            input_cost_per_million=Decimal("2"),
+            output_cost_per_million=Decimal("8"),
+            capabilities=("coding",),
+            executor_keys=("codex",),
+        )
+    )
+    definition = WorkflowDefinition(
+        key="routed",
+        version=1,
+        entry_node="work",
+        nodes=(
+            NodeDefinition(
+                key="work",
+                kind=NodeKind.TASK,
+                executor_key="codex",
+                model_routing=ModelRoutingRequest(
+                    complexity=RequirementLevel.HIGH,
+                    risk=RequirementLevel.HIGH,
+                    required_capabilities=("coding",),
+                    estimated_input_tokens=10_000,
+                    max_output_tokens=2_000,
+                ),
+            ),
+            NodeDefinition(
+                key="done", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.SUCCEEDED
+            ),
+        ),
+        edges=(EdgeDefinition(source="work", outcome=NodeOutcome.SUCCESS, target="done"),),
+    )
+    service = WorkflowService(unit_of_work_factory)
+    await service.register_definition(definition)
+
+    execution = await service.start(run.id, "routed")
+    claim = await TaskDispatchService(unit_of_work_factory).claim_next("worker-a", {"codex"})
+
+    assert execution.snapshot.model_selections[0].selection.profile.version == 1
+    assert claim is not None
+    assert claim.model_selection is not None
+    assert claim.model_selection.profile.model_id == "gpt-codex-advanced"
+    assert claim.model_selection.policy_version == 1
+    assert claim.model_selection.estimated_cost_usd == Decimal("0.036")

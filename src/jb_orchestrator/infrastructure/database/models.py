@@ -1,6 +1,7 @@
 """Relational persistence records for the initial orchestration domain."""
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -11,6 +12,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -24,6 +26,7 @@ from jb_orchestrator.domain.projects import ProjectStatus
 from jb_orchestrator.domain.requests import RequestStatus
 from jb_orchestrator.domain.runs import RunStatus
 from jb_orchestrator.infrastructure.database.base import Base
+from jb_orchestrator.model_routing import ModelTier
 from jb_orchestrator.skills import SkillSourceKind
 from jb_orchestrator.workflows.models import NodeExecutionStatus, NodeOutcome, WorkflowStatus
 
@@ -156,6 +159,29 @@ class SkillDefinitionRecord(Base):
     source_revision: Mapped[str | None] = mapped_column(String(255))
     entrypoint: Mapped[str] = mapped_column(String(1024), nullable=False)
     skill_metadata: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ModelProfileRecord(Base):
+    """Immutable catalog entry for one executable model profile version."""
+
+    __tablename__ = "model_profiles"
+    __table_args__ = (UniqueConstraint("key", "version", name="uq_model_profiles_key_version"),)
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    key: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    provider: Mapped[str] = mapped_column(String(128), nullable=False)
+    model_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    tier: Mapped[ModelTier] = mapped_column(string_enum(ModelTier, "model_tier"), nullable=False)
+    context_window: Mapped[int] = mapped_column(Integer, nullable=False)
+    input_cost_per_million: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    output_cost_per_million: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    enabled: Mapped[bool] = mapped_column(nullable=False, default=True)
+    capabilities: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    executor_keys: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    profile_metadata: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 

@@ -18,6 +18,7 @@ def test_metadata_creates_initial_domain_schema() -> None:
     inspector = inspect(engine)
     assert set(inspector.get_table_names()) == {
         "events",
+        "model_profiles",
         "node_executions",
         "projects",
         "runs",

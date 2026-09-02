@@ -7,6 +7,10 @@ from uuid import UUID
 from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNotFound
 from jb_orchestrator.application.unit_of_work import UnitOfWork
 from jb_orchestrator.domain import DomainEvent
+from jb_orchestrator.model_routing import (
+    DeterministicModelRouter,
+    NodeModelSelection,
+)
 from jb_orchestrator.skills import SkillDefinition
 from jb_orchestrator.workflows import (
     NodeOutcome,
@@ -24,9 +28,11 @@ class WorkflowService:
         self,
         unit_of_work_factory: Callable[[], UnitOfWork],
         engine: WorkflowEngine | None = None,
+        model_router: DeterministicModelRouter | None = None,
     ) -> None:
         self._unit_of_work_factory = unit_of_work_factory
         self._engine = engine or WorkflowEngine()
+        self._model_router = model_router or DeterministicModelRouter()
 
     async def register_definition(self, definition: WorkflowDefinition) -> WorkflowDefinition:
         async with self._unit_of_work_factory() as unit_of_work:
@@ -62,13 +68,33 @@ class WorkflowService:
                 raise ResourceNotFound(f"workflow definition not found: {definition_key}{suffix}")
 
             skills = await self._resolve_skills(unit_of_work, definition)
+            model_selections = await self._route_models(unit_of_work, definition)
 
             execution = WorkflowExecution.create(
-                WorkflowSnapshot.from_definition(definition, run_id=run_id, skills=skills)
+                WorkflowSnapshot.from_definition(
+                    definition,
+                    run_id=run_id,
+                    skills=skills,
+                    model_selections=model_selections,
+                )
             )
             self._engine.start(execution)
             await unit_of_work.workflow_executions.add(execution)
-            await self._append_event(unit_of_work, execution, "workflow.started")
+            await self._append_event(
+                unit_of_work,
+                execution,
+                "workflow.started",
+                model_selections=[
+                    {
+                        "node_key": value.node_key,
+                        "profile_key": value.selection.profile.key,
+                        "profile_version": value.selection.profile.version,
+                        "policy_version": value.selection.policy_version,
+                        "estimated_cost_usd": str(value.selection.estimated_cost_usd),
+                    }
+                    for value in model_selections
+                ],
+            )
             await unit_of_work.commit()
         return execution
 
@@ -187,3 +213,23 @@ class WorkflowService:
                 raise ResourceNotFound(f"skill not found: {reference.key}@{reference.version}")
             resolved.append(skill)
         return tuple(resolved)
+
+    async def _route_models(
+        self, unit_of_work: UnitOfWork, definition: WorkflowDefinition
+    ) -> tuple[NodeModelSelection, ...]:
+        routed_nodes = [node for node in definition.nodes if node.model_routing is not None]
+        if not routed_nodes:
+            return ()
+        profiles = await unit_of_work.model_profiles.list_latest()
+        return tuple(
+            NodeModelSelection(
+                node_key=node.key,
+                selection=self._model_router.route(
+                    node.model_routing,
+                    profiles,
+                    executor_key=node.executor_key or "default",
+                ),
+            )
+            for node in routed_nodes
+            if node.model_routing is not None
+        )

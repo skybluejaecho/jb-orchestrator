@@ -1,8 +1,11 @@
+from decimal import Decimal
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from jb_orchestrator.application import (
     CreateUserRequest,
+    ModelCatalogService,
     OrchestrationService,
     RegisterProject,
     SkillCatalogService,
@@ -11,6 +14,11 @@ from jb_orchestrator.application import (
 )
 from jb_orchestrator.domain import RequestStatus, RunStatus
 from jb_orchestrator.infrastructure.database import Base, EventRecord, SqlAlchemyUnitOfWork
+from jb_orchestrator.model_routing import (
+    ModelProfile,
+    ModelRoutingRequest,
+    ModelTier,
+)
 from jb_orchestrator.skills import SkillDefinition, SkillReference, SkillSourceKind
 from jb_orchestrator.worker.models import TaskResult
 from jb_orchestrator.workflows import (
@@ -51,6 +59,7 @@ async def test_application_service_round_trip_with_sqlalchemy() -> None:
 
     workflow_service = WorkflowService(lambda: SqlAlchemyUnitOfWork(session_factory))
     skill_service = SkillCatalogService(lambda: SqlAlchemyUnitOfWork(session_factory))
+    model_service = ModelCatalogService(lambda: SqlAlchemyUnitOfWork(session_factory))
     skill = await skill_service.register(
         SkillDefinition(
             key="implementation",
@@ -60,6 +69,21 @@ async def test_application_service_round_trip_with_sqlalchemy() -> None:
             source_kind=SkillSourceKind.LOCAL,
             source_uri="skills/implementation",
             content_digest="sha256:" + "c" * 64,
+        )
+    )
+    await model_service.register(
+        ModelProfile(
+            key="integration-balanced",
+            version=1,
+            name="Integration Balanced",
+            provider="test",
+            model_id="integration-model",
+            tier=ModelTier.BALANCED,
+            context_window=32_000,
+            input_cost_per_million=Decimal("1"),
+            output_cost_per_million=Decimal("4"),
+            capabilities=("coding",),
+            executor_keys=("integration",),
         )
     )
     definition = WorkflowDefinition(
@@ -72,6 +96,7 @@ async def test_application_service_round_trip_with_sqlalchemy() -> None:
                 kind=NodeKind.TASK,
                 executor_key="integration",
                 skills=(SkillReference(key=skill.key, version=skill.version),),
+                model_routing=ModelRoutingRequest(required_capabilities=("coding",)),
             ),
             NodeDefinition(
                 key="done", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.SUCCEEDED
@@ -89,6 +114,8 @@ async def test_application_service_round_trip_with_sqlalchemy() -> None:
     assert leased_execution.nodes["implement"].worker_id == "integration-worker"
     assert leased_execution.nodes["implement"].lease_token == claim.lease_token
     assert [(item.key, item.version) for item in claim.skills] == [("implementation", 1)]
+    assert claim.model_selection is not None
+    assert claim.model_selection.profile.model_id == "integration-model"
     completed_execution = await dispatch.complete(
         claim,
         TaskResult(outcome=NodeOutcome.SUCCESS, output={"commit": "abc123"}),
@@ -111,6 +138,7 @@ async def test_application_service_round_trip_with_sqlalchemy() -> None:
             "project.registered",
             "request.created",
             "workflow.definition_registered",
+            "model.registered",
             "skill.registered",
             "workflow.started",
             "task.claimed",

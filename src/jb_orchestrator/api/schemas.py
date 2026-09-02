@@ -1,12 +1,14 @@
 """HTTP request and response schemas."""
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 from jb_orchestrator.domain import ProjectStatus, RequestStatus, RunStatus
+from jb_orchestrator.model_routing import ModelTier
 from jb_orchestrator.skills import SkillSourceKind
 
 
@@ -93,6 +95,42 @@ class SkillResponse(BaseModel):
     content_digest: str
     source_revision: str | None
     entrypoint: str
+    metadata: dict[str, Any]
+    created_at: datetime
+
+
+class ModelProfileCreate(BaseModel):
+    key: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$", max_length=128)
+    version: int = Field(ge=1)
+    name: str = Field(min_length=1, max_length=255)
+    provider: str = Field(min_length=1, max_length=128)
+    model_id: str = Field(min_length=1, max_length=255)
+    tier: ModelTier
+    context_window: int = Field(ge=1)
+    input_cost_per_million: Decimal = Field(ge=0)
+    output_cost_per_million: Decimal = Field(ge=0)
+    enabled: bool = True
+    capabilities: tuple[str, ...] = ()
+    executor_keys: tuple[str, ...] = ()
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ModelProfileResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    key: str
+    version: int
+    name: str
+    provider: str
+    model_id: str
+    tier: ModelTier
+    context_window: int
+    input_cost_per_million: Decimal
+    output_cost_per_million: Decimal
+    enabled: bool
+    capabilities: tuple[str, ...]
+    executor_keys: tuple[str, ...]
     metadata: dict[str, Any]
     created_at: datetime
 
