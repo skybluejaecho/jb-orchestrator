@@ -78,6 +78,14 @@ ORCH-009 adds deterministic model routing:
 - routing policy version, reasons, and estimated cost pinned in workflow snapshots
 - selected provider and model identity delivered to executor task claims
 
+ORCH-010 adds project budget enforcement:
+
+- project-level USD limits with separate reserved, spent, and available balances
+- row-locked, idempotent maximum-cost reservations before executor invocation
+- append-only actual token usage and conservative unknown-usage forfeiture records
+- retry-safe settlement using stable workflow task idempotency keys
+- active reservation release when a run or workflow is cancelled
+
 ## Prerequisites
 
 - Python 3.12
@@ -113,6 +121,8 @@ codex = "jb_codex_executor:create_executor"
 
 The factory returns an object implementing the async `TaskExecutor.execute(claim)` contract.
 Its entry-point name must match the workflow node's `executor_key`.
+For model-routed tasks, the executor returns provider-reported input and output token usage in
+`TaskResult.usage`; configured project budgets require this usage for actual settlement.
 
 Skill registration stores immutable metadata; workers fetch and verify the files only when a
 referencing task is claimed. Local sources must be below `JB_SKILL_LOCAL_ROOT`. Remote Git and
@@ -136,6 +146,9 @@ The API exposes:
 - `POST /v1/models`
 - `GET /v1/models`
 - `GET /v1/models/{key}?version={version}`
+- `PUT /v1/projects/{project_id}/budget`
+- `GET /v1/projects/{project_id}/budget`
+- `GET /v1/projects/{project_id}/usage`
 
 ## Quality checks
 

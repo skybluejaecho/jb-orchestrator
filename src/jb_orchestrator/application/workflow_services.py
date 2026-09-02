@@ -4,6 +4,7 @@ from collections.abc import Callable
 from typing import Any
 from uuid import UUID
 
+from jb_orchestrator.application.budget_services import release_run_reservations
 from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNotFound
 from jb_orchestrator.application.unit_of_work import UnitOfWork
 from jb_orchestrator.domain import DomainEvent
@@ -173,6 +174,11 @@ class WorkflowService:
         async with self._unit_of_work_factory() as unit_of_work:
             execution = await self._get_execution(unit_of_work, execution_id)
             self._engine.cancel(execution)
+            await release_run_reservations(
+                unit_of_work,
+                execution.snapshot.run_id,
+                reason="workflow_cancelled",
+            )
             await unit_of_work.workflow_executions.save(execution)
             await self._append_event(unit_of_work, execution, "workflow.cancelled")
             await unit_of_work.commit()

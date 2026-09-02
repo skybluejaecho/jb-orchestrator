@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from uuid import UUID
 
+from jb_orchestrator.application.budget_services import release_run_reservations
 from jb_orchestrator.application.commands import CreateUserRequest, RegisterProject
 from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNotFound
 from jb_orchestrator.application.unit_of_work import UnitOfWork
@@ -124,6 +125,7 @@ class OrchestrationService:
             request = await unit_of_work.requests.get(run.request_id)
             if request is None:
                 raise ResourceNotFound(f"request not found: {run.request_id}")
+            await release_run_reservations(unit_of_work, run.id, reason="run_cancelled")
             run.transition_to(RunStatus.CANCELLED)
             request.cancel()
             await unit_of_work.runs.save(run)

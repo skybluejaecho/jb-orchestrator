@@ -1,16 +1,27 @@
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
-from jb_orchestrator.application import TaskDispatchService
+from jb_orchestrator.application import BudgetService, TaskDispatchService
+from jb_orchestrator.budgets import BudgetReservationStatus, UsageKind
+from jb_orchestrator.domain import Project, Run, UserRequest
+from jb_orchestrator.model_routing import (
+    DeterministicModelRouter,
+    ModelProfile,
+    ModelRoutingRequest,
+    ModelSelection,
+    ModelTier,
+    NodeModelSelection,
+)
 from jb_orchestrator.skills import SkillDefinition, SkillSourceKind
 from jb_orchestrator.skills.materialization import (
     LocalSkillFetcher,
     SkillMaterializer,
     compute_directory_digest,
 )
-from jb_orchestrator.worker.models import TaskClaim, TaskResult
+from jb_orchestrator.worker.models import TaskClaim, TaskResult, TokenUsage
 from jb_orchestrator.worker.registry import ExecutorRegistry
 from jb_orchestrator.worker.runtime import WorkerRuntime
 from jb_orchestrator.workflows import (
@@ -46,6 +57,8 @@ def running_execution(
     max_attempts: int = 2,
     executor_key: str = "fake",
     skills: tuple[SkillDefinition, ...] = (),
+    run_id: UUID | None = None,
+    model_selection: ModelSelection | None = None,
 ) -> WorkflowExecution:
     definition = WorkflowDefinition(
         key="worker-flow",
@@ -61,6 +74,7 @@ def running_execution(
                 instructions="Produce the requested artifact.",
                 configuration={"model": "test-model"},
                 skills=tuple(skill.reference for skill in skills),
+                model_routing=(ModelRoutingRequest() if model_selection is not None else None),
             ),
             NodeDefinition(
                 key="done", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.SUCCEEDED
@@ -69,10 +83,39 @@ def running_execution(
         edges=(EdgeDefinition(source="work", outcome=NodeOutcome.SUCCESS, target="done"),),
     )
     execution = WorkflowExecution.create(
-        WorkflowSnapshot.from_definition(definition, run_id=uuid4(), skills=skills)
+        WorkflowSnapshot.from_definition(
+            definition,
+            run_id=run_id or uuid4(),
+            skills=skills,
+            model_selections=(
+                (NodeModelSelection(node_key="work", selection=model_selection),)
+                if model_selection is not None
+                else ()
+            ),
+        )
     )
     WorkflowEngine().start(execution)
     return execution
+
+
+def routed_model_selection() -> ModelSelection:
+    profile = ModelProfile(
+        key="codex-balanced",
+        version=1,
+        name="Codex Balanced",
+        provider="openai",
+        model_id="gpt-codex",
+        tier=ModelTier.BALANCED,
+        context_window=128_000,
+        input_cost_per_million=Decimal("1"),
+        output_cost_per_million=Decimal("4"),
+        executor_keys=("fake",),
+    )
+    return DeterministicModelRouter().route(
+        ModelRoutingRequest(estimated_input_tokens=100_000, max_output_tokens=10_000),
+        (profile,),
+        executor_key="fake",
+    )
 
 
 async def test_worker_executes_claim_and_persists_result() -> None:
@@ -244,3 +287,82 @@ async def test_heartbeat_extends_an_active_lease() -> None:
 
     assert execution.nodes["work"].lease_expires_at == claimed_at + timedelta(seconds=20)
     assert store.events[-1].event_type == "task.lease_renewed"
+
+
+async def test_worker_reserves_and_settles_actual_model_usage() -> None:
+    store = MemoryStore()
+    project = Project(
+        key="budget-worker",
+        name="Budget Worker",
+        repository_url="https://example.com/repository.git",
+    )
+    request = UserRequest(project_id=project.id, prompt="Implement")
+    run = Run(request_id=request.id)
+    store.projects[project.id] = project
+    store.requests[request.id] = request
+    store.runs[run.id] = run
+    execution = running_execution(run_id=run.id, model_selection=routed_model_selection())
+    store.workflow_executions[execution.id] = execution
+    budget = BudgetService(lambda: MemoryUnitOfWork(store))
+    await budget.configure(project.id, Decimal("1.00"))
+    executor = FakeExecutor(
+        [
+            TaskResult(
+                outcome=NodeOutcome.SUCCESS,
+                usage=TokenUsage(input_tokens=50_000, output_tokens=5_000),
+            )
+        ]
+    )
+    runtime = WorkerRuntime(
+        "worker-a",
+        TaskDispatchService(lambda: MemoryUnitOfWork(store)),
+        ExecutorRegistry({"fake": executor}),
+        budget_service=budget,
+    )
+
+    assert await runtime.run_once() is True
+
+    account = store.budget_accounts[project.id]
+    reservation = next(iter(store.budget_reservations.values()))
+    assert execution.status is WorkflowStatus.SUCCEEDED
+    assert account.reserved_usd == Decimal("0.000000")
+    assert account.spent_usd == Decimal("0.070000")
+    assert reservation.status is BudgetReservationStatus.SETTLED
+    assert store.usage_records[0].kind is UsageKind.ACTUAL
+
+
+async def test_worker_forfeits_reservation_after_final_missing_usage() -> None:
+    store = MemoryStore()
+    project = Project(
+        key="budget-forfeit",
+        name="Budget Forfeit",
+        repository_url="https://example.com/repository.git",
+    )
+    request = UserRequest(project_id=project.id, prompt="Implement")
+    run = Run(request_id=request.id)
+    store.projects[project.id] = project
+    store.requests[request.id] = request
+    store.runs[run.id] = run
+    execution = running_execution(
+        max_attempts=1,
+        run_id=run.id,
+        model_selection=routed_model_selection(),
+    )
+    store.workflow_executions[execution.id] = execution
+    budget = BudgetService(lambda: MemoryUnitOfWork(store))
+    await budget.configure(project.id, Decimal("1.00"))
+    executor = FakeExecutor([TaskResult(outcome=NodeOutcome.SUCCESS)])
+    runtime = WorkerRuntime(
+        "worker-a",
+        TaskDispatchService(lambda: MemoryUnitOfWork(store)),
+        ExecutorRegistry({"fake": executor}),
+        budget_service=budget,
+    )
+
+    assert await runtime.run_once() is True
+
+    reservation = next(iter(store.budget_reservations.values()))
+    assert execution.status is WorkflowStatus.FAILED
+    assert reservation.status is BudgetReservationStatus.FORFEITED
+    assert store.budget_accounts[project.id].spent_usd == Decimal("0.140000")
+    assert store.usage_records[0].kind is UsageKind.ESTIMATED_FORFEIT
