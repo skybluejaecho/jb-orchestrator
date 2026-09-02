@@ -86,6 +86,14 @@ ORCH-010 adds project budget enforcement:
 - retry-safe settlement using stable workflow task idempotency keys
 - active reservation release when a run or workflow is cancelled
 
+ORCH-011 exposes the workflow control plane:
+
+- versioned workflow definition registration, latest-version listing, and exact lookup
+- workflow execution startup for an existing run with an immutable definition snapshot
+- workflow and node execution status queries by run or execution identifier
+- explicit approval resolution and workflow cancellation endpoints
+- domain validation errors returned as structured HTTP problem details
+
 ## Prerequisites
 
 - Python 3.12
@@ -149,6 +157,14 @@ The API exposes:
 - `PUT /v1/projects/{project_id}/budget`
 - `GET /v1/projects/{project_id}/budget`
 - `GET /v1/projects/{project_id}/usage`
+- `POST /v1/workflows`
+- `GET /v1/workflows`
+- `GET /v1/workflows/{key}?version={version}`
+- `POST /v1/runs/{run_id}/workflow`
+- `GET /v1/runs/{run_id}/workflow`
+- `GET /v1/workflow-executions/{execution_id}`
+- `POST /v1/workflow-executions/{execution_id}/approvals/{node_key}`
+- `POST /v1/workflow-executions/{execution_id}/cancel`
 
 ## Quality checks
 

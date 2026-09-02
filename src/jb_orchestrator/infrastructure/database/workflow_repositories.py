@@ -4,7 +4,7 @@ from collections.abc import Collection
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jb_orchestrator.infrastructure.database.models import (
@@ -90,6 +90,26 @@ class SqlAlchemyWorkflowDefinitionRepository:
             statement = statement.where(WorkflowDefinitionRecord.version == version)
         record = await self._session.scalar(statement)
         return definition_from_dict(record.definition) if record is not None else None
+
+    async def list_latest(self) -> list[WorkflowDefinition]:
+        latest_versions = (
+            select(
+                WorkflowDefinitionRecord.key,
+                func.max(WorkflowDefinitionRecord.version).label("version"),
+            )
+            .group_by(WorkflowDefinitionRecord.key)
+            .subquery()
+        )
+        records = await self._session.scalars(
+            select(WorkflowDefinitionRecord)
+            .join(
+                latest_versions,
+                (WorkflowDefinitionRecord.key == latest_versions.c.key)
+                & (WorkflowDefinitionRecord.version == latest_versions.c.version),
+            )
+            .order_by(WorkflowDefinitionRecord.key)
+        )
+        return [definition_from_dict(record.definition) for record in records]
 
 
 class SqlAlchemyWorkflowExecutionRepository:

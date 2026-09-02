@@ -9,8 +9,14 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 from jb_orchestrator.budgets import UsageKind
 from jb_orchestrator.domain import ProjectStatus, RequestStatus, RunStatus
-from jb_orchestrator.model_routing import ModelTier
+from jb_orchestrator.model_routing import ModelTier, RequirementLevel
 from jb_orchestrator.skills import SkillSourceKind
+from jb_orchestrator.workflows import (
+    NodeExecutionStatus,
+    NodeKind,
+    NodeOutcome,
+    WorkflowStatus,
+)
 
 
 class ProjectCreate(BaseModel):
@@ -170,6 +176,103 @@ class UsageRecordResponse(BaseModel):
     model_profile_key: str
     model_profile_version: int
     recorded_at: datetime
+
+
+class SkillReferencePayload(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    key: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$", max_length=128)
+    version: int = Field(ge=1)
+
+
+class ModelRoutingPayload(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    complexity: RequirementLevel = RequirementLevel.MEDIUM
+    risk: RequirementLevel = RequirementLevel.MEDIUM
+    quality: RequirementLevel = RequirementLevel.MEDIUM
+    required_capabilities: tuple[str, ...] = ()
+    estimated_input_tokens: int = Field(default=0, ge=0)
+    max_output_tokens: int = Field(default=4096, ge=1)
+    max_cost_usd: Decimal | None = Field(default=None, ge=0)
+
+
+class WorkflowNodePayload(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    key: str = Field(min_length=1, max_length=128)
+    kind: NodeKind
+    max_attempts: int = Field(default=1, ge=1)
+    max_visits: int = Field(default=1, ge=1)
+    timeout_seconds: int = Field(default=600, ge=1)
+    terminal_status: WorkflowStatus | None = None
+    executor_key: str | None = Field(default=None, min_length=1, max_length=128)
+    instructions: str | None = Field(default=None, min_length=1)
+    configuration: dict[str, Any] = Field(default_factory=dict)
+    skills: tuple[SkillReferencePayload, ...] = ()
+    model_routing: ModelRoutingPayload | None = None
+
+
+class WorkflowEdgePayload(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    source: str = Field(min_length=1, max_length=128)
+    outcome: NodeOutcome
+    target: str = Field(min_length=1, max_length=128)
+
+
+class WorkflowDefinitionCreate(BaseModel):
+    key: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$", max_length=128)
+    version: int = Field(ge=1)
+    entry_node: str = Field(min_length=1, max_length=128)
+    nodes: tuple[WorkflowNodePayload, ...] = Field(min_length=1)
+    edges: tuple[WorkflowEdgePayload, ...] = ()
+
+
+class WorkflowDefinitionResponse(WorkflowDefinitionCreate):
+    id: UUID
+
+
+class WorkflowStart(BaseModel):
+    definition_key: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$", max_length=128)
+    version: int | None = Field(default=None, ge=1)
+
+
+class WorkflowApprovalResolve(BaseModel):
+    approved: bool
+
+
+class NodeExecutionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    node_key: str
+    executor_key: str
+    status: NodeExecutionStatus
+    visit_count: int
+    attempt_count: int
+    outcome: NodeOutcome | None
+    output: dict[str, Any] | None
+    worker_id: str | None
+    lease_expires_at: datetime | None
+    started_at: datetime | None
+    completed_at: datetime | None
+    updated_at: datetime
+
+
+class WorkflowExecutionResponse(BaseModel):
+    id: UUID
+    run_id: UUID
+    snapshot_id: UUID
+    definition_key: str
+    definition_version: int
+    status: WorkflowStatus
+    nodes: tuple[NodeExecutionResponse, ...]
+    failure_reason: str | None
+    started_at: datetime | None
+    completed_at: datetime | None
+    updated_at: datetime
+    version: int
 
 
 class ProblemDetail(BaseModel):
