@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 from jb_orchestrator.budgets import UsageKind
 from jb_orchestrator.domain import ProjectStatus, RequestStatus, RunStatus
+from jb_orchestrator.external_executions import ExternalExecutionStatus
 from jb_orchestrator.model_routing import ModelTier, RequirementLevel
 from jb_orchestrator.skills import SkillSourceKind
 from jb_orchestrator.workflows import (
@@ -176,6 +177,26 @@ class UsageRecordResponse(BaseModel):
     model_profile_key: str
     model_profile_version: int
     recorded_at: datetime
+
+
+class ExternalExecutionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    execution_id: UUID
+    run_id: UUID
+    node_key: str
+    executor_key: str
+    idempotency_key: str
+    external_session_key: str
+    external_agent_id: str | None
+    external_run_id: str | None
+    status: ExternalExecutionStatus
+    terminal_result: dict[str, Any] | None
+    failure_reason: str | None
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None
 
 
 class SkillReferencePayload(BaseModel):

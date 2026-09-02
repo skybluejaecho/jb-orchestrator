@@ -10,6 +10,7 @@ from jb_orchestrator import __version__
 from jb_orchestrator.api.routes import router
 from jb_orchestrator.application.budget_services import BudgetService
 from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNotFound
+from jb_orchestrator.application.external_execution_services import ExternalExecutionService
 from jb_orchestrator.application.model_services import ModelCatalogService
 from jb_orchestrator.application.services import OrchestrationService
 from jb_orchestrator.application.skill_services import SkillCatalogService
@@ -28,6 +29,7 @@ def create_app(
     model_service: ModelCatalogService | None = None,
     budget_service: BudgetService | None = None,
     workflow_service: WorkflowService | None = None,
+    external_execution_service: ExternalExecutionService | None = None,
 ) -> FastAPI:
     """Build the API application."""
 
@@ -38,6 +40,7 @@ def create_app(
         or model_service is None
         or budget_service is None
         or workflow_service is None
+        or external_execution_service is None
     ):
         session_factory = create_session_factory()
     if service is None:
@@ -50,11 +53,16 @@ def create_app(
         budget_service = BudgetService(lambda: SqlAlchemyUnitOfWork(session_factory))
     if workflow_service is None:
         workflow_service = WorkflowService(lambda: SqlAlchemyUnitOfWork(session_factory))
+    if external_execution_service is None:
+        external_execution_service = ExternalExecutionService(
+            lambda: SqlAlchemyUnitOfWork(session_factory)
+        )
     app.state.orchestration_service = service
     app.state.skill_catalog_service = skill_service
     app.state.model_catalog_service = model_service
     app.state.budget_service = budget_service
     app.state.workflow_service = workflow_service
+    app.state.external_execution_service = external_execution_service
 
     @app.get("/health/live", tags=["health"])
     async def live() -> dict[str, str]:

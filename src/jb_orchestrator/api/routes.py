@@ -3,10 +3,11 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 
 from jb_orchestrator.api.dependencies import (
     get_budget_service,
+    get_external_execution_service,
     get_model_catalog_service,
     get_orchestration_service,
     get_skill_catalog_service,
@@ -16,6 +17,7 @@ from jb_orchestrator.api.schemas import (
     BudgetConfigure,
     BudgetResponse,
     CreatedRequestResponse,
+    ExternalExecutionResponse,
     ModelProfileCreate,
     ModelProfileResponse,
     NodeExecutionResponse,
@@ -38,12 +40,14 @@ from jb_orchestrator.api.schemas import (
 from jb_orchestrator.application import (
     BudgetService,
     CreateUserRequest,
+    ExternalExecutionService,
     ModelCatalogService,
     OrchestrationService,
     RegisterProject,
     SkillCatalogService,
     WorkflowService,
 )
+from jb_orchestrator.external_executions import ExternalExecutionStatus
 from jb_orchestrator.model_routing import ModelProfile, ModelRoutingRequest
 from jb_orchestrator.skills import SkillDefinition, SkillReference
 from jb_orchestrator.workflows import (
@@ -59,6 +63,9 @@ SkillService = Annotated[SkillCatalogService, Depends(get_skill_catalog_service)
 ModelService = Annotated[ModelCatalogService, Depends(get_model_catalog_service)]
 BudgetServiceDependency = Annotated[BudgetService, Depends(get_budget_service)]
 WorkflowServiceDependency = Annotated[WorkflowService, Depends(get_workflow_service)]
+ExternalExecutionServiceDependency = Annotated[
+    ExternalExecutionService, Depends(get_external_execution_service)
+]
 
 
 def workflow_definition_response(
@@ -335,3 +342,30 @@ async def list_usage(
         UsageRecordResponse.model_validate(record)
         for record in await service.list_usage(project_id)
     ]
+
+
+@router.get("/external-executions", response_model=list[ExternalExecutionResponse])
+async def list_external_executions(
+    service: ExternalExecutionServiceDependency,
+    workflow_execution_id: UUID | None = None,
+    run_id: UUID | None = None,
+    status: ExternalExecutionStatus | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[ExternalExecutionResponse]:
+    return [
+        ExternalExecutionResponse.model_validate(execution)
+        for execution in await service.list(
+            workflow_execution_id=workflow_execution_id,
+            run_id=run_id,
+            status=status,
+            limit=limit,
+        )
+    ]
+
+
+@router.get("/external-executions/{execution_id}", response_model=ExternalExecutionResponse)
+async def get_external_execution(
+    execution_id: UUID,
+    service: ExternalExecutionServiceDependency,
+) -> ExternalExecutionResponse:
+    return ExternalExecutionResponse.model_validate(await service.get_by_id(execution_id))

@@ -1,9 +1,11 @@
 """SQLAlchemy adapter for external execution mappings."""
 
-from sqlalchemy import select
+from uuid import UUID
+
+from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from jb_orchestrator.external_executions import ExternalExecution
+from jb_orchestrator.external_executions import ExternalExecution, ExternalExecutionStatus
 from jb_orchestrator.infrastructure.database.models import ExternalExecutionRecord
 
 
@@ -62,6 +64,34 @@ class SqlAlchemyExternalExecutionRepository:
             statement = statement.with_for_update().execution_options(populate_existing=True)
         record = await self._session.scalar(statement)
         return external_execution_from_record(record) if record is not None else None
+
+    async def get(self, execution_id: UUID) -> ExternalExecution | None:
+        record = await self._session.get(ExternalExecutionRecord, execution_id)
+        return external_execution_from_record(record) if record is not None else None
+
+    async def list(
+        self,
+        *,
+        workflow_execution_id: UUID | None = None,
+        run_id: UUID | None = None,
+        status: ExternalExecutionStatus | None = None,
+        limit: int = 100,
+    ) -> list[ExternalExecution]:
+        statement: Select[tuple[ExternalExecutionRecord]] = select(ExternalExecutionRecord)
+        if workflow_execution_id is not None:
+            statement = statement.where(
+                ExternalExecutionRecord.execution_id == workflow_execution_id
+            )
+        if run_id is not None:
+            statement = statement.where(ExternalExecutionRecord.run_id == run_id)
+        if status is not None:
+            statement = statement.where(ExternalExecutionRecord.status == status)
+        records = await self._session.scalars(
+            statement.order_by(
+                ExternalExecutionRecord.created_at.desc(), ExternalExecutionRecord.id.desc()
+            ).limit(limit)
+        )
+        return [external_execution_from_record(record) for record in records]
 
     async def save(self, execution: ExternalExecution) -> None:
         record = await self._session.get(ExternalExecutionRecord, execution.id)

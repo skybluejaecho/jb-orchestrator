@@ -14,7 +14,7 @@ from jb_orchestrator.budgets import (
     UsageRecord,
 )
 from jb_orchestrator.domain import DomainEvent, Project, Run, UserRequest
-from jb_orchestrator.external_executions import ExternalExecution
+from jb_orchestrator.external_executions import ExternalExecution, ExternalExecutionStatus
 from jb_orchestrator.model_routing import ModelProfile
 from jb_orchestrator.skills import SkillDefinition
 from jb_orchestrator.workflows import (
@@ -97,6 +97,33 @@ class MemoryExternalExecutionRepository:
         self, idempotency_key: str, *, for_update: bool = False
     ) -> ExternalExecution | None:
         return self._store.external_executions.get(idempotency_key)
+
+    async def get(self, execution_id: UUID) -> ExternalExecution | None:
+        return next(
+            (
+                execution
+                for execution in self._store.external_executions.values()
+                if execution.id == execution_id
+            ),
+            None,
+        )
+
+    async def list(
+        self,
+        *,
+        workflow_execution_id: UUID | None = None,
+        run_id: UUID | None = None,
+        status: ExternalExecutionStatus | None = None,
+        limit: int = 100,
+    ) -> list[ExternalExecution]:
+        matches = [
+            execution
+            for execution in self._store.external_executions.values()
+            if (workflow_execution_id is None or execution.execution_id == workflow_execution_id)
+            and (run_id is None or execution.run_id == run_id)
+            and (status is None or execution.status == status)
+        ]
+        return sorted(matches, key=lambda value: (value.created_at, value.id), reverse=True)[:limit]
 
     async def save(self, execution: ExternalExecution) -> None:
         self._store.external_executions[execution.idempotency_key] = execution
