@@ -1,6 +1,8 @@
 """Transactional lifecycle service for external runtime identifiers."""
 
-from collections.abc import Callable
+from __future__ import annotations
+
+from collections.abc import Callable, Sequence
 from typing import Any
 from uuid import UUID
 
@@ -102,6 +104,24 @@ class ExternalExecutionService:
                 workflow_execution_id=workflow_execution_id,
                 run_id=run_id,
                 status=status,
+                limit=limit,
+            )
+
+    async def list_events(
+        self,
+        *,
+        after_event_id: UUID | None = None,
+        limit: int = 100,
+    ) -> Sequence[DomainEvent]:
+        async with self._unit_of_work_factory() as unit_of_work:
+            after = None
+            if after_event_id is not None:
+                after = await unit_of_work.events.get(after_event_id)
+                if after is None:
+                    raise ResourceNotFound(f"event cursor not found: {after_event_id}")
+            return await unit_of_work.events.list_after(
+                aggregate_type="external_execution",
+                after=after,
                 limit=limit,
             )
 
