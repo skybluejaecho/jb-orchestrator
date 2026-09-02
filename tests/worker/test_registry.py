@@ -28,6 +28,14 @@ class SyncExecutor:
         return TaskResult(outcome=NodeOutcome.SUCCESS)
 
 
+class SyncCancellationExecutor:
+    async def execute(self, claim: TaskClaim) -> TaskResult:
+        return TaskResult(outcome=NodeOutcome.SUCCESS)
+
+    def cancel(self, claim: TaskClaim) -> None:
+        return None
+
+
 async def test_registry_routes_claim_to_selected_executor() -> None:
     store = MemoryStore()
     execution = running_execution()
@@ -64,6 +72,11 @@ def test_registry_rejects_duplicate_keys() -> None:
 def test_registry_rejects_synchronous_executor() -> None:
     with pytest.raises(ExecutorRegistrationError, match="must be async"):
         ExecutorRegistry({"sync": SyncExecutor()})  # type: ignore[dict-item]
+
+
+def test_registry_rejects_synchronous_optional_cancel_hook() -> None:
+    with pytest.raises(ExecutorRegistrationError, match="cancel method must be async"):
+        ExecutorRegistry({"sync-cancel": SyncCancellationExecutor()})
 
 
 async def test_registry_rejects_unregistered_claim() -> None:
