@@ -94,6 +94,14 @@ ORCH-011 exposes the workflow control plane:
 - explicit approval resolution and workflow cancellation endpoints
 - domain validation errors returned as structured HTTP problem details
 
+ORCH-012 hardens long-running worker execution:
+
+- periodic PostgreSQL lease renewal while an executor is active
+- fail-closed cancellation when heartbeat ownership can no longer be renewed
+- bounded timeout and graceful worker-stop cleanup
+- optional idempotent provider-side cancellation hooks for remote agent runtimes
+- configurable heartbeat and cancellation timeout settings
+
 ## Prerequisites
 
 - Python 3.12

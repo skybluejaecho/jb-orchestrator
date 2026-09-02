@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     database_url: str = (
         "postgresql+asyncpg://jb_orchestrator:jb_orchestrator@localhost:5432/jb_orchestrator"
     )
+    worker_heartbeat_interval_seconds: float = Field(default=30.0, gt=0)
+    worker_cancellation_timeout_seconds: float = Field(default=10.0, gt=0)
     skill_cache_dir: Path = Path(".jb-orchestrator/cache/skills")
     skill_local_root: Path = Path("skills")
     skill_allowed_remote_hosts: frozenset[str] = frozenset()

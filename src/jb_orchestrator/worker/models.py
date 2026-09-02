@@ -62,3 +62,10 @@ class TaskExecutor(Protocol):
     """Adapter contract implemented by Codex, Orca, OpenClaw, or test executors."""
 
     async def execute(self, claim: TaskClaim) -> TaskResult: ...
+
+
+@runtime_checkable
+class CancellableTaskExecutor(Protocol):
+    """Optional hook for stopping provider-side work after local cancellation."""
+
+    async def cancel(self, claim: TaskClaim) -> None: ...

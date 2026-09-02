@@ -64,6 +64,8 @@ def run(
         dispatch,
         registry,
         poll_interval_seconds=poll_interval,
+        heartbeat_interval_seconds=settings.worker_heartbeat_interval_seconds,
+        cancellation_timeout_seconds=settings.worker_cancellation_timeout_seconds,
         skill_materializer=SkillMaterializer(
             settings.skill_cache_dir,
             {
