@@ -40,7 +40,7 @@ packages = ["src/jb_orchestrator"]
 [tool.pytest.ini_options]
 addopts = "-ra --strict-config --strict-markers"
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = [".", "adapters/openclaw/src"]
 asyncio_mode = "auto"
 
 [tool.ruff]
@@ -53,4 +53,5 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-packages = ["jb_orchestrator"]
+packages = ["jb_orchestrator", "jb_openclaw_executor"]
+mypy_path = "adapters/openclaw/src"
