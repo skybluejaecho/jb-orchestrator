@@ -123,6 +123,14 @@ ORCH-014 adds the first installable OpenClaw executor adapter:
 
 See `adapters/openclaw/README.md` for installation and current production-hardening requirements.
 
+ORCH-015 hardens OpenClaw Gateway authentication:
+
+- persistent Ed25519 worker identity with challenge-bound signatures
+- shared credentials used only for initial device pairing bootstrap
+- role-scoped Gateway device-token persistence, rotation, and clearing
+- atomic private state writes outside PostgreSQL and process arguments
+- optional TLS certificate fingerprint pinning for remote `wss://` Gateways
+
 ## Prerequisites
 
 - Python 3.12
