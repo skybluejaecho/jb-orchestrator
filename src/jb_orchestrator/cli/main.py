@@ -1,6 +1,7 @@
 """Administration CLI entry point."""
 
 import json
+from pathlib import Path
 from typing import Annotated, Any, cast
 from uuid import UUID
 
@@ -9,14 +10,20 @@ import typer
 
 from jb_orchestrator import __version__
 from jb_orchestrator.config import get_settings
+from jb_orchestrator.skills.materialization import (
+    SkillMaterializationError,
+    compute_directory_digest,
+)
 
 app = typer.Typer(no_args_is_help=True, help="Administer jb-orchestrator.")
 project_app = typer.Typer(no_args_is_help=True, help="Manage registered projects.")
 request_app = typer.Typer(no_args_is_help=True, help="Submit and inspect user requests.")
 run_app = typer.Typer(no_args_is_help=True, help="Inspect and control runs.")
+skill_app = typer.Typer(no_args_is_help=True, help="Inspect and prepare skills.")
 app.add_typer(project_app, name="project")
 app.add_typer(request_app, name="request")
 app.add_typer(run_app, name="run")
+app.add_typer(skill_app, name="skill")
 
 
 def call_api(method: str, path: str, *, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -60,6 +67,17 @@ def doctor() -> None:
         "version": __version__,
     }
     typer.echo(json.dumps(result, indent=2, sort_keys=True))
+
+
+@skill_app.command("digest")
+def digest_skill(path: Path) -> None:
+    """Compute the canonical SHA-256 identity of a local skill directory."""
+
+    try:
+        typer.echo(compute_directory_digest(path))
+    except (FileNotFoundError, NotADirectoryError, SkillMaterializationError) as exc:
+        typer.echo(f"cannot digest skill: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
 
 
 @project_app.command("register")

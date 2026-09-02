@@ -1,8 +1,15 @@
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from uuid import uuid4
 
 from jb_orchestrator.application import TaskDispatchService
+from jb_orchestrator.skills import SkillDefinition, SkillSourceKind
+from jb_orchestrator.skills.materialization import (
+    LocalSkillFetcher,
+    SkillMaterializer,
+    compute_directory_digest,
+)
 from jb_orchestrator.worker.models import TaskClaim, TaskResult
 from jb_orchestrator.worker.registry import ExecutorRegistry
 from jb_orchestrator.worker.runtime import WorkerRuntime
@@ -34,7 +41,12 @@ class FakeExecutor:
         return result
 
 
-def running_execution(*, max_attempts: int = 2, executor_key: str = "fake") -> WorkflowExecution:
+def running_execution(
+    *,
+    max_attempts: int = 2,
+    executor_key: str = "fake",
+    skills: tuple[SkillDefinition, ...] = (),
+) -> WorkflowExecution:
     definition = WorkflowDefinition(
         key="worker-flow",
         version=1,
@@ -48,6 +60,7 @@ def running_execution(*, max_attempts: int = 2, executor_key: str = "fake") -> W
                 executor_key=executor_key,
                 instructions="Produce the requested artifact.",
                 configuration={"model": "test-model"},
+                skills=tuple(skill.reference for skill in skills),
             ),
             NodeDefinition(
                 key="done", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.SUCCEEDED
@@ -56,7 +69,7 @@ def running_execution(*, max_attempts: int = 2, executor_key: str = "fake") -> W
         edges=(EdgeDefinition(source="work", outcome=NodeOutcome.SUCCESS, target="done"),),
     )
     execution = WorkflowExecution.create(
-        WorkflowSnapshot.from_definition(definition, run_id=uuid4())
+        WorkflowSnapshot.from_definition(definition, run_id=uuid4(), skills=skills)
     )
     WorkflowEngine().start(execution)
     return execution
@@ -80,6 +93,78 @@ async def test_worker_executes_claim_and_persists_result() -> None:
     assert executor.claims[0].instructions == "Produce the requested artifact."
     assert executor.claims[0].configuration == {"model": "test-model"}
     assert [event.event_type for event in store.events] == ["task.claimed", "task.completed"]
+
+
+async def test_worker_materializes_verified_skills_before_executor(
+    tmp_path: Path,
+) -> None:
+    source_root = tmp_path / "skills"
+    skill_root = source_root / "review"
+    skill_root.mkdir(parents=True)
+    (skill_root / "SKILL.md").write_text("# Review\n", encoding="utf-8")
+    skill = SkillDefinition(
+        key="review",
+        version=1,
+        name="Review",
+        description="Review changes",
+        source_kind=SkillSourceKind.LOCAL,
+        source_uri="review",
+        content_digest=compute_directory_digest(skill_root),
+    )
+    store = MemoryStore()
+    execution = running_execution(skills=(skill,))
+    store.workflow_executions[execution.id] = execution
+    executor = FakeExecutor([TaskResult(outcome=NodeOutcome.SUCCESS)])
+    runtime = WorkerRuntime(
+        "worker-a",
+        TaskDispatchService(lambda: MemoryUnitOfWork(store)),
+        ExecutorRegistry({"fake": executor}),
+        skill_materializer=SkillMaterializer(
+            tmp_path / "cache",
+            {SkillSourceKind.LOCAL: LocalSkillFetcher(source_root)},
+        ),
+    )
+
+    assert await runtime.run_once() is True
+
+    entrypoint = Path(executor.claims[0].skill_paths["review@1"])
+    assert entrypoint.read_text(encoding="utf-8") == "# Review\n"
+    assert entrypoint.parent.parent == tmp_path / "cache"
+
+
+async def test_worker_retries_when_skill_verification_fails(tmp_path: Path) -> None:
+    source_root = tmp_path / "skills"
+    skill_root = source_root / "review"
+    skill_root.mkdir(parents=True)
+    (skill_root / "SKILL.md").write_text("# Review\n", encoding="utf-8")
+    skill = SkillDefinition(
+        key="review",
+        version=1,
+        name="Review",
+        description="Review changes",
+        source_kind=SkillSourceKind.LOCAL,
+        source_uri="review",
+        content_digest="sha256:" + "0" * 64,
+    )
+    store = MemoryStore()
+    execution = running_execution(skills=(skill,))
+    store.workflow_executions[execution.id] = execution
+    executor = FakeExecutor([TaskResult(outcome=NodeOutcome.SUCCESS)])
+    runtime = WorkerRuntime(
+        "worker-a",
+        TaskDispatchService(lambda: MemoryUnitOfWork(store)),
+        ExecutorRegistry({"fake": executor}),
+        skill_materializer=SkillMaterializer(
+            tmp_path / "cache",
+            {SkillSourceKind.LOCAL: LocalSkillFetcher(source_root)},
+        ),
+    )
+
+    assert await runtime.run_once() is True
+
+    assert execution.nodes["work"].status is NodeExecutionStatus.READY
+    assert not executor.claims
+    assert store.events[-1].event_type == "task.failed"
 
 
 async def test_competing_workers_cannot_claim_running_node() -> None:

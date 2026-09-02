@@ -1,6 +1,7 @@
 """Application configuration."""
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field
@@ -24,6 +25,9 @@ class Settings(BaseSettings):
     database_url: str = (
         "postgresql+asyncpg://jb_orchestrator:jb_orchestrator@localhost:5432/jb_orchestrator"
     )
+    skill_cache_dir: Path = Path(".jb-orchestrator/cache/skills")
+    skill_local_root: Path = Path("skills")
+    skill_allowed_remote_hosts: frozenset[str] = frozenset()
 
 
 @lru_cache

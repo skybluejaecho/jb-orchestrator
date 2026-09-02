@@ -7,7 +7,15 @@ import socket
 import typer
 
 from jb_orchestrator.application import TaskDispatchService
+from jb_orchestrator.config import get_settings
 from jb_orchestrator.infrastructure.database import SqlAlchemyUnitOfWork, create_session_factory
+from jb_orchestrator.skills import SkillSourceKind
+from jb_orchestrator.skills.materialization import (
+    ArchiveSkillFetcher,
+    GitSkillFetcher,
+    LocalSkillFetcher,
+    SkillMaterializer,
+)
 from jb_orchestrator.worker.registry import ExecutorRegistrationError, ExecutorRegistry
 from jb_orchestrator.worker.runtime import WorkerRuntime
 
@@ -48,13 +56,25 @@ def run(
         raise typer.Exit(code=2)
 
     resolved_worker_id = worker_id or f"{socket.gethostname()}-{os.getpid()}"
-    session_factory = create_session_factory()
+    settings = get_settings()
+    session_factory = create_session_factory(settings)
     dispatch = TaskDispatchService(lambda: SqlAlchemyUnitOfWork(session_factory))
     runtime = WorkerRuntime(
         resolved_worker_id,
         dispatch,
         registry,
         poll_interval_seconds=poll_interval,
+        skill_materializer=SkillMaterializer(
+            settings.skill_cache_dir,
+            {
+                SkillSourceKind.LOCAL: LocalSkillFetcher(settings.skill_local_root),
+                SkillSourceKind.GIT: GitSkillFetcher(settings.skill_allowed_remote_hosts),
+                SkillSourceKind.ARCHIVE: ArchiveSkillFetcher(
+                    settings.skill_local_root,
+                    allowed_remote_hosts=settings.skill_allowed_remote_hosts,
+                ),
+            },
+        ),
     )
     if once:
         worked = asyncio.run(runtime.run_once())

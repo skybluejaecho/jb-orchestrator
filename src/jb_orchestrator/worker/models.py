@@ -27,6 +27,7 @@ class TaskClaim:
     instructions: str | None
     configuration: dict[str, Any]
     skills: tuple[SkillDefinition, ...]
+    skill_paths: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
