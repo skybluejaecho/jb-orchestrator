@@ -6,7 +6,7 @@ import socket
 
 import typer
 
-from jb_orchestrator.application import TaskDispatchService
+from jb_orchestrator.application import BudgetService, TaskDispatchService
 from jb_orchestrator.config import get_settings
 from jb_orchestrator.infrastructure.database import SqlAlchemyUnitOfWork, create_session_factory
 from jb_orchestrator.skills import SkillSourceKind
@@ -75,6 +75,7 @@ def run(
                 ),
             },
         ),
+        budget_service=BudgetService(lambda: SqlAlchemyUnitOfWork(session_factory)),
     )
     if once:
         worked = asyncio.run(runtime.run_once())

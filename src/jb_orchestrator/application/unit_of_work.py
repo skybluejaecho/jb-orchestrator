@@ -3,6 +3,11 @@
 from types import TracebackType
 from typing import Protocol, Self
 
+from jb_orchestrator.budgets.repositories import (
+    BudgetAccountRepository,
+    BudgetReservationRepository,
+    UsageRecordRepository,
+)
 from jb_orchestrator.domain.repositories import (
     EventRepository,
     ProjectRepository,
@@ -37,6 +42,15 @@ class UnitOfWork(Protocol):
 
     @property
     def model_profiles(self) -> ModelProfileRepository: ...
+
+    @property
+    def budget_accounts(self) -> BudgetAccountRepository: ...
+
+    @property
+    def budget_reservations(self) -> BudgetReservationRepository: ...
+
+    @property
+    def usage_records(self) -> UsageRecordRepository: ...
 
     @property
     def workflow_definitions(self) -> WorkflowDefinitionRepository: ...

@@ -1,16 +1,24 @@
 """SQLAlchemy persistence adapters."""
 
 from jb_orchestrator.infrastructure.database.base import Base
+from jb_orchestrator.infrastructure.database.budget_repositories import (
+    SqlAlchemyBudgetAccountRepository,
+    SqlAlchemyBudgetReservationRepository,
+    SqlAlchemyUsageRecordRepository,
+)
 from jb_orchestrator.infrastructure.database.model_repositories import (
     SqlAlchemyModelProfileRepository,
 )
 from jb_orchestrator.infrastructure.database.models import (
+    BudgetAccountRecord,
+    BudgetReservationRecord,
     EventRecord,
     ModelProfileRecord,
     NodeExecutionRecord,
     ProjectRecord,
     RunRecord,
     SkillDefinitionRecord,
+    UsageRecordRecord,
     UserRequestRecord,
     WorkflowDefinitionRecord,
     WorkflowExecutionRecord,
@@ -31,21 +39,27 @@ from jb_orchestrator.infrastructure.database.workflow_repositories import (
 
 __all__ = [
     "Base",
+    "BudgetAccountRecord",
+    "BudgetReservationRecord",
     "EventRecord",
     "ModelProfileRecord",
     "NodeExecutionRecord",
     "ProjectRecord",
     "RunRecord",
     "SkillDefinitionRecord",
+    "SqlAlchemyBudgetAccountRepository",
+    "SqlAlchemyBudgetReservationRepository",
     "SqlAlchemyEventRepository",
     "SqlAlchemyModelProfileRepository",
     "SqlAlchemyProjectRepository",
     "SqlAlchemyRunRepository",
     "SqlAlchemySkillRepository",
     "SqlAlchemyUnitOfWork",
+    "SqlAlchemyUsageRecordRepository",
     "SqlAlchemyUserRequestRepository",
     "SqlAlchemyWorkflowDefinitionRepository",
     "SqlAlchemyWorkflowExecutionRepository",
+    "UsageRecordRecord",
     "UserRequestRecord",
     "WorkflowDefinitionRecord",
     "WorkflowExecutionRecord",

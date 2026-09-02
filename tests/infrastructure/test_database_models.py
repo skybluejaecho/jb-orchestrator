@@ -18,12 +18,15 @@ def test_metadata_creates_initial_domain_schema() -> None:
     inspector = inspect(engine)
     assert set(inspector.get_table_names()) == {
         "events",
+        "budget_accounts",
+        "budget_reservations",
         "model_profiles",
         "node_executions",
         "projects",
         "runs",
         "skill_definitions",
         "user_requests",
+        "usage_records",
         "workflow_definitions",
         "workflow_executions",
     }

@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import (
     JSON,
+    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
@@ -22,6 +23,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
+from jb_orchestrator.budgets import BudgetReservationStatus, UsageKind
 from jb_orchestrator.domain.projects import ProjectStatus
 from jb_orchestrator.domain.requests import RequestStatus
 from jb_orchestrator.domain.runs import RunStatus
@@ -183,6 +185,102 @@ class ModelProfileRecord(Base):
     executor_keys: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     profile_metadata: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class BudgetAccountRecord(Base):
+    """Mutable project-level USD budget balance."""
+
+    __tablename__ = "budget_accounts"
+    __table_args__ = (
+        CheckConstraint("limit_usd >= 0", name="budget_limit_nonnegative"),
+        CheckConstraint("reserved_usd >= 0", name="budget_reserved_nonnegative"),
+        CheckConstraint("spent_usd >= 0", name="budget_spent_nonnegative"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    limit_usd: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    reserved_usd: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    spent_usd: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __mapper_args__ = {"version_id_col": version}  # noqa: RUF012
+
+
+class BudgetReservationRecord(Base):
+    """Idempotent maximum-cost reservation for one logical task visit."""
+
+    __tablename__ = "budget_reservations"
+    __table_args__ = (
+        CheckConstraint("reserved_usd >= 0", name="reservation_amount_nonnegative"),
+        CheckConstraint(
+            "actual_usd IS NULL OR actual_usd >= 0",
+            name="reservation_actual_nonnegative",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    account_id: Mapped[UUID] = mapped_column(
+        ForeignKey("budget_accounts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    run_id: Mapped[UUID] = mapped_column(
+        ForeignKey("runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    execution_id: Mapped[UUID] = mapped_column(
+        ForeignKey("workflow_executions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    node_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    reserved_usd: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    status: Mapped[BudgetReservationStatus] = mapped_column(
+        string_enum(BudgetReservationStatus, "budget_reservation_status"), nullable=False
+    )
+    actual_usd: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class UsageRecordRecord(Base):
+    """Append-only actual or conservative model usage charge."""
+
+    __tablename__ = "usage_records"
+    __table_args__ = (
+        CheckConstraint("input_tokens >= 0", name="usage_input_tokens_nonnegative"),
+        CheckConstraint("output_tokens >= 0", name="usage_output_tokens_nonnegative"),
+        CheckConstraint("cost_usd >= 0", name="usage_cost_nonnegative"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    reservation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("budget_reservations.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    account_id: Mapped[UUID] = mapped_column(
+        ForeignKey("budget_accounts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    run_id: Mapped[UUID] = mapped_column(
+        ForeignKey("runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    execution_id: Mapped[UUID] = mapped_column(
+        ForeignKey("workflow_executions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    node_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    kind: Mapped[UsageKind] = mapped_column(string_enum(UsageKind, "usage_kind"), nullable=False)
+    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
+    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
+    cost_usd: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    model_profile_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    model_profile_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class WorkflowDefinitionRecord(Base):

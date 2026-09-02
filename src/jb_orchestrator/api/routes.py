@@ -6,11 +6,14 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 
 from jb_orchestrator.api.dependencies import (
+    get_budget_service,
     get_model_catalog_service,
     get_orchestration_service,
     get_skill_catalog_service,
 )
 from jb_orchestrator.api.schemas import (
+    BudgetConfigure,
+    BudgetResponse,
     CreatedRequestResponse,
     ModelProfileCreate,
     ModelProfileResponse,
@@ -19,10 +22,12 @@ from jb_orchestrator.api.schemas import (
     RunResponse,
     SkillCreate,
     SkillResponse,
+    UsageRecordResponse,
     UserRequestCreate,
     UserRequestResponse,
 )
 from jb_orchestrator.application import (
+    BudgetService,
     CreateUserRequest,
     ModelCatalogService,
     OrchestrationService,
@@ -36,6 +41,7 @@ router = APIRouter(prefix="/v1")
 Service = Annotated[OrchestrationService, Depends(get_orchestration_service)]
 SkillService = Annotated[SkillCatalogService, Depends(get_skill_catalog_service)]
 ModelService = Annotated[ModelCatalogService, Depends(get_model_catalog_service)]
+BudgetServiceDependency = Annotated[BudgetService, Depends(get_budget_service)]
 
 
 @router.post("/projects", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
@@ -127,3 +133,27 @@ async def get_model(
     key: str, service: ModelService, version: int | None = None
 ) -> ModelProfileResponse:
     return ModelProfileResponse.model_validate(await service.get(key, version))
+
+
+@router.put("/projects/{project_id}/budget", response_model=BudgetResponse)
+async def configure_budget(
+    project_id: UUID,
+    payload: BudgetConfigure,
+    service: BudgetServiceDependency,
+) -> BudgetResponse:
+    return BudgetResponse.model_validate(await service.configure(project_id, payload.limit_usd))
+
+
+@router.get("/projects/{project_id}/budget", response_model=BudgetResponse)
+async def get_budget(project_id: UUID, service: BudgetServiceDependency) -> BudgetResponse:
+    return BudgetResponse.model_validate(await service.get(project_id))
+
+
+@router.get("/projects/{project_id}/usage", response_model=list[UsageRecordResponse])
+async def list_usage(
+    project_id: UUID, service: BudgetServiceDependency
+) -> list[UsageRecordResponse]:
+    return [
+        UsageRecordResponse.model_validate(record)
+        for record in await service.list_usage(project_id)
+    ]

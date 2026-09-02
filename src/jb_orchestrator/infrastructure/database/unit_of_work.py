@@ -5,6 +5,11 @@ from typing import Self
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from jb_orchestrator.infrastructure.database.budget_repositories import (
+    SqlAlchemyBudgetAccountRepository,
+    SqlAlchemyBudgetReservationRepository,
+    SqlAlchemyUsageRecordRepository,
+)
 from jb_orchestrator.infrastructure.database.model_repositories import (
     SqlAlchemyModelProfileRepository,
 )
@@ -30,6 +35,9 @@ class SqlAlchemyUnitOfWork:
     events: SqlAlchemyEventRepository
     skills: SqlAlchemySkillRepository
     model_profiles: SqlAlchemyModelProfileRepository
+    budget_accounts: SqlAlchemyBudgetAccountRepository
+    budget_reservations: SqlAlchemyBudgetReservationRepository
+    usage_records: SqlAlchemyUsageRecordRepository
     workflow_definitions: SqlAlchemyWorkflowDefinitionRepository
     workflow_executions: SqlAlchemyWorkflowExecutionRepository
 
@@ -45,6 +53,9 @@ class SqlAlchemyUnitOfWork:
         self.events = SqlAlchemyEventRepository(self._session)
         self.skills = SqlAlchemySkillRepository(self._session)
         self.model_profiles = SqlAlchemyModelProfileRepository(self._session)
+        self.budget_accounts = SqlAlchemyBudgetAccountRepository(self._session)
+        self.budget_reservations = SqlAlchemyBudgetReservationRepository(self._session)
+        self.usage_records = SqlAlchemyUsageRecordRepository(self._session)
         self.workflow_definitions = SqlAlchemyWorkflowDefinitionRepository(self._session)
         self.workflow_executions = SqlAlchemyWorkflowExecutionRepository(self._session)
         return self
