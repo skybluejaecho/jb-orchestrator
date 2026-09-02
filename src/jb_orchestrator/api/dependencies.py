@@ -5,6 +5,7 @@ from typing import cast
 from fastapi import Request
 
 from jb_orchestrator.application.budget_services import BudgetService
+from jb_orchestrator.application.external_execution_services import ExternalExecutionService
 from jb_orchestrator.application.model_services import ModelCatalogService
 from jb_orchestrator.application.services import OrchestrationService
 from jb_orchestrator.application.skill_services import SkillCatalogService
@@ -39,3 +40,9 @@ def get_workflow_service(request: Request) -> WorkflowService:
     """Return the workflow control service owned by this app instance."""
 
     return cast(WorkflowService, request.app.state.workflow_service)
+
+
+def get_external_execution_service(request: Request) -> ExternalExecutionService:
+    """Return the external execution query service owned by this app instance."""
+
+    return cast(ExternalExecutionService, request.app.state.external_execution_service)
