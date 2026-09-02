@@ -1,4 +1,6 @@
+from datetime import UTC, datetime
 from decimal import Decimal
+from uuid import UUID, uuid4
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -13,7 +15,7 @@ from jb_orchestrator.application import (
     TaskDispatchService,
     WorkflowService,
 )
-from jb_orchestrator.domain import RequestStatus, RunStatus
+from jb_orchestrator.domain import DomainEvent, RequestStatus, RunStatus
 from jb_orchestrator.infrastructure.database import Base, EventRecord, SqlAlchemyUnitOfWork
 from jb_orchestrator.model_routing import (
     ModelProfile,
@@ -161,4 +163,52 @@ async def test_application_service_round_trip_with_sqlalchemy() -> None:
         ]
     )
 
+    await engine.dispose()
+
+
+async def test_event_repository_reads_a_stable_cursor_order() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    occurred_at = datetime(2026, 1, 1, tzinfo=UTC)
+    first = DomainEvent(
+        id=UUID(int=1),
+        aggregate_type="external_execution",
+        aggregate_id=uuid4(),
+        event_type="external_execution.prepared",
+        occurred_at=occurred_at,
+    )
+    second = DomainEvent(
+        id=UUID(int=2),
+        aggregate_type="external_execution",
+        aggregate_id=first.aggregate_id,
+        event_type="external_execution.accepted",
+        occurred_at=occurred_at,
+    )
+    unrelated = DomainEvent(
+        id=UUID(int=3),
+        aggregate_type="run",
+        aggregate_id=uuid4(),
+        event_type="run.started",
+        occurred_at=occurred_at,
+    )
+
+    async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+        await unit_of_work.events.append(first)
+        await unit_of_work.events.append(unrelated)
+        await unit_of_work.events.append(second)
+        await unit_of_work.commit()
+
+    async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+        cursor = await unit_of_work.events.get(first.id)
+        events = await unit_of_work.events.list_after(
+            aggregate_type="external_execution", after=cursor
+        )
+
+    assert cursor is not None
+    assert cursor.id == first.id
+    assert cursor.sequence == 1
+    assert [event.id for event in events] == [second.id]
+    assert events[0].sequence == 3
     await engine.dispose()

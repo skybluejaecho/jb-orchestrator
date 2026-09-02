@@ -54,6 +54,18 @@ def run_from_record(record: RunRecord) -> Run:
     )
 
 
+def event_from_record(record: EventRecord) -> DomainEvent:
+    return DomainEvent(
+        id=record.id,
+        aggregate_type=record.aggregate_type,
+        aggregate_id=record.aggregate_id,
+        event_type=record.event_type,
+        payload=record.payload,
+        sequence=record.sequence,
+        occurred_at=record.occurred_at,
+    )
+
+
 class SqlAlchemyProjectRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -163,3 +175,22 @@ class SqlAlchemyEventRepository:
                 occurred_at=event.occurred_at,
             )
         )
+
+    async def get(self, event_id: UUID) -> DomainEvent | None:
+        record = await self._session.scalar(select(EventRecord).where(EventRecord.id == event_id))
+        return event_from_record(record) if record is not None else None
+
+    async def list_after(
+        self,
+        *,
+        aggregate_type: str,
+        after: DomainEvent | None = None,
+        limit: int = 100,
+    ) -> list[DomainEvent]:
+        statement = select(EventRecord).where(EventRecord.aggregate_type == aggregate_type)
+        if after is not None:
+            if after.sequence is None:
+                raise ValueError("persisted event cursor requires a sequence")
+            statement = statement.where(EventRecord.sequence > after.sequence)
+        records = await self._session.scalars(statement.order_by(EventRecord.sequence).limit(limit))
+        return [event_from_record(record) for record in records]
