@@ -7,6 +7,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
+from jb_orchestrator.budgets import UsageKind
 from jb_orchestrator.domain import ProjectStatus, RequestStatus, RunStatus
 from jb_orchestrator.model_routing import ModelTier
 from jb_orchestrator.skills import SkillSourceKind
@@ -133,6 +134,42 @@ class ModelProfileResponse(BaseModel):
     executor_keys: tuple[str, ...]
     metadata: dict[str, Any]
     created_at: datetime
+
+
+class BudgetConfigure(BaseModel):
+    limit_usd: Decimal = Field(ge=0)
+
+
+class BudgetResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    project_id: UUID
+    limit_usd: Decimal
+    reserved_usd: Decimal
+    spent_usd: Decimal
+    available_usd: Decimal
+    version: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class UsageRecordResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    reservation_id: UUID
+    project_id: UUID
+    run_id: UUID
+    execution_id: UUID
+    node_key: str
+    kind: UsageKind
+    input_tokens: int
+    output_tokens: int
+    cost_usd: Decimal
+    model_profile_key: str
+    model_profile_version: int
+    recorded_at: datetime
 
 
 class ProblemDetail(BaseModel):

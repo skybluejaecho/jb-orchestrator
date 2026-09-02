@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 from jb_orchestrator import __version__
 from jb_orchestrator.api.routes import router
+from jb_orchestrator.application.budget_services import BudgetService
 from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNotFound
 from jb_orchestrator.application.model_services import ModelCatalogService
 from jb_orchestrator.application.services import OrchestrationService
@@ -23,11 +24,12 @@ def create_app(
     service: OrchestrationService | None = None,
     skill_service: SkillCatalogService | None = None,
     model_service: ModelCatalogService | None = None,
+    budget_service: BudgetService | None = None,
 ) -> FastAPI:
     """Build the API application."""
 
     app = FastAPI(title=SERVICE_NAME, version=__version__)
-    if service is None or skill_service is None or model_service is None:
+    if service is None or skill_service is None or model_service is None or budget_service is None:
         session_factory = create_session_factory()
     if service is None:
         service = OrchestrationService(lambda: SqlAlchemyUnitOfWork(session_factory))
@@ -35,9 +37,12 @@ def create_app(
         skill_service = SkillCatalogService(lambda: SqlAlchemyUnitOfWork(session_factory))
     if model_service is None:
         model_service = ModelCatalogService(lambda: SqlAlchemyUnitOfWork(session_factory))
+    if budget_service is None:
+        budget_service = BudgetService(lambda: SqlAlchemyUnitOfWork(session_factory))
     app.state.orchestration_service = service
     app.state.skill_catalog_service = skill_service
     app.state.model_catalog_service = model_service
+    app.state.budget_service = budget_service
 
     @app.get("/health/live", tags=["health"])
     async def live() -> dict[str, str]:
