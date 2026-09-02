@@ -131,6 +131,19 @@ ORCH-015 hardens OpenClaw Gateway authentication:
 - atomic private state writes outside PostgreSQL and process arguments
 - optional TLS certificate fingerprint pinning for remote `wss://` Gateways
 
+ORCH-016 exposes durable external execution observation:
+
+- PostgreSQL-backed external execution detail and filtered list APIs
+- idempotent prepared, accepted, and terminal external execution events
+- polling-friendly status projections for Jarvis and other clients
+
+ORCH-017 adds a resumable external execution event stream:
+
+- database-issued monotonic event sequences for deterministic replay order
+- SSE delivery with durable event IDs, idle heartbeats, and proxy buffering disabled
+- reconnection through the standard `Last-Event-ID` header or an initial `after` cursor
+- ledger replay before live polling so temporary client disconnects do not lose events
+
 ## Prerequisites
 
 - Python 3.12
@@ -203,12 +216,14 @@ The API exposes:
 - `POST /v1/workflow-executions/{execution_id}/approvals/{node_key}`
 - `POST /v1/workflow-executions/{execution_id}/cancel`
 - `GET /v1/external-executions`
+- `GET /v1/external-executions/events/stream`
 - `GET /v1/external-executions/{execution_id}`
 
 외부 런타임 실행은 PostgreSQL 원장을 기준으로 조회합니다. 목록 API는
 `workflow_execution_id`, `run_id`, `status`, `limit` 필터를 지원하므로 Jarvis 같은
 클라이언트가 폴링으로 현재 상태를 표시할 수 있습니다. 각 상태 전이는 동일 트랜잭션에서
-작은 도메인 이벤트도 기록하며, 이 이벤트는 이후 SSE 알림을 추가할 때 사용합니다.
+작은 도메인 이벤트도 기록합니다. SSE 엔드포인트는 저장된 이벤트를 먼저 재생한 뒤 새
+이벤트를 전달하며, 재연결 시 `Last-Event-ID` 이후부터 이어서 받을 수 있습니다.
 
 ## Quality checks
 
