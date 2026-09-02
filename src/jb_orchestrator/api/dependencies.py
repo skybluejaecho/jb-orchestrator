@@ -8,6 +8,7 @@ from jb_orchestrator.application.budget_services import BudgetService
 from jb_orchestrator.application.model_services import ModelCatalogService
 from jb_orchestrator.application.services import OrchestrationService
 from jb_orchestrator.application.skill_services import SkillCatalogService
+from jb_orchestrator.application.workflow_services import WorkflowService
 
 
 def get_orchestration_service(request: Request) -> OrchestrationService:
@@ -32,3 +33,9 @@ def get_budget_service(request: Request) -> BudgetService:
     """Return the project budget service owned by this app instance."""
 
     return cast(BudgetService, request.app.state.budget_service)
+
+
+def get_workflow_service(request: Request) -> WorkflowService:
+    """Return the workflow control service owned by this app instance."""
+
+    return cast(WorkflowService, request.app.state.workflow_service)
