@@ -27,6 +27,7 @@ from jb_orchestrator.budgets import BudgetReservationStatus, UsageKind
 from jb_orchestrator.domain.projects import ProjectStatus
 from jb_orchestrator.domain.requests import RequestStatus
 from jb_orchestrator.domain.runs import RunStatus
+from jb_orchestrator.external_executions import ExternalExecutionStatus
 from jb_orchestrator.infrastructure.database.base import Base
 from jb_orchestrator.model_routing import ModelTier
 from jb_orchestrator.skills import SkillSourceKind
@@ -281,6 +282,42 @@ class UsageRecordRecord(Base):
     model_profile_key: Mapped[str] = mapped_column(String(128), nullable=False)
     model_profile_version: Mapped[int] = mapped_column(Integer, nullable=False)
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ExternalExecutionRecord(Base):
+    """Retry-safe mapping to one external runtime execution."""
+
+    __tablename__ = "external_executions"
+    __table_args__ = (
+        UniqueConstraint(
+            "executor_key",
+            "external_run_id",
+            name="uq_external_executions_executor_run",
+        ),
+        Index("ix_external_executions_status_updated", "status", "updated_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    execution_id: Mapped[UUID] = mapped_column(
+        ForeignKey("workflow_executions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    run_id: Mapped[UUID] = mapped_column(
+        ForeignKey("runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    node_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    executor_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    external_session_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    external_agent_id: Mapped[str | None] = mapped_column(String(255))
+    external_run_id: Mapped[str | None] = mapped_column(String(255))
+    status: Mapped[ExternalExecutionStatus] = mapped_column(
+        string_enum(ExternalExecutionStatus, "external_execution_status"), nullable=False
+    )
+    terminal_result: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    failure_reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class WorkflowDefinitionRecord(Base):

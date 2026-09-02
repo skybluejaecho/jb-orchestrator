@@ -7,6 +7,7 @@
     "node": ">=22.19.0"
   },
   "scripts": {
+    "bridge": "node src/bridge.mjs",
     "inspect": "node src/cli.mjs inspect",
     "run": "node src/cli.mjs run",
     "test": "node --test"

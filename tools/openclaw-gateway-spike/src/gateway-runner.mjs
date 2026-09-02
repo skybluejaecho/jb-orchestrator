@@ -43,7 +43,17 @@ export class GatewayRunCoordinator {
     return { health, agents, sessions };
   }
 
-  async start({ message, sessionKey, idempotencyKey, agentId, cwd, timeoutSeconds }) {
+  async start({
+    message,
+    sessionKey,
+    idempotencyKey,
+    agentId,
+    cwd,
+    timeoutSeconds,
+    provider,
+    model,
+    thinking,
+  }) {
     const params = {
       message,
       sessionKey,
@@ -51,6 +61,9 @@ export class GatewayRunCoordinator {
       deliver: false,
       ...(agentId ? { agentId } : {}),
       ...(cwd ? { cwd } : {}),
+      ...(provider ? { provider } : {}),
+      ...(model ? { model } : {}),
+      ...(thinking ? { thinking } : {}),
       ...(timeoutSeconds === undefined ? {} : { timeout: timeoutSeconds }),
     };
     assertValid(validateAgentParams, params, "agent request");

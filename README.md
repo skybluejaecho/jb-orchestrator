@@ -113,6 +113,16 @@ See `tools/openclaw-gateway-spike/README.md` for the executable contract test an
 instructions. Live validation requires an independently configured OpenClaw Gateway and is not a
 prerequisite for the Python application runtime.
 
+ORCH-014 adds the first installable OpenClaw executor adapter:
+
+- PostgreSQL ledger mapping stable JB task keys to OpenClaw sessions and runs
+- crash-safe resume without duplicate `agent` calls and persisted terminal projections
+- bounded JSON subprocess bridge that keeps credentials and prompts out of process arguments
+- exact-run provider cancellation integrated with the ORCH-012 worker lifecycle
+- separately installed `openclaw` executor entry point, leaving the core runtime optional
+
+See `adapters/openclaw/README.md` for installation and current production-hardening requirements.
+
 ## Prerequisites
 
 - Python 3.12

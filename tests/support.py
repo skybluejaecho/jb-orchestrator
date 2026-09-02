@@ -14,6 +14,7 @@ from jb_orchestrator.budgets import (
     UsageRecord,
 )
 from jb_orchestrator.domain import DomainEvent, Project, Run, UserRequest
+from jb_orchestrator.external_executions import ExternalExecution
 from jb_orchestrator.model_routing import ModelProfile
 from jb_orchestrator.skills import SkillDefinition
 from jb_orchestrator.workflows import (
@@ -38,6 +39,7 @@ class MemoryStore:
     budget_accounts: dict[UUID, BudgetAccount] = field(default_factory=dict)
     budget_reservations: dict[str, BudgetReservation] = field(default_factory=dict)
     usage_records: list[UsageRecord] = field(default_factory=list)
+    external_executions: dict[str, ExternalExecution] = field(default_factory=dict)
 
 
 class MemoryProjectRepository:
@@ -82,6 +84,22 @@ class MemoryRunRepository:
 
     async def save(self, run: Run) -> None:
         self._store.runs[run.id] = run
+
+
+class MemoryExternalExecutionRepository:
+    def __init__(self, store: MemoryStore) -> None:
+        self._store = store
+
+    async def add(self, execution: ExternalExecution) -> None:
+        self._store.external_executions[execution.idempotency_key] = execution
+
+    async def get_by_idempotency_key(
+        self, idempotency_key: str, *, for_update: bool = False
+    ) -> ExternalExecution | None:
+        return self._store.external_executions.get(idempotency_key)
+
+    async def save(self, execution: ExternalExecution) -> None:
+        self._store.external_executions[execution.idempotency_key] = execution
 
 
 class MemoryEventRepository:
@@ -318,6 +336,7 @@ class MemoryUnitOfWork:
         self.budget_accounts = MemoryBudgetAccountRepository(store)
         self.budget_reservations = MemoryBudgetReservationRepository(store)
         self.usage_records = MemoryUsageRecordRepository(store)
+        self.external_executions = MemoryExternalExecutionRepository(store)
         self.workflow_definitions = MemoryWorkflowDefinitionRepository(store)
         self.workflow_executions = MemoryWorkflowExecutionRepository(store)
         self.committed = False

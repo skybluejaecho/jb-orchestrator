@@ -6,6 +6,9 @@ from jb_orchestrator.infrastructure.database.budget_repositories import (
     SqlAlchemyBudgetReservationRepository,
     SqlAlchemyUsageRecordRepository,
 )
+from jb_orchestrator.infrastructure.database.external_execution_repositories import (
+    SqlAlchemyExternalExecutionRepository,
+)
 from jb_orchestrator.infrastructure.database.model_repositories import (
     SqlAlchemyModelProfileRepository,
 )
@@ -13,6 +16,7 @@ from jb_orchestrator.infrastructure.database.models import (
     BudgetAccountRecord,
     BudgetReservationRecord,
     EventRecord,
+    ExternalExecutionRecord,
     ModelProfileRecord,
     NodeExecutionRecord,
     ProjectRecord,
@@ -42,6 +46,7 @@ __all__ = [
     "BudgetAccountRecord",
     "BudgetReservationRecord",
     "EventRecord",
+    "ExternalExecutionRecord",
     "ModelProfileRecord",
     "NodeExecutionRecord",
     "ProjectRecord",
@@ -50,6 +55,7 @@ __all__ = [
     "SqlAlchemyBudgetAccountRepository",
     "SqlAlchemyBudgetReservationRepository",
     "SqlAlchemyEventRepository",
+    "SqlAlchemyExternalExecutionRepository",
     "SqlAlchemyModelProfileRepository",
     "SqlAlchemyProjectRepository",
     "SqlAlchemyRunRepository",

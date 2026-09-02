@@ -1,0 +1,16 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "jb-openclaw-executor"
+version = "0.1.0.dev0"
+description = "OpenClaw Gateway executor adapter for jb-orchestrator."
+requires-python = ">=3.12"
+dependencies = ["jb-orchestrator>=0.1.0.dev0"]
+
+[project.entry-points."jb_orchestrator.executors"]
+openclaw = "jb_openclaw_executor:create_executor"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/jb_openclaw_executor"]
