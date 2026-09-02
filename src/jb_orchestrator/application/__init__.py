@@ -2,6 +2,7 @@
 
 from jb_orchestrator.application.budget_services import BudgetService, BudgetUsageRequired
 from jb_orchestrator.application.commands import CreateUserRequest, RegisterProject
+from jb_orchestrator.application.external_execution_services import ExternalExecutionService
 from jb_orchestrator.application.model_services import ModelCatalogService
 from jb_orchestrator.application.services import CreatedRequest, OrchestrationService
 from jb_orchestrator.application.skill_services import SkillCatalogService
@@ -13,6 +14,7 @@ __all__ = [
     "BudgetUsageRequired",
     "CreateUserRequest",
     "CreatedRequest",
+    "ExternalExecutionService",
     "ModelCatalogService",
     "OrchestrationService",
     "RegisterProject",

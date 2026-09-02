@@ -10,6 +10,9 @@ from jb_orchestrator.infrastructure.database.budget_repositories import (
     SqlAlchemyBudgetReservationRepository,
     SqlAlchemyUsageRecordRepository,
 )
+from jb_orchestrator.infrastructure.database.external_execution_repositories import (
+    SqlAlchemyExternalExecutionRepository,
+)
 from jb_orchestrator.infrastructure.database.model_repositories import (
     SqlAlchemyModelProfileRepository,
 )
@@ -38,6 +41,7 @@ class SqlAlchemyUnitOfWork:
     budget_accounts: SqlAlchemyBudgetAccountRepository
     budget_reservations: SqlAlchemyBudgetReservationRepository
     usage_records: SqlAlchemyUsageRecordRepository
+    external_executions: SqlAlchemyExternalExecutionRepository
     workflow_definitions: SqlAlchemyWorkflowDefinitionRepository
     workflow_executions: SqlAlchemyWorkflowExecutionRepository
 
@@ -56,6 +60,7 @@ class SqlAlchemyUnitOfWork:
         self.budget_accounts = SqlAlchemyBudgetAccountRepository(self._session)
         self.budget_reservations = SqlAlchemyBudgetReservationRepository(self._session)
         self.usage_records = SqlAlchemyUsageRecordRepository(self._session)
+        self.external_executions = SqlAlchemyExternalExecutionRepository(self._session)
         self.workflow_definitions = SqlAlchemyWorkflowDefinitionRepository(self._session)
         self.workflow_executions = SqlAlchemyWorkflowExecutionRepository(self._session)
         return self

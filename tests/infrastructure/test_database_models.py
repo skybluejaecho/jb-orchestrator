@@ -18,6 +18,7 @@ def test_metadata_creates_initial_domain_schema() -> None:
     inspector = inspect(engine)
     assert set(inspector.get_table_names()) == {
         "events",
+        "external_executions",
         "budget_accounts",
         "budget_reservations",
         "model_profiles",
@@ -38,6 +39,11 @@ def test_metadata_creates_initial_domain_schema() -> None:
         "ix_node_executions_executor_ready",
         "ix_node_executions_lease_expiry",
         "ix_node_executions_status_updated",
+    }
+    assert {index["name"] for index in inspector.get_indexes("external_executions")} >= {
+        "ix_external_executions_execution_id",
+        "ix_external_executions_run_id",
+        "ix_external_executions_status_updated",
     }
 
 
