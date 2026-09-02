@@ -102,6 +102,17 @@ ORCH-012 hardens long-running worker execution:
 - optional idempotent provider-side cancellation hooks for remote agent runtimes
 - configurable heartbeat and cancellation timeout settings
 
+ORCH-013 validates the OpenClaw Gateway boundary before production integration:
+
+- exact-pinned official Gateway client and protocol packages in an isolated Node.js spike
+- protocol-validated `agent` and `agent.wait` execution using stable JB idempotency keys
+- exact-run cancellation through `sessions.abort` and same-session continuation semantics
+- documented PostgreSQL-to-OpenClaw ownership boundary and production adapter follow-up
+
+See `tools/openclaw-gateway-spike/README.md` for the executable contract test and live Gateway
+instructions. Live validation requires an independently configured OpenClaw Gateway and is not a
+prerequisite for the Python application runtime.
+
 ## Prerequisites
 
 - Python 3.12
