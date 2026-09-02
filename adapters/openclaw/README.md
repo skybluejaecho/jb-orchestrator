@@ -17,8 +17,14 @@ The executor key is `openclaw`. Installing this package registers its entry poin
 does not claim OpenClaw tasks by default.
 
 Set `JB_OPENCLAW_BRIDGE_PATH` if the bridge is not at the repository-relative default. Gateway
-credentials are inherited by the Node subprocess through `OPENCLAW_GATEWAY_TOKEN` or
+bootstrap credentials are inherited by the Node subprocess through `OPENCLAW_GATEWAY_TOKEN` or
 `OPENCLAW_GATEWAY_PASSWORD` and are never passed in command arguments or stored in workflow rows.
+
+The first connection creates an Ed25519 identity below `JB_OPENCLAW_DEVICE_STATE_DIR`. Approve the
+reported request with `openclaw devices approve <requestId>`, then connect once more with the
+bootstrap credential. The issued operator device token is persisted and used by later bridge
+processes without the shared credential. Protect this directory with OS-account-only permissions.
+For remote `wss://` Gateways, set `OPENCLAW_GATEWAY_TLS_FINGERPRINT`.
 
 ## Node configuration
 
@@ -40,7 +46,5 @@ versions selected by the workflow snapshot.
 - terminal records return their persisted normalized result without contacting OpenClaw.
 - worker timeout, lease loss, or shutdown calls `sessions.abort` for the recorded exact run ID.
 
-This first adapter uses shared Gateway authentication with the ORCH-013 token-only bridge. Before a
-non-loopback production deployment, add host-owned device identity/token persistence and validate
-pairing, TLS pinning, reconnect event reconciliation, and credential rotation against the deployed
-Gateway version.
+Before a non-loopback production deployment, validate pairing, TLS pinning, reconnect event
+reconciliation, filesystem ACLs, and credential rotation against the deployed Gateway version.

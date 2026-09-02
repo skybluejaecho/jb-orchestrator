@@ -7,23 +7,39 @@ import {
   MIN_CLIENT_PROTOCOL_VERSION,
   PROTOCOL_VERSION,
 } from "@openclaw/gateway-protocol/version";
+import { resolve } from "node:path";
+
+import {
+  DeviceStateStore,
+  publicKeyRawBase64UrlFromPem,
+  signDevicePayload,
+} from "./device-state.mjs";
 
 const DEFAULT_GATEWAY_URL = "ws://127.0.0.1:18789";
 const CONNECT_TIMEOUT_MS = 20_000;
 
-function requiredCredential(env) {
-  const token = env.OPENCLAW_GATEWAY_TOKEN?.trim();
+export function connectionAuth(env, storedToken) {
+  const bootstrapToken = env.OPENCLAW_GATEWAY_TOKEN?.trim();
   const password = env.OPENCLAW_GATEWAY_PASSWORD?.trim();
-  if (!token && !password) {
+  if (!storedToken && !bootstrapToken && !password) {
     throw new Error(
-      "OPENCLAW_GATEWAY_TOKEN or OPENCLAW_GATEWAY_PASSWORD is required for this spike",
+      "a stored device token, OPENCLAW_GATEWAY_TOKEN, or OPENCLAW_GATEWAY_PASSWORD is required",
     );
   }
-  return { token: token || undefined, password: password || undefined };
+  return {
+    bootstrapToken: bootstrapToken || undefined,
+    password: storedToken ? undefined : password || undefined,
+    preferBootstrapToken: Boolean(bootstrapToken && !storedToken),
+  };
 }
 
 export async function connectGateway(env = process.env) {
-  const credential = requiredCredential(env);
+  const state = new DeviceStateStore(
+    resolve(env.JB_OPENCLAW_DEVICE_STATE_DIR?.trim() || ".jb-orchestrator/openclaw-device"),
+  );
+  const identity = state.loadOrCreateIdentity();
+  const storedToken = state.loadToken({ deviceId: identity.deviceId, role: "operator" });
+  const auth = connectionAuth(env, storedToken);
   let resolveReady;
   let rejectReady;
   const ready = new Promise((resolve, reject) => {
@@ -33,7 +49,7 @@ export async function connectGateway(env = process.env) {
 
   const client = new GatewayClient({
     url: env.OPENCLAW_GATEWAY_URL?.trim() || DEFAULT_GATEWAY_URL,
-    ...credential,
+    ...auth,
     clientName: GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT,
     clientDisplayName: "jb-orchestrator gateway spike",
     clientVersion: "0.0.0",
@@ -43,9 +59,16 @@ export async function connectGateway(env = process.env) {
     scopes: ["operator.read", "operator.write"],
     minProtocol: MIN_CLIENT_PROTOCOL_VERSION,
     maxProtocol: PROTOCOL_VERSION,
-    // This spike uses shared Gateway auth without persisting a device key or token.
-    // The production adapter must provide host-owned device identity/token storage.
-    deviceIdentity: null,
+    tlsFingerprint: env.OPENCLAW_GATEWAY_TLS_FINGERPRINT?.trim() || undefined,
+    deviceIdentity: identity,
+    hostDeps: {
+      signDevicePayload,
+      publicKeyRawBase64UrlFromPem,
+      loadDeviceAuthToken: (params) => state.loadToken(params),
+      storeDeviceAuthToken: (params) => state.storeToken(params),
+      clearDeviceAuthToken: (params) => state.clearToken(params),
+      redactForLog: () => "[redacted Gateway client error]",
+    },
     onHelloOk: resolveReady,
     onConnectError: rejectReady,
   });

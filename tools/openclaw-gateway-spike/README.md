@@ -36,13 +36,29 @@ npm test
 ## Live inspection
 
 Start or provide an OpenClaw Gateway, then set its shared bootstrap credential in the current
-shell. Do not put credentials in a committed file.
+shell. Do not put credentials in a committed file. The first attempt creates a persistent Ed25519
+identity and can return `PAIRING_REQUIRED` with a request ID.
 
 ```powershell
 $env:OPENCLAW_GATEWAY_URL = "ws://127.0.0.1:18789"
 $env:OPENCLAW_GATEWAY_TOKEN = "<gateway-token>"
 npm run inspect
 ```
+
+On the Gateway host, review and approve that exact request:
+
+```powershell
+openclaw devices list
+openclaw devices approve <requestId>
+```
+
+Run `npm run inspect` again with the bootstrap credential. The Gateway-issued device token is saved
+under `JB_OPENCLAW_DEVICE_STATE_DIR` (default `.jb-orchestrator/openclaw-device`). Later processes
+reuse that scoped token, so the shared bootstrap credential can be removed from the worker
+environment after pairing.
+
+For a remote Gateway, use `wss://` and configure `OPENCLAW_GATEWAY_TLS_FINGERPRINT`. Keep the device
+state directory restricted to the worker OS account; on Windows, verify its NTFS ACL explicitly.
 
 Run one turn and wait for its terminal result:
 
@@ -57,7 +73,7 @@ or process termination sends `sessions.abort` for the exact active `runId` befor
 
 ## Spike boundary
 
-For a disposable local proof this client deliberately uses shared Gateway auth with
-`deviceIdentity: null`. The production adapter must not copy this shortcut. It must provide
-host-owned Ed25519 identity and device-token persistence, handle pairing, persist the mapping from
-JB task/run IDs to OpenClaw `sessionKey`/`runId`, and reconcile active runs after reconnect.
+The client provides host-owned Ed25519 identity and scoped device-token persistence. The production
+deployment must additionally protect the state directory, rotate credentials operationally,
+persist the mapping from JB task/run IDs to OpenClaw `sessionKey`/`runId`, and reconcile active runs
+after reconnect.
