@@ -234,6 +234,20 @@ class MemoryWorkflowDefinitionRepository:
         ]
         return max(matches, key=lambda definition: definition.version, default=None)
 
+    async def list_latest(self) -> list[WorkflowDefinition]:
+        keys = sorted({key for key, _ in self._store.workflow_definitions})
+        return [
+            max(
+                (
+                    definition
+                    for (stored_key, _), definition in self._store.workflow_definitions.items()
+                    if stored_key == key
+                ),
+                key=lambda definition: definition.version,
+            )
+            for key in keys
+        ]
+
 
 class MemoryWorkflowExecutionRepository:
     def __init__(self, store: MemoryStore) -> None:

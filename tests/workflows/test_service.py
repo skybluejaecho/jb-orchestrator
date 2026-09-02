@@ -9,7 +9,7 @@ from jb_orchestrator.application import (
     TaskDispatchService,
     WorkflowService,
 )
-from jb_orchestrator.application.exceptions import ResourceConflict
+from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNotFound
 from jb_orchestrator.domain import Run
 from jb_orchestrator.model_routing import (
     ModelProfile,
@@ -72,6 +72,38 @@ async def test_service_persists_versioned_snapshot_and_events() -> None:
         "workflow.node_started",
         "workflow.node_completed",
     ]
+
+
+async def test_service_lists_latest_definitions_and_gets_exact_version() -> None:
+    store = MemoryStore()
+    service = WorkflowService(lambda: MemoryUnitOfWork(store))
+    await service.register_definition(simple_definition(version=1))
+    latest = await service.register_definition(simple_definition(version=2))
+    other = WorkflowDefinition(
+        key="other",
+        version=1,
+        entry_node="done",
+        nodes=(
+            NodeDefinition(
+                key="done", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.SUCCEEDED
+            ),
+        ),
+        edges=(),
+    )
+    await service.register_definition(other)
+
+    definitions = await service.list_latest_definitions()
+    exact = await service.get_definition("simple", 1)
+
+    assert [(definition.key, definition.version) for definition in definitions] == [
+        ("other", 1),
+        ("simple", 2),
+    ]
+    assert exact.version == 1
+    assert (await service.get_definition("simple")).id == latest.id
+
+    with pytest.raises(ResourceNotFound, match="missing@1"):
+        await service.get_definition("missing", 1)
 
 
 async def test_service_allows_only_one_execution_per_run() -> None:

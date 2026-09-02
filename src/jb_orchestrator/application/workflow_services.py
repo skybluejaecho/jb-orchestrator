@@ -55,6 +55,18 @@ class WorkflowService:
             await unit_of_work.commit()
         return definition
 
+    async def get_definition(self, key: str, version: int | None = None) -> WorkflowDefinition:
+        async with self._unit_of_work_factory() as unit_of_work:
+            definition = await unit_of_work.workflow_definitions.get(key, version)
+        if definition is None:
+            suffix = f"@{version}" if version is not None else ""
+            raise ResourceNotFound(f"workflow definition not found: {key}{suffix}")
+        return definition
+
+    async def list_latest_definitions(self) -> list[WorkflowDefinition]:
+        async with self._unit_of_work_factory() as unit_of_work:
+            return await unit_of_work.workflow_definitions.list_latest()
+
     async def start(
         self, run_id: UUID, definition_key: str, version: int | None = None
     ) -> WorkflowExecution:
@@ -104,6 +116,13 @@ class WorkflowService:
             execution = await unit_of_work.workflow_executions.get(execution_id)
         if execution is None:
             raise ResourceNotFound(f"workflow execution not found: {execution_id}")
+        return execution
+
+    async def get_by_run(self, run_id: UUID) -> WorkflowExecution:
+        async with self._unit_of_work_factory() as unit_of_work:
+            execution = await unit_of_work.workflow_executions.get_by_run(run_id)
+        if execution is None:
+            raise ResourceNotFound(f"workflow execution not found for run: {run_id}")
         return execution
 
     async def begin_task(self, execution_id: UUID, node_key: str) -> WorkflowExecution:
