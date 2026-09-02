@@ -7,6 +7,12 @@ from types import TracebackType
 from typing import Self
 from uuid import UUID
 
+from jb_orchestrator.budgets import (
+    BudgetAccount,
+    BudgetReservation,
+    BudgetReservationStatus,
+    UsageRecord,
+)
 from jb_orchestrator.domain import DomainEvent, Project, Run, UserRequest
 from jb_orchestrator.model_routing import ModelProfile
 from jb_orchestrator.skills import SkillDefinition
@@ -29,6 +35,9 @@ class MemoryStore:
     workflow_executions: dict[UUID, WorkflowExecution] = field(default_factory=dict)
     skills: dict[tuple[str, int], SkillDefinition] = field(default_factory=dict)
     model_profiles: dict[tuple[str, int], ModelProfile] = field(default_factory=dict)
+    budget_accounts: dict[UUID, BudgetAccount] = field(default_factory=dict)
+    budget_reservations: dict[str, BudgetReservation] = field(default_factory=dict)
+    usage_records: list[UsageRecord] = field(default_factory=list)
 
 
 class MemoryProjectRepository:
@@ -145,6 +154,69 @@ class MemoryModelProfileRepository:
         ]
 
 
+class MemoryBudgetAccountRepository:
+    def __init__(self, store: MemoryStore) -> None:
+        self._store = store
+
+    async def add(self, account: BudgetAccount) -> None:
+        self._store.budget_accounts[account.project_id] = account
+
+    async def get_by_project(
+        self, project_id: UUID, *, for_update: bool = False
+    ) -> BudgetAccount | None:
+        return self._store.budget_accounts.get(project_id)
+
+    async def save(self, account: BudgetAccount) -> None:
+        self._store.budget_accounts[account.project_id] = account
+
+
+class MemoryBudgetReservationRepository:
+    def __init__(self, store: MemoryStore) -> None:
+        self._store = store
+
+    async def add(self, reservation: BudgetReservation) -> None:
+        self._store.budget_reservations[reservation.idempotency_key] = reservation
+
+    async def get_by_key(
+        self, idempotency_key: str, *, for_update: bool = False
+    ) -> BudgetReservation | None:
+        return self._store.budget_reservations.get(idempotency_key)
+
+    async def list_reserved_by_run(
+        self, run_id: UUID, *, for_update: bool = False
+    ) -> list[BudgetReservation]:
+        return [
+            reservation
+            for reservation in self._store.budget_reservations.values()
+            if reservation.run_id == run_id
+            and reservation.status is BudgetReservationStatus.RESERVED
+        ]
+
+    async def save(self, reservation: BudgetReservation) -> None:
+        self._store.budget_reservations[reservation.idempotency_key] = reservation
+
+
+class MemoryUsageRecordRepository:
+    def __init__(self, store: MemoryStore) -> None:
+        self._store = store
+
+    async def add(self, record: UsageRecord) -> None:
+        self._store.usage_records.append(record)
+
+    async def get_by_reservation(self, reservation_id: UUID) -> UsageRecord | None:
+        return next(
+            (
+                record
+                for record in self._store.usage_records
+                if record.reservation_id == reservation_id
+            ),
+            None,
+        )
+
+    async def list_by_project(self, project_id: UUID) -> list[UsageRecord]:
+        return [record for record in self._store.usage_records if record.project_id == project_id]
+
+
 class MemoryWorkflowDefinitionRepository:
     def __init__(self, store: MemoryStore) -> None:
         self._store = store
@@ -229,6 +301,9 @@ class MemoryUnitOfWork:
         self.events = MemoryEventRepository(store)
         self.skills = MemorySkillRepository(store)
         self.model_profiles = MemoryModelProfileRepository(store)
+        self.budget_accounts = MemoryBudgetAccountRepository(store)
+        self.budget_reservations = MemoryBudgetReservationRepository(store)
+        self.usage_records = MemoryUsageRecordRepository(store)
         self.workflow_definitions = MemoryWorkflowDefinitionRepository(store)
         self.workflow_executions = MemoryWorkflowExecutionRepository(store)
         self.committed = False

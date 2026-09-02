@@ -33,11 +33,24 @@ class TaskClaim:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class TokenUsage:
+    """Provider-reported billable token usage for one task result."""
+
+    input_tokens: int
+    output_tokens: int
+
+    def __post_init__(self) -> None:
+        if self.input_tokens < 0 or self.output_tokens < 0:
+            raise ValueError("token usage must not be negative")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class TaskResult:
     """Business outcome reported by an executor."""
 
     outcome: NodeOutcome
     output: dict[str, Any] = field(default_factory=dict)
+    usage: TokenUsage | None = None
 
     def __post_init__(self) -> None:
         if self.outcome not in {NodeOutcome.SUCCESS, NodeOutcome.FAILURE}:
