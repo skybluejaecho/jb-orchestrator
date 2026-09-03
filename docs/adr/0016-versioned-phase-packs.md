@@ -55,5 +55,5 @@ Phase Pack은 재사용 가능한 실행 재료이고 Workflow는 재료를 순�
 그래프로 조립한다. 따라서 기획 다음에 반드시 개발이 실행되는 구조가 아니며, 같은 Phase
 Pack을 여러 Workflow에서 선택적으로 사용할 수 있다.
 
-현재 입력 매핑은 Artifact 전체 JSON 문서를 전달한다. JSONPath 일부 선택, 여러 Artifact
-집계, 출력 JSON Schema 강제 검증은 별도 확장으로 남긴다.
+현재 입력 매핑은 Artifact 전체 JSON 문서를 전달한다. JSONPath 일부 선택과 여러 Artifact
+집계는 별도 확장으로 남긴다. 출력 JSON Schema 강제 검증은 ADR 0017에서 정의한다.
