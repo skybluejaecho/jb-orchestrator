@@ -19,6 +19,7 @@ from jb_orchestrator.external_executions import ExternalExecutionRepository
 from jb_orchestrator.model_routing.repositories import ModelProfileRepository
 from jb_orchestrator.phase_packs import PhasePackRepository
 from jb_orchestrator.skills.repositories import SkillRepository
+from jb_orchestrator.workflows.bindings import ProjectWorkflowBindingRepository
 from jb_orchestrator.workflows.repositories import (
     WorkflowDefinitionRepository,
     WorkflowExecutionRepository,
@@ -69,6 +70,9 @@ class UnitOfWork(Protocol):
 
     @property
     def workflow_executions(self) -> WorkflowExecutionRepository: ...
+
+    @property
+    def project_workflow_bindings(self) -> ProjectWorkflowBindingRepository: ...
 
     async def __aenter__(self) -> Self: ...
 

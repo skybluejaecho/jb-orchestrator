@@ -24,6 +24,7 @@ from jb_orchestrator.infrastructure.database.models import (
     NodeExecutionRecord,
     PhasePackDefinitionRecord,
     ProjectRecord,
+    ProjectWorkflowBindingRecord,
     RunRecord,
     SkillDefinitionRecord,
     TaskArtifactRecord,
@@ -44,6 +45,9 @@ from jb_orchestrator.infrastructure.database.repositories import (
 from jb_orchestrator.infrastructure.database.session import create_session_factory
 from jb_orchestrator.infrastructure.database.skill_repositories import SqlAlchemySkillRepository
 from jb_orchestrator.infrastructure.database.unit_of_work import SqlAlchemyUnitOfWork
+from jb_orchestrator.infrastructure.database.workflow_binding_repositories import (
+    SqlAlchemyProjectWorkflowBindingRepository,
+)
 from jb_orchestrator.infrastructure.database.workflow_repositories import (
     SqlAlchemyWorkflowDefinitionRepository,
     SqlAlchemyWorkflowExecutionRepository,
@@ -59,6 +63,7 @@ __all__ = [
     "NodeExecutionRecord",
     "PhasePackDefinitionRecord",
     "ProjectRecord",
+    "ProjectWorkflowBindingRecord",
     "RunRecord",
     "SkillDefinitionRecord",
     "SqlAlchemyBudgetAccountRepository",
@@ -68,6 +73,7 @@ __all__ = [
     "SqlAlchemyModelProfileRepository",
     "SqlAlchemyPhasePackRepository",
     "SqlAlchemyProjectRepository",
+    "SqlAlchemyProjectWorkflowBindingRepository",
     "SqlAlchemyRunRepository",
     "SqlAlchemySkillRepository",
     "SqlAlchemyTaskArtifactRepository",

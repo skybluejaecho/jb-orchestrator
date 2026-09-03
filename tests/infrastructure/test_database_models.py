@@ -24,6 +24,7 @@ def test_metadata_creates_initial_domain_schema() -> None:
         "model_profiles",
         "node_executions",
         "phase_pack_definitions",
+        "project_workflow_bindings",
         "projects",
         "runs",
         "skill_definitions",

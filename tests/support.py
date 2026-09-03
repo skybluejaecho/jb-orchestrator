@@ -21,6 +21,7 @@ from jb_orchestrator.phase_packs import PhasePackDefinition
 from jb_orchestrator.skills import SkillDefinition
 from jb_orchestrator.workflows import (
     NodeExecutionStatus,
+    ProjectWorkflowBinding,
     WorkflowDefinition,
     WorkflowExecution,
     WorkflowStatus,
@@ -37,6 +38,7 @@ class MemoryStore:
     artifacts: list[TaskArtifact] = field(default_factory=list)
     workflow_definitions: dict[tuple[str, int], WorkflowDefinition] = field(default_factory=dict)
     workflow_executions: dict[UUID, WorkflowExecution] = field(default_factory=dict)
+    project_workflow_bindings: dict[UUID, ProjectWorkflowBinding] = field(default_factory=dict)
     skills: dict[tuple[str, int], SkillDefinition] = field(default_factory=dict)
     phase_packs: dict[tuple[str, int], PhasePackDefinition] = field(default_factory=dict)
     model_profiles: dict[tuple[str, int], ModelProfile] = field(default_factory=dict)
@@ -374,6 +376,19 @@ class MemoryWorkflowDefinitionRepository:
         ]
 
 
+class MemoryProjectWorkflowBindingRepository:
+    def __init__(self, store: MemoryStore) -> None:
+        self._store = store
+
+    async def get_by_project(
+        self, project_id: UUID, *, for_update: bool = False
+    ) -> ProjectWorkflowBinding | None:
+        return self._store.project_workflow_bindings.get(project_id)
+
+    async def save(self, binding: ProjectWorkflowBinding) -> None:
+        self._store.project_workflow_bindings[binding.project_id] = binding
+
+
 class MemoryWorkflowExecutionRepository:
     def __init__(self, store: MemoryStore) -> None:
         self._store = store
@@ -451,6 +466,7 @@ class MemoryUnitOfWork:
         self.external_executions = MemoryExternalExecutionRepository(store)
         self.workflow_definitions = MemoryWorkflowDefinitionRepository(store)
         self.workflow_executions = MemoryWorkflowExecutionRepository(store)
+        self.project_workflow_bindings = MemoryProjectWorkflowBindingRepository(store)
         self.committed = False
         self.rolled_back = False
 

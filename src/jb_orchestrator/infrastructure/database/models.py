@@ -80,6 +80,22 @@ class ProjectRecord(TimestampMixin, Base):
     )
 
 
+class ProjectWorkflowBindingRecord(TimestampMixin, Base):
+    """Current exact workflow version selected for a project."""
+
+    __tablename__ = "project_workflow_bindings"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    definition_id: Mapped[UUID] = mapped_column(
+        ForeignKey("workflow_definitions.id", ondelete="RESTRICT"), nullable=False
+    )
+    definition_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    definition_version: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
 class UserRequestRecord(TimestampMixin, Base):
     """Stored original user intent."""
 
