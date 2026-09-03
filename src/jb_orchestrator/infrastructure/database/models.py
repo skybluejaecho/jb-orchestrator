@@ -96,6 +96,38 @@ class ProjectWorkflowBindingRecord(TimestampMixin, Base):
     definition_version: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
+class RequestDispatchReceiptRecord(Base):
+    """Project-scoped idempotency claim and completed dispatch result."""
+
+    __tablename__ = "request_dispatch_receipts"
+    __table_args__ = (
+        UniqueConstraint("project_id", "idempotency_key", name="uq_dispatch_receipts_project_key"),
+        CheckConstraint(
+            "(request_id IS NULL AND run_id IS NULL AND workflow_execution_id IS NULL "
+            "AND completed_at IS NULL) OR "
+            "(request_id IS NOT NULL AND run_id IS NOT NULL "
+            "AND workflow_execution_id IS NOT NULL AND completed_at IS NOT NULL)",
+            name="dispatch_receipt_result_all_or_none",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    payload_digest: Mapped[str] = mapped_column(String(71), nullable=False)
+    request_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("user_requests.id", ondelete="CASCADE")
+    )
+    run_id: Mapped[UUID | None] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"))
+    workflow_execution_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("workflow_executions.id", ondelete="CASCADE")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class UserRequestRecord(TimestampMixin, Base):
     """Stored original user intent."""
 

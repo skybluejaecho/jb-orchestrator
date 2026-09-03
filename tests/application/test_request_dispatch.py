@@ -48,7 +48,12 @@ async def test_binding_pins_exact_version_and_dispatches_all_state() -> None:
     await workflows.register_definition(definition(2))
 
     binding = await service.configure_binding(project.id, "delivery", 1)
-    dispatched = await service.dispatch(project.id, "Ship the requested change", "Delivery")
+    dispatched = await service.dispatch(
+        project.id,
+        "Ship the requested change",
+        "Delivery",
+        idempotency_key="delivery-1",
+    )
 
     assert binding.definition_id == first.id
     assert dispatched.request.id in store.requests
@@ -81,9 +86,9 @@ async def test_binding_update_affects_only_future_dispatches() -> None:
     await workflows.register_definition(definition(2))
 
     await service.configure_binding(project.id, "delivery", 1)
-    first = await service.dispatch(project.id, "First")
+    first = await service.dispatch(project.id, "First", idempotency_key="first")
     await service.configure_binding(project.id, "delivery", 2)
-    second = await service.dispatch(project.id, "Second")
+    second = await service.dispatch(project.id, "Second", idempotency_key="second")
 
     assert first.workflow.snapshot.definition_version == 1
     assert second.workflow.snapshot.definition_version == 2
@@ -100,6 +105,42 @@ async def test_dispatch_requires_binding_and_exact_definition() -> None:
     service = RequestDispatchService(lambda: MemoryUnitOfWork(store))
 
     with pytest.raises(ResourceConflict, match="not configured"):
-        await service.dispatch(project.id, "Cannot start")
+        await service.dispatch(project.id, "Cannot start", idempotency_key="missing-binding")
     with pytest.raises(ResourceNotFound, match="delivery@1"):
         await service.configure_binding(project.id, "delivery", 1)
+
+
+async def test_dispatch_replays_same_key_and_rejects_different_payload() -> None:
+    store = MemoryStore()
+    project = Project(
+        key="idempotent-project",
+        name="Idempotent Project",
+        repository_url="https://example.com/idempotent.git",
+    )
+    store.projects[project.id] = project
+    factory = lambda: MemoryUnitOfWork(store)  # noqa: E731
+    workflows = WorkflowService(factory)
+    service = RequestDispatchService(factory, workflows)
+    await workflows.register_definition(definition(1))
+    await service.configure_binding(project.id, "delivery", 1)
+
+    first = await service.dispatch(project.id, "Ship it", idempotency_key="client-request-1")
+    await workflows.register_definition(definition(2))
+    await service.configure_binding(project.id, "delivery", 2)
+    event_count = len(store.events)
+    replay = await service.dispatch(project.id, "  Ship it  ", idempotency_key="client-request-1")
+
+    assert replay.replayed is True
+    assert replay.request.id == first.request.id
+    assert replay.run.id == first.run.id
+    assert replay.workflow.id == first.workflow.id
+    assert replay.workflow.snapshot.definition_version == 1
+    assert len(store.requests) == 1
+    assert len(store.runs) == 1
+    assert len(store.workflow_executions) == 1
+    assert len(store.events) == event_count
+
+    with pytest.raises(ResourceConflict, match="different request payload"):
+        await service.dispatch(
+            project.id, "Ship something else", idempotency_key="client-request-1"
+        )

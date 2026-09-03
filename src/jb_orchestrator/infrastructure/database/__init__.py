@@ -9,6 +9,9 @@ from jb_orchestrator.infrastructure.database.budget_repositories import (
     SqlAlchemyBudgetReservationRepository,
     SqlAlchemyUsageRecordRepository,
 )
+from jb_orchestrator.infrastructure.database.dispatch_repositories import (
+    SqlAlchemyRequestDispatchReceiptRepository,
+)
 from jb_orchestrator.infrastructure.database.external_execution_repositories import (
     SqlAlchemyExternalExecutionRepository,
 )
@@ -25,6 +28,7 @@ from jb_orchestrator.infrastructure.database.models import (
     PhasePackDefinitionRecord,
     ProjectRecord,
     ProjectWorkflowBindingRecord,
+    RequestDispatchReceiptRecord,
     RunRecord,
     SkillDefinitionRecord,
     TaskArtifactRecord,
@@ -64,6 +68,7 @@ __all__ = [
     "PhasePackDefinitionRecord",
     "ProjectRecord",
     "ProjectWorkflowBindingRecord",
+    "RequestDispatchReceiptRecord",
     "RunRecord",
     "SkillDefinitionRecord",
     "SqlAlchemyBudgetAccountRepository",
@@ -74,6 +79,7 @@ __all__ = [
     "SqlAlchemyPhasePackRepository",
     "SqlAlchemyProjectRepository",
     "SqlAlchemyProjectWorkflowBindingRepository",
+    "SqlAlchemyRequestDispatchReceiptRepository",
     "SqlAlchemyRunRepository",
     "SqlAlchemySkillRepository",
     "SqlAlchemyTaskArtifactRepository",

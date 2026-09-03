@@ -9,6 +9,7 @@ from jb_orchestrator.budgets.repositories import (
     BudgetReservationRepository,
     UsageRecordRepository,
 )
+from jb_orchestrator.domain.dispatches import RequestDispatchReceiptRepository
 from jb_orchestrator.domain.repositories import (
     EventRepository,
     ProjectRepository,
@@ -34,6 +35,9 @@ class UnitOfWork(Protocol):
 
     @property
     def requests(self) -> UserRequestRepository: ...
+
+    @property
+    def request_dispatch_receipts(self) -> RequestDispatchReceiptRepository: ...
 
     @property
     def runs(self) -> RunRepository: ...

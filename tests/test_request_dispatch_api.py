@@ -50,6 +50,17 @@ async def test_project_binding_and_one_call_dispatch_api() -> None:
         dispatched = await client.post(
             f"/v1/projects/{project_id}/dispatches",
             json={"title": "Deliver", "prompt": "Implement this"},
+            headers={"Idempotency-Key": "api-request-1"},
+        )
+        replayed = await client.post(
+            f"/v1/projects/{project_id}/dispatches",
+            json={"title": "Deliver", "prompt": "Implement this"},
+            headers={"Idempotency-Key": "api-request-1"},
+        )
+        conflicting = await client.post(
+            f"/v1/projects/{project_id}/dispatches",
+            json={"title": "Different", "prompt": "Implement something else"},
+            headers={"Idempotency-Key": "api-request-1"},
         )
 
     assert project.status_code == 201
@@ -61,3 +72,26 @@ async def test_project_binding_and_one_call_dispatch_api() -> None:
     assert dispatched.json()["run"]["status"] == "running"
     assert dispatched.json()["workflow"]["definition_version"] == 1
     assert dispatched.json()["workflow"]["request_context"]["prompt"] == "Implement this"
+    assert dispatched.json()["replayed"] is False
+    assert replayed.status_code == 201
+    assert replayed.json()["replayed"] is True
+    assert replayed.json()["workflow"]["id"] == dispatched.json()["workflow"]["id"]
+    assert conflicting.status_code == 409
+
+
+async def test_dispatch_api_requires_idempotency_key() -> None:
+    store = MemoryStore()
+    factory = lambda: MemoryUnitOfWork(store)  # noqa: E731
+    workflow_service = WorkflowService(factory)
+    app = create_app(
+        service=OrchestrationService(factory),
+        workflow_service=workflow_service,
+        request_dispatch_service=RequestDispatchService(factory, workflow_service),
+    )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/v1/projects/00000000-0000-0000-0000-000000000000/dispatches",
+            json={"prompt": "Missing key"},
+        )
+
+    assert response.status_code == 422

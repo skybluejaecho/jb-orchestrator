@@ -1,5 +1,6 @@
 """Core domain types and rules."""
 
+from jb_orchestrator.domain.dispatches import RequestDispatchReceipt
 from jb_orchestrator.domain.events import DomainEvent
 from jb_orchestrator.domain.exceptions import DomainValidationError, InvalidStateTransition
 from jb_orchestrator.domain.projects import Project, ProjectStatus
@@ -12,6 +13,7 @@ __all__ = [
     "InvalidStateTransition",
     "Project",
     "ProjectStatus",
+    "RequestDispatchReceipt",
     "RequestStatus",
     "Run",
     "RunStatus",

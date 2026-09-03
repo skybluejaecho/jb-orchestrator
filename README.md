@@ -196,6 +196,14 @@ ORCH-023 synchronizes the complete execution lifecycle:
 - phase-neutral Run states for freely composed workflows
 - row locks and durable lifecycle events protecting concurrent state changes
 
+ORCH-024 makes one-call request dispatch retry-safe:
+
+- required project-scoped `Idempotency-Key` headers on dispatch requests
+- atomic PostgreSQL claims allowing only one creator for concurrent duplicate submissions
+- durable receipts mapping client keys to the original Request, Run, and Workflow Execution
+- normalized payload digests rejecting reuse of a key for different user intent
+- completed retries returning the original aggregates without creating execution state
+
 ## Prerequisites
 
 - Python 3.12
@@ -286,7 +294,9 @@ The API exposes:
 Workflow Execution이 하나의 트랜잭션에서 생성됩니다. 선택된 정의와 요청 문맥은 실행
 스냅샷에 고정되므로 이후 프로젝트 바인딩을 변경해도 이미 시작된 실행에는 영향을 주지
 않습니다. 기존의 요청 생성 및 수동 Workflow 시작 API도 명시적 실행이 필요한 도구를 위해
-계속 제공됩니다.
+계속 제공됩니다. Dispatch 호출에는 프로젝트 범위에서 고유한 `Idempotency-Key` 헤더가
+필수입니다. 같은 key와 payload를 재전송하면 응답의 `replayed`가 `true`이고 최초 실행을
+그대로 반환합니다. 같은 key를 다른 payload에 사용하면 `409 Conflict`가 반환됩니다.
 
 ## Quality checks
 

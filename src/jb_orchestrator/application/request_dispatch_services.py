@@ -1,14 +1,22 @@
 """Project workflow binding and one-call request dispatch use cases."""
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from hashlib import sha256
 from uuid import UUID
 
 from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNotFound
 from jb_orchestrator.application.unit_of_work import UnitOfWork
 from jb_orchestrator.application.workflow_services import WorkflowService
-from jb_orchestrator.domain import DomainEvent, ProjectStatus, Run, UserRequest
+from jb_orchestrator.domain import (
+    DomainEvent,
+    ProjectStatus,
+    RequestDispatchReceipt,
+    Run,
+    UserRequest,
+)
 from jb_orchestrator.workflows import ProjectWorkflowBinding, WorkflowExecution
 
 
@@ -19,6 +27,7 @@ class DispatchedRequest:
     request: UserRequest
     run: Run
     workflow: WorkflowExecution
+    replayed: bool = False
 
 
 class RequestDispatchService:
@@ -90,12 +99,36 @@ class RequestDispatchService:
         return binding
 
     async def dispatch(
-        self, project_id: UUID, prompt: str, title: str | None = None
+        self,
+        project_id: UUID,
+        prompt: str,
+        title: str | None = None,
+        *,
+        idempotency_key: str,
     ) -> DispatchedRequest:
+        normalized_prompt = prompt.strip()
+        normalized_title = title.strip() if title else None
+        normalized_title = normalized_title or None
         async with self._unit_of_work_factory() as unit_of_work:
             project = await unit_of_work.projects.get(project_id)
             if project is None:
                 raise ResourceNotFound(f"project not found: {project_id}")
+            receipt = RequestDispatchReceipt(
+                project_id=project_id,
+                idempotency_key=idempotency_key,
+                payload_digest=self._payload_digest(normalized_prompt, normalized_title),
+            )
+            if not await unit_of_work.request_dispatch_receipts.try_claim(receipt):
+                existing = await unit_of_work.request_dispatch_receipts.get(
+                    project_id, receipt.idempotency_key, for_update=True
+                )
+                if existing is None:
+                    raise RuntimeError("claimed dispatch receipt could not be loaded")
+                if existing.payload_digest != receipt.payload_digest:
+                    raise ResourceConflict(
+                        "idempotency key was already used with a different request payload"
+                    )
+                return await self._replay(unit_of_work, existing)
             if project.status is not ProjectStatus.ACTIVE:
                 raise ResourceConflict(f"project is not active: {project_id}")
             binding = await unit_of_work.project_workflow_bindings.get_by_project(
@@ -109,7 +142,11 @@ class RequestDispatchService:
             if definition is None or definition.id != binding.definition_id:
                 raise ResourceConflict(f"bound workflow definition is unavailable: {project_id}")
 
-            request = UserRequest(project_id=project.id, prompt=prompt, title=title)
+            request = UserRequest(
+                project_id=project.id,
+                prompt=normalized_prompt,
+                title=normalized_title,
+            )
             request.activate()
             run = Run(request_id=request.id)
             await unit_of_work.requests.add(request)
@@ -134,9 +171,45 @@ class RequestDispatchService:
             synchronized_request = await unit_of_work.requests.get(request.id)
             if synchronized_run is None or synchronized_request is None:
                 raise RuntimeError("dispatched request lifecycle state was not persisted")
+            receipt.complete(
+                request_id=synchronized_request.id,
+                run_id=synchronized_run.id,
+                workflow_execution_id=workflow.id,
+                at=workflow.updated_at,
+            )
+            await unit_of_work.request_dispatch_receipts.save(receipt)
             await unit_of_work.commit()
         return DispatchedRequest(
             request=synchronized_request,
             run=synchronized_run,
             workflow=workflow,
         )
+
+    @staticmethod
+    def _payload_digest(prompt: str, title: str | None) -> str:
+        normalized_title = title.strip() if title else None
+        payload = json.dumps(
+            {"prompt": prompt.strip(), "title": normalized_title or None},
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode()
+        return f"sha256:{sha256(payload).hexdigest()}"
+
+    @staticmethod
+    async def _replay(
+        unit_of_work: UnitOfWork, receipt: RequestDispatchReceipt
+    ) -> DispatchedRequest:
+        request_id = receipt.request_id
+        run_id = receipt.run_id
+        execution_id = receipt.workflow_execution_id
+        if request_id is None or run_id is None or execution_id is None:
+            raise ResourceConflict(
+                "request dispatch with this idempotency key is still in progress"
+            )
+        request = await unit_of_work.requests.get(request_id)
+        run = await unit_of_work.runs.get(run_id)
+        workflow = await unit_of_work.workflow_executions.get(execution_id)
+        if request is None or run is None or workflow is None:
+            raise ResourceConflict("completed request dispatch result is unavailable")
+        return DispatchedRequest(request=request, run=run, workflow=workflow, replayed=True)

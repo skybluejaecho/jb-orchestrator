@@ -229,12 +229,19 @@ async def dispatch_project_request(
     project_id: UUID,
     payload: UserRequestCreate,
     service: RequestDispatchServiceDependency,
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=128)],
 ) -> DispatchedRequestResponse:
-    dispatched = await service.dispatch(project_id, payload.prompt, payload.title)
+    dispatched = await service.dispatch(
+        project_id,
+        payload.prompt,
+        payload.title,
+        idempotency_key=idempotency_key,
+    )
     return DispatchedRequestResponse(
         request=UserRequestResponse.model_validate(dispatched.request),
         run=RunResponse.model_validate(dispatched.run),
         workflow=workflow_execution_response(dispatched.workflow),
+        replayed=dispatched.replayed,
     )
 
 
