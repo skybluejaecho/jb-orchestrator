@@ -13,6 +13,7 @@ dependencies = [
   "asyncpg>=0.30,<1",
   "fastapi>=0.115,<1",
   "jsonschema>=4.23,<5",
+  "mcp>=1.20,<2",
   "pydantic-settings>=2.7,<3",
   "sqlalchemy[asyncio]>=2.0,<3",
   "typer>=0.15,<1",
@@ -34,6 +35,7 @@ dev = [
 [project.scripts]
 jb = "jb_orchestrator.cli.main:main"
 jb-api = "jb_orchestrator.api.main:run"
+jb-mcp = "jb_orchestrator.mcp_server.main:main"
 jb-worker = "jb_orchestrator.worker.main:main"
 
 [tool.hatch.build.targets.wheel]
