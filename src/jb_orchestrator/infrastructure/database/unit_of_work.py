@@ -31,6 +31,9 @@ from jb_orchestrator.infrastructure.database.repositories import (
     SqlAlchemyRunRepository,
     SqlAlchemyUserRequestRepository,
 )
+from jb_orchestrator.infrastructure.database.security_repositories import (
+    SqlAlchemyServiceAccountRepository,
+)
 from jb_orchestrator.infrastructure.database.skill_repositories import SqlAlchemySkillRepository
 from jb_orchestrator.infrastructure.database.workflow_binding_repositories import (
     SqlAlchemyProjectWorkflowBindingRepository,
@@ -60,6 +63,7 @@ class SqlAlchemyUnitOfWork:
     workflow_definitions: SqlAlchemyWorkflowDefinitionRepository
     workflow_executions: SqlAlchemyWorkflowExecutionRepository
     project_workflow_bindings: SqlAlchemyProjectWorkflowBindingRepository
+    service_accounts: SqlAlchemyServiceAccountRepository
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
@@ -83,6 +87,7 @@ class SqlAlchemyUnitOfWork:
         self.workflow_definitions = SqlAlchemyWorkflowDefinitionRepository(self._session)
         self.workflow_executions = SqlAlchemyWorkflowExecutionRepository(self._session)
         self.project_workflow_bindings = SqlAlchemyProjectWorkflowBindingRepository(self._session)
+        self.service_accounts = SqlAlchemyServiceAccountRepository(self._session)
         return self
 
     async def __aexit__(

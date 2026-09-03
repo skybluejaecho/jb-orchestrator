@@ -14,6 +14,7 @@ from jb_orchestrator.application.request_dispatch_services import (
     DispatchedRequest,
     RequestDispatchService,
 )
+from jb_orchestrator.application.security_services import IssuedServiceAccount, SecurityService
 from jb_orchestrator.application.services import CreatedRequest, OrchestrationService
 from jb_orchestrator.application.skill_services import SkillCatalogService
 from jb_orchestrator.application.task_dispatch import TaskDispatchService
@@ -27,12 +28,14 @@ __all__ = [
     "DispatchProjectRequest",
     "DispatchedRequest",
     "ExternalExecutionService",
+    "IssuedServiceAccount",
     "ModelCatalogService",
     "OrchestrationService",
     "PhasePackCatalogService",
     "ProjectObservationService",
     "RegisterProject",
     "RequestDispatchService",
+    "SecurityService",
     "SkillCatalogService",
     "TaskDispatchService",
     "WorkflowService",
