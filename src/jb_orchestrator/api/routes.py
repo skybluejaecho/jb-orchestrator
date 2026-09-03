@@ -3,7 +3,8 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Header, Query, Request, status
+from fastapi.responses import StreamingResponse
 
 from jb_orchestrator.api.dependencies import (
     get_budget_service,
@@ -13,6 +14,7 @@ from jb_orchestrator.api.dependencies import (
     get_skill_catalog_service,
     get_workflow_service,
 )
+from jb_orchestrator.api.event_streams import external_execution_event_stream
 from jb_orchestrator.api.schemas import (
     BudgetConfigure,
     BudgetResponse,
@@ -47,6 +49,8 @@ from jb_orchestrator.application import (
     SkillCatalogService,
     WorkflowService,
 )
+from jb_orchestrator.config import get_settings
+from jb_orchestrator.domain import DomainValidationError
 from jb_orchestrator.external_executions import ExternalExecutionStatus
 from jb_orchestrator.model_routing import ModelProfile, ModelRoutingRequest
 from jb_orchestrator.skills import SkillDefinition, SkillReference
@@ -361,6 +365,36 @@ async def list_external_executions(
             limit=limit,
         )
     ]
+
+
+@router.get("/external-executions/events/stream")
+async def stream_external_execution_events(
+    request: Request,
+    service: ExternalExecutionServiceDependency,
+    after: Annotated[UUID | None, Query()] = None,
+    last_event_id: Annotated[UUID | None, Header(alias="Last-Event-ID")] = None,
+) -> StreamingResponse:
+    if after is not None and last_event_id is not None and after != last_event_id:
+        raise DomainValidationError("after and Last-Event-ID cursors must match")
+    cursor = last_event_id or after
+    initial_events = await service.list_events(after_event_id=cursor)
+    settings = get_settings()
+    return StreamingResponse(
+        external_execution_event_stream(
+            request=request,
+            service=service,
+            initial_events=initial_events,
+            cursor=cursor,
+            poll_interval_seconds=settings.sse_poll_interval_seconds,
+            heartbeat_interval_seconds=settings.sse_heartbeat_interval_seconds,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/external-executions/{execution_id}", response_model=ExternalExecutionResponse)

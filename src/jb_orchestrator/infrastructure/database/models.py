@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     CheckConstraint,
     DateTime,
     Enum,
@@ -133,9 +134,16 @@ class EventRecord(Base):
     """Append-only event emitted by a committed application use case."""
 
     __tablename__ = "events"
-    __table_args__ = (Index("ix_events_aggregate_occurred", "aggregate_id", "occurred_at"),)
+    __table_args__ = (
+        Index("ix_events_aggregate_occurred", "aggregate_id", "occurred_at"),
+        Index("ix_events_aggregate_type_sequence", "aggregate_type", "sequence"),
+        UniqueConstraint("id", name="uq_events_id"),
+    )
 
-    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    sequence: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
+    )
+    id: Mapped[UUID] = mapped_column(Uuid, nullable=False, default=uuid4)
     aggregate_type: Mapped[str] = mapped_column(String(64), nullable=False)
     aggregate_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
     event_type: Mapped[str] = mapped_column(String(128), nullable=False, index=True)

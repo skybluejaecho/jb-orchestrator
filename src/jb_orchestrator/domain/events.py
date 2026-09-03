@@ -15,4 +15,5 @@ class DomainEvent:
     event_type: str
     payload: dict[str, Any] = field(default_factory=dict)
     id: UUID = field(default_factory=uuid4)
+    sequence: int | None = None
     occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))

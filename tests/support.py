@@ -1,7 +1,7 @@
 """In-memory application adapters used by tests."""
 
 from collections.abc import Collection
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from types import TracebackType
 from typing import Self
@@ -134,7 +134,28 @@ class MemoryEventRepository:
         self._store = store
 
     async def append(self, event: DomainEvent) -> None:
-        self._store.events.append(event)
+        self._store.events.append(replace(event, sequence=len(self._store.events) + 1))
+
+    async def get(self, event_id: UUID) -> DomainEvent | None:
+        return next((event for event in self._store.events if event.id == event_id), None)
+
+    async def list_after(
+        self,
+        *,
+        aggregate_type: str,
+        after: DomainEvent | None = None,
+        limit: int = 100,
+    ) -> list[DomainEvent]:
+        after_sequence = after.sequence if after is not None else 0
+        if after_sequence is None:
+            raise ValueError("persisted event cursor requires a sequence")
+        return [
+            event
+            for event in self._store.events
+            if event.aggregate_type == aggregate_type
+            and event.sequence is not None
+            and event.sequence > after_sequence
+        ][:limit]
 
 
 class MemorySkillRepository:

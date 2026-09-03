@@ -43,3 +43,13 @@ class EventRepository(Protocol):
     """Append-only domain event persistence contract."""
 
     async def append(self, event: DomainEvent) -> None: ...
+
+    async def get(self, event_id: UUID) -> DomainEvent | None: ...
+
+    async def list_after(
+        self,
+        *,
+        aggregate_type: str,
+        after: DomainEvent | None = None,
+        limit: int = 100,
+    ) -> list[DomainEvent]: ...
