@@ -28,6 +28,7 @@ from jb_orchestrator.api.schemas import (
     RunResponse,
     SkillCreate,
     SkillResponse,
+    TaskArtifactResponse,
     UsageRecordResponse,
     UserRequestCreate,
     UserRequestResponse,
@@ -37,6 +38,7 @@ from jb_orchestrator.api.schemas import (
     WorkflowEdgePayload,
     WorkflowExecutionResponse,
     WorkflowNodePayload,
+    WorkflowRequestContextResponse,
     WorkflowStart,
 )
 from jb_orchestrator.application import (
@@ -92,6 +94,11 @@ def workflow_execution_response(execution: WorkflowExecution) -> WorkflowExecuti
         snapshot_id=execution.snapshot.id,
         definition_key=execution.snapshot.definition_key,
         definition_version=execution.snapshot.definition_version,
+        request_context=(
+            WorkflowRequestContextResponse.model_validate(execution.snapshot.request_context)
+            if execution.snapshot.request_context is not None
+            else None
+        ),
         status=execution.status,
         nodes=tuple(
             NodeExecutionResponse.model_validate(execution.nodes[node.key])
@@ -257,6 +264,20 @@ async def get_workflow_execution(
     service: WorkflowServiceDependency,
 ) -> WorkflowExecutionResponse:
     return workflow_execution_response(await service.get(execution_id))
+
+
+@router.get(
+    "/workflow-executions/{execution_id}/artifacts",
+    response_model=list[TaskArtifactResponse],
+)
+async def list_workflow_artifacts(
+    execution_id: UUID,
+    service: WorkflowServiceDependency,
+) -> list[TaskArtifactResponse]:
+    return [
+        TaskArtifactResponse.model_validate(artifact)
+        for artifact in await service.list_artifacts(execution_id)
+    ]
 
 
 @router.post(
