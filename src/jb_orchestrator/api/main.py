@@ -13,6 +13,7 @@ from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNot
 from jb_orchestrator.application.external_execution_services import ExternalExecutionService
 from jb_orchestrator.application.model_services import ModelCatalogService
 from jb_orchestrator.application.phase_pack_services import PhasePackCatalogService
+from jb_orchestrator.application.project_observation_services import ProjectObservationService
 from jb_orchestrator.application.request_dispatch_services import RequestDispatchService
 from jb_orchestrator.application.services import OrchestrationService
 from jb_orchestrator.application.skill_services import SkillCatalogService
@@ -34,6 +35,7 @@ def create_app(
     external_execution_service: ExternalExecutionService | None = None,
     phase_pack_service: PhasePackCatalogService | None = None,
     request_dispatch_service: RequestDispatchService | None = None,
+    project_observation_service: ProjectObservationService | None = None,
 ) -> FastAPI:
     """Build the API application."""
 
@@ -47,6 +49,7 @@ def create_app(
         or workflow_service is None
         or external_execution_service is None
         or request_dispatch_service is None
+        or project_observation_service is None
     ):
         session_factory = create_session_factory()
     if service is None:
@@ -69,6 +72,10 @@ def create_app(
         request_dispatch_service = RequestDispatchService(
             lambda: SqlAlchemyUnitOfWork(session_factory), workflow_service
         )
+    if project_observation_service is None:
+        project_observation_service = ProjectObservationService(
+            lambda: SqlAlchemyUnitOfWork(session_factory)
+        )
     app.state.orchestration_service = service
     app.state.skill_catalog_service = skill_service
     app.state.model_catalog_service = model_service
@@ -77,6 +84,7 @@ def create_app(
     app.state.workflow_service = workflow_service
     app.state.external_execution_service = external_execution_service
     app.state.request_dispatch_service = request_dispatch_service
+    app.state.project_observation_service = project_observation_service
 
     @app.get("/health/live", tags=["health"])
     async def live() -> dict[str, str]:

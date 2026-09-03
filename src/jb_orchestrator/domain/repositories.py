@@ -4,9 +4,9 @@ from typing import Protocol
 from uuid import UUID
 
 from jb_orchestrator.domain.events import DomainEvent
-from jb_orchestrator.domain.projects import Project
-from jb_orchestrator.domain.requests import UserRequest
-from jb_orchestrator.domain.runs import Run
+from jb_orchestrator.domain.projects import Project, ProjectStatus
+from jb_orchestrator.domain.requests import RequestStatus, UserRequest
+from jb_orchestrator.domain.runs import Run, RunStatus
 
 
 class ProjectRepository(Protocol):
@@ -17,6 +17,10 @@ class ProjectRepository(Protocol):
     async def get(self, project_id: UUID) -> Project | None: ...
 
     async def get_by_key(self, key: str) -> Project | None: ...
+
+    async def list(
+        self, *, status: ProjectStatus | None = None, limit: int = 100
+    ) -> list[Project]: ...
 
 
 class UserRequestRepository(Protocol):
@@ -30,6 +34,14 @@ class UserRequestRepository(Protocol):
 
     async def save(self, request: UserRequest) -> None: ...
 
+    async def list_by_project(
+        self,
+        project_id: UUID,
+        *,
+        status: RequestStatus | None = None,
+        limit: int = 100,
+    ) -> list[UserRequest]: ...
+
 
 class RunRepository(Protocol):
     """Run persistence contract."""
@@ -41,6 +53,14 @@ class RunRepository(Protocol):
     async def get_for_update(self, run_id: UUID) -> Run | None: ...
 
     async def save(self, run: Run) -> None: ...
+
+    async def list_by_request(
+        self,
+        request_id: UUID,
+        *,
+        status: RunStatus | None = None,
+        limit: int = 100,
+    ) -> list[Run]: ...
 
 
 class EventRepository(Protocol):
@@ -54,6 +74,14 @@ class EventRepository(Protocol):
         self,
         *,
         aggregate_type: str,
+        after: DomainEvent | None = None,
+        limit: int = 100,
+    ) -> list[DomainEvent]: ...
+
+    async def list_project_after(
+        self,
+        *,
+        project_id: UUID,
         after: DomainEvent | None = None,
         limit: int = 100,
     ) -> list[DomainEvent]: ...

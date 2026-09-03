@@ -12,11 +12,12 @@ from jb_orchestrator.api.dependencies import (
     get_model_catalog_service,
     get_orchestration_service,
     get_phase_pack_catalog_service,
+    get_project_observation_service,
     get_request_dispatch_service,
     get_skill_catalog_service,
     get_workflow_service,
 )
-from jb_orchestrator.api.event_streams import external_execution_event_stream
+from jb_orchestrator.api.event_streams import external_execution_event_stream, project_event_stream
 from jb_orchestrator.api.schemas import (
     BudgetConfigure,
     BudgetResponse,
@@ -55,13 +56,19 @@ from jb_orchestrator.application import (
     ModelCatalogService,
     OrchestrationService,
     PhasePackCatalogService,
+    ProjectObservationService,
     RegisterProject,
     RequestDispatchService,
     SkillCatalogService,
     WorkflowService,
 )
 from jb_orchestrator.config import get_settings
-from jb_orchestrator.domain import DomainValidationError
+from jb_orchestrator.domain import (
+    DomainValidationError,
+    ProjectStatus,
+    RequestStatus,
+    RunStatus,
+)
 from jb_orchestrator.external_executions import ExternalExecutionStatus
 from jb_orchestrator.model_routing import ModelProfile, ModelRoutingRequest
 from jb_orchestrator.phase_packs import (
@@ -76,6 +83,7 @@ from jb_orchestrator.workflows import (
     NodeInputMapping,
     WorkflowDefinition,
     WorkflowExecution,
+    WorkflowStatus,
 )
 
 router = APIRouter(prefix="/v1")
@@ -90,6 +98,9 @@ RequestDispatchServiceDependency = Annotated[
 ]
 ExternalExecutionServiceDependency = Annotated[
     ExternalExecutionService, Depends(get_external_execution_service)
+]
+ProjectObservationServiceDependency = Annotated[
+    ProjectObservationService, Depends(get_project_observation_service)
 ]
 
 
@@ -190,9 +201,84 @@ async def register_project(payload: ProjectCreate, service: Service) -> ProjectR
     return ProjectResponse.model_validate(project)
 
 
+@router.get("/projects", response_model=list[ProjectResponse])
+async def list_projects(
+    service: ProjectObservationServiceDependency,
+    status: ProjectStatus | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[ProjectResponse]:
+    return [
+        ProjectResponse.model_validate(project)
+        for project in await service.list_projects(status=status, limit=limit)
+    ]
+
+
 @router.get("/projects/{project_id}", response_model=ProjectResponse)
 async def get_project(project_id: UUID, service: Service) -> ProjectResponse:
     return ProjectResponse.model_validate(await service.get_project(project_id))
+
+
+@router.get("/projects/{project_id}/requests", response_model=list[UserRequestResponse])
+async def list_project_requests(
+    project_id: UUID,
+    service: ProjectObservationServiceDependency,
+    status: RequestStatus | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[UserRequestResponse]:
+    return [
+        UserRequestResponse.model_validate(user_request)
+        for user_request in await service.list_requests(project_id, status=status, limit=limit)
+    ]
+
+
+@router.get(
+    "/projects/{project_id}/workflow-executions",
+    response_model=list[WorkflowExecutionResponse],
+)
+async def list_project_workflow_executions(
+    project_id: UUID,
+    service: ProjectObservationServiceDependency,
+    status: WorkflowStatus | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[WorkflowExecutionResponse]:
+    return [
+        workflow_execution_response(execution)
+        for execution in await service.list_workflow_executions(
+            project_id, status=status, limit=limit
+        )
+    ]
+
+
+@router.get("/projects/{project_id}/events/stream")
+async def stream_project_events(
+    project_id: UUID,
+    request: Request,
+    service: ProjectObservationServiceDependency,
+    after: Annotated[UUID | None, Query()] = None,
+    last_event_id: Annotated[UUID | None, Header(alias="Last-Event-ID")] = None,
+) -> StreamingResponse:
+    if after is not None and last_event_id is not None and after != last_event_id:
+        raise DomainValidationError("after and Last-Event-ID cursors must match")
+    cursor = last_event_id or after
+    initial_events = await service.list_events(project_id, after_event_id=cursor)
+    settings = get_settings()
+    return StreamingResponse(
+        project_event_stream(
+            request=request,
+            service=service,
+            project_id=project_id,
+            initial_events=initial_events,
+            cursor=cursor,
+            poll_interval_seconds=settings.sse_poll_interval_seconds,
+            heartbeat_interval_seconds=settings.sse_heartbeat_interval_seconds,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.put(
@@ -265,6 +351,19 @@ async def create_request(
 @router.get("/requests/{request_id}", response_model=UserRequestResponse)
 async def get_request(request_id: UUID, service: Service) -> UserRequestResponse:
     return UserRequestResponse.model_validate(await service.get_request(request_id))
+
+
+@router.get("/requests/{request_id}/runs", response_model=list[RunResponse])
+async def list_request_runs(
+    request_id: UUID,
+    service: ProjectObservationServiceDependency,
+    status: RunStatus | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[RunResponse]:
+    return [
+        RunResponse.model_validate(run)
+        for run in await service.list_runs(request_id, status=status, limit=limit)
+    ]
 
 
 @router.get("/runs/{run_id}", response_model=RunResponse)
