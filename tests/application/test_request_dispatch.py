@@ -57,12 +57,13 @@ async def test_binding_pins_exact_version_and_dispatches_all_state() -> None:
     assert dispatched.workflow.snapshot.definition_version == 1
     assert dispatched.workflow.snapshot.request_context is not None
     assert dispatched.workflow.snapshot.request_context.prompt == "Ship the requested change"
-    assert [event.event_type for event in store.events[-3:]] == [
+    assert [event.event_type for event in store.events[-4:]] == [
         "project.workflow_bound",
         "request.created",
         "workflow.started",
+        "run.status_changed",
     ]
-    assert store.events[-1].payload["selection_source"] == "project_binding"
+    assert store.events[-2].payload["selection_source"] == "project_binding"
 
 
 async def test_binding_update_affects_only_future_dispatches() -> None:

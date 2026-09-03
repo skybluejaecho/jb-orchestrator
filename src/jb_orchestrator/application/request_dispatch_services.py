@@ -130,5 +130,13 @@ class RequestDispatchService:
                 definition=definition,
                 selection_source="project_binding",
             )
+            synchronized_run = await unit_of_work.runs.get(run.id)
+            synchronized_request = await unit_of_work.requests.get(request.id)
+            if synchronized_run is None or synchronized_request is None:
+                raise RuntimeError("dispatched request lifecycle state was not persisted")
             await unit_of_work.commit()
-        return DispatchedRequest(request=request, run=run, workflow=workflow)
+        return DispatchedRequest(
+            request=synchronized_request,
+            run=synchronized_run,
+            workflow=workflow,
+        )

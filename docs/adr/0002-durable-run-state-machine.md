@@ -1,5 +1,7 @@
 # ADR 0002: Persist a guarded run state machine
 
+> Workflow 기반 Run의 phase-neutral 상태 투영은 ADR 0020에서 이 결정을 확장한다.
+
 - Status: Accepted
 - Date: 2026-09-01
 
@@ -22,4 +24,3 @@ verification back to running.
 - Terminal runs cannot be reopened; a retry creates a new attempt.
 - The database schema can reject unknown states while orchestration rules remain testable without
   a database.
-

@@ -159,9 +159,8 @@ async def test_application_service_round_trip_with_sqlalchemy() -> None:
     assert artifacts[0].producer_node_key == "implement"
     assert artifacts[0].content == {"commit": "abc123"}
 
-    cancelled = await service.cancel_run(created.run.id)
-    assert cancelled.status is RunStatus.CANCELLED
-    assert (await service.get_request(created.request.id)).status is RequestStatus.CANCELLED
+    assert (await service.get_run(created.run.id)).status is RunStatus.SUCCEEDED
+    assert (await service.get_request(created.request.id)).status is RequestStatus.COMPLETED
 
     async with session_factory() as session:
         event_types = list(await session.scalars(select(EventRecord.event_type)))
@@ -174,9 +173,11 @@ async def test_application_service_round_trip_with_sqlalchemy() -> None:
             "phase_pack.registered",
             "skill.registered",
             "workflow.started",
+            "run.status_changed",
             "task.claimed",
             "task.completed",
-            "run.cancelled",
+            "run.status_changed",
+            "request.completed",
             "budget.configured",
             "budget.reserved",
             "budget.settled",

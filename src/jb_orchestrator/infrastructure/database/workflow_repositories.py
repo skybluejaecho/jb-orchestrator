@@ -150,6 +150,14 @@ class SqlAlchemyWorkflowExecutionRepository:
         )
         return await self._to_execution(record)
 
+    async def get_by_run_for_update(self, run_id: UUID) -> WorkflowExecution | None:
+        record = await self._session.scalar(
+            select(WorkflowExecutionRecord)
+            .where(WorkflowExecutionRecord.run_id == run_id)
+            .with_for_update()
+        )
+        return await self._to_execution(record)
+
     async def get_ready_for_update(
         self, executor_keys: Collection[str] | None = None
     ) -> WorkflowTaskCandidate | None:

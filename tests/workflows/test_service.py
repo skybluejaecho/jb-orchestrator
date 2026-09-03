@@ -65,6 +65,7 @@ def store_run_context(store: MemoryStore) -> Run:
         prompt="Implement and verify the requested change.",
         title="Test request",
     )
+    request.activate()
     run = Run(request_id=request.id)
     store.projects[project.id] = project
     store.requests[request.id] = request
@@ -100,8 +101,11 @@ async def test_service_persists_versioned_snapshot_and_events() -> None:
         "workflow.definition_registered",
         "workflow.definition_registered",
         "workflow.started",
+        "run.status_changed",
         "workflow.node_started",
         "workflow.node_completed",
+        "run.status_changed",
+        "request.completed",
     ]
 
 

@@ -62,5 +62,7 @@ async def test_sqlalchemy_binding_and_dispatch_round_trip() -> None:
     assert stored.snapshot.request_context is not None
     assert stored.snapshot.request_context.request_id == dispatched.request.id
     assert stored.snapshot.run_id == dispatched.run.id
+    assert dispatched.run.status.value == "running"
+    assert dispatched.run.started_at is not None
 
     await engine.dispose()

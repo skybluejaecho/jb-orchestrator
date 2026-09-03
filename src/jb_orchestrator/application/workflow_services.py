@@ -6,6 +6,7 @@ from uuid import UUID
 
 from jb_orchestrator.application.budget_services import release_run_reservations
 from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNotFound
+from jb_orchestrator.application.execution_lifecycle import synchronize_execution_lifecycle
 from jb_orchestrator.application.output_contracts import enforce_output_contract
 from jb_orchestrator.application.unit_of_work import UnitOfWork
 from jb_orchestrator.artifacts import TaskArtifact
@@ -157,6 +158,7 @@ class WorkflowService:
                 for value in model_selections
             ],
         )
+        await synchronize_execution_lifecycle(unit_of_work, execution)
         return execution
 
     async def get(self, execution_id: UUID) -> WorkflowExecution:
@@ -226,6 +228,7 @@ class WorkflowService:
                 artifact_id=str(artifact.id),
                 output_contract_rejected=decision.rejected,
             )
+            await synchronize_execution_lifecycle(unit_of_work, execution)
             await unit_of_work.commit()
         return execution
 
@@ -246,6 +249,7 @@ class WorkflowService:
                 node_key=node_key,
                 reason=reason,
             )
+            await synchronize_execution_lifecycle(unit_of_work, execution)
             await unit_of_work.commit()
         return execution
 
@@ -263,6 +267,7 @@ class WorkflowService:
                 node_key=node_key,
                 approved=approved,
             )
+            await synchronize_execution_lifecycle(unit_of_work, execution)
             await unit_of_work.commit()
         return execution
 
@@ -277,6 +282,7 @@ class WorkflowService:
             )
             await unit_of_work.workflow_executions.save(execution)
             await self._append_event(unit_of_work, execution, "workflow.cancelled")
+            await synchronize_execution_lifecycle(unit_of_work, execution)
             await unit_of_work.commit()
         return execution
 

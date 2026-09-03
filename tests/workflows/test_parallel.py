@@ -28,6 +28,7 @@ async def test_parallel_workers_join_and_deliver_named_branch_artifacts() -> Non
         default_branch="develop",
     )
     request = UserRequest(project_id=project.id, prompt="Research and design in parallel.")
+    request.activate()
     run = Run(request_id=request.id)
     store.projects[project.id] = project
     store.requests[request.id] = request
