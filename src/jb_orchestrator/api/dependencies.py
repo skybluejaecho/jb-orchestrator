@@ -8,6 +8,7 @@ from jb_orchestrator.application.budget_services import BudgetService
 from jb_orchestrator.application.external_execution_services import ExternalExecutionService
 from jb_orchestrator.application.model_services import ModelCatalogService
 from jb_orchestrator.application.phase_pack_services import PhasePackCatalogService
+from jb_orchestrator.application.request_dispatch_services import RequestDispatchService
 from jb_orchestrator.application.services import OrchestrationService
 from jb_orchestrator.application.skill_services import SkillCatalogService
 from jb_orchestrator.application.workflow_services import WorkflowService
@@ -47,6 +48,12 @@ def get_workflow_service(request: Request) -> WorkflowService:
     """Return the workflow control service owned by this app instance."""
 
     return cast(WorkflowService, request.app.state.workflow_service)
+
+
+def get_request_dispatch_service(request: Request) -> RequestDispatchService:
+    """Return the project request dispatch service owned by this app instance."""
+
+    return cast(RequestDispatchService, request.app.state.request_dispatch_service)
 
 
 def get_external_execution_service(request: Request) -> ExternalExecutionService:

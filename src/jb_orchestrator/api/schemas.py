@@ -77,6 +77,21 @@ class CreatedRequestResponse(BaseModel):
     run: RunResponse
 
 
+class ProjectWorkflowBindingConfigure(BaseModel):
+    definition_key: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$", max_length=128)
+    definition_version: int = Field(ge=1)
+
+
+class ProjectWorkflowBindingResponse(ProjectWorkflowBindingConfigure):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    project_id: UUID
+    definition_id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
 class SkillCreate(BaseModel):
     key: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$", max_length=128)
     version: int = Field(ge=1)
@@ -363,6 +378,12 @@ class WorkflowExecutionResponse(BaseModel):
     completed_at: datetime | None
     updated_at: datetime
     version: int
+
+
+class DispatchedRequestResponse(BaseModel):
+    request: UserRequestResponse
+    run: RunResponse
+    workflow: WorkflowExecutionResponse
 
 
 class ProblemDetail(BaseModel):

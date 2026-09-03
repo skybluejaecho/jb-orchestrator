@@ -9,7 +9,7 @@ from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNot
 from jb_orchestrator.application.output_contracts import enforce_output_contract
 from jb_orchestrator.application.unit_of_work import UnitOfWork
 from jb_orchestrator.artifacts import TaskArtifact
-from jb_orchestrator.domain import DomainEvent
+from jb_orchestrator.domain import DomainEvent, Project, Run, UserRequest
 from jb_orchestrator.model_routing import (
     DeterministicModelRouter,
     NodeModelSelection,
@@ -87,54 +87,76 @@ class WorkflowService:
             project = await unit_of_work.projects.get(request.project_id)
             if project is None:
                 raise ResourceNotFound(f"project not found: {request.project_id}")
-            if await unit_of_work.workflow_executions.get_by_run(run_id) is not None:
-                raise ResourceConflict(f"workflow execution already exists for run: {run_id}")
             definition = await unit_of_work.workflow_definitions.get(definition_key, version)
             if definition is None:
                 suffix = f"@{version}" if version is not None else ""
                 raise ResourceNotFound(f"workflow definition not found: {definition_key}{suffix}")
 
-            phase_packs = await self._resolve_phase_packs(unit_of_work, definition)
-            skills = await self._resolve_skills(unit_of_work, definition, phase_packs)
-            model_selections = await self._route_models(unit_of_work, definition)
-
-            execution = WorkflowExecution.create(
-                WorkflowSnapshot.from_definition(
-                    definition,
-                    run_id=run_id,
-                    request_context=WorkflowRequestContext(
-                        request_id=request.id,
-                        project_id=project.id,
-                        project_key=project.key,
-                        project_name=project.name,
-                        repository_url=project.repository_url,
-                        default_branch=project.default_branch,
-                        prompt=request.prompt,
-                        title=request.title,
-                    ),
-                    phase_packs=phase_packs,
-                    skills=skills,
-                    model_selections=model_selections,
-                )
-            )
-            self._engine.start(execution)
-            await unit_of_work.workflow_executions.add(execution)
-            await self._append_event(
+            execution = await self.create_execution(
                 unit_of_work,
-                execution,
-                "workflow.started",
-                model_selections=[
-                    {
-                        "node_key": value.node_key,
-                        "profile_key": value.selection.profile.key,
-                        "profile_version": value.selection.profile.version,
-                        "policy_version": value.selection.policy_version,
-                        "estimated_cost_usd": str(value.selection.estimated_cost_usd),
-                    }
-                    for value in model_selections
-                ],
+                run=run,
+                request=request,
+                project=project,
+                definition=definition,
+                selection_source="explicit",
             )
             await unit_of_work.commit()
+        return execution
+
+    async def create_execution(
+        self,
+        unit_of_work: UnitOfWork,
+        *,
+        run: Run,
+        request: UserRequest,
+        project: Project,
+        definition: WorkflowDefinition,
+        selection_source: str,
+    ) -> WorkflowExecution:
+        """Create and start an execution inside the caller's transaction."""
+
+        if await unit_of_work.workflow_executions.get_by_run(run.id) is not None:
+            raise ResourceConflict(f"workflow execution already exists for run: {run.id}")
+        phase_packs = await self._resolve_phase_packs(unit_of_work, definition)
+        skills = await self._resolve_skills(unit_of_work, definition, phase_packs)
+        model_selections = await self._route_models(unit_of_work, definition)
+        execution = WorkflowExecution.create(
+            WorkflowSnapshot.from_definition(
+                definition,
+                run_id=run.id,
+                request_context=WorkflowRequestContext(
+                    request_id=request.id,
+                    project_id=project.id,
+                    project_key=project.key,
+                    project_name=project.name,
+                    repository_url=project.repository_url,
+                    default_branch=project.default_branch,
+                    prompt=request.prompt,
+                    title=request.title,
+                ),
+                phase_packs=phase_packs,
+                skills=skills,
+                model_selections=model_selections,
+            )
+        )
+        self._engine.start(execution)
+        await unit_of_work.workflow_executions.add(execution)
+        await self._append_event(
+            unit_of_work,
+            execution,
+            "workflow.started",
+            selection_source=selection_source,
+            model_selections=[
+                {
+                    "node_key": value.node_key,
+                    "profile_key": value.selection.profile.key,
+                    "profile_version": value.selection.profile.version,
+                    "policy_version": value.selection.policy_version,
+                    "estimated_cost_usd": str(value.selection.estimated_cost_usd),
+                }
+                for value in model_selections
+            ],
+        )
         return execution
 
     async def get(self, execution_id: UUID) -> WorkflowExecution:

@@ -5,6 +5,10 @@ from jb_orchestrator.application.commands import CreateUserRequest, RegisterProj
 from jb_orchestrator.application.external_execution_services import ExternalExecutionService
 from jb_orchestrator.application.model_services import ModelCatalogService
 from jb_orchestrator.application.phase_pack_services import PhasePackCatalogService
+from jb_orchestrator.application.request_dispatch_services import (
+    DispatchedRequest,
+    RequestDispatchService,
+)
 from jb_orchestrator.application.services import CreatedRequest, OrchestrationService
 from jb_orchestrator.application.skill_services import SkillCatalogService
 from jb_orchestrator.application.task_dispatch import TaskDispatchService
@@ -15,11 +19,13 @@ __all__ = [
     "BudgetUsageRequired",
     "CreateUserRequest",
     "CreatedRequest",
+    "DispatchedRequest",
     "ExternalExecutionService",
     "ModelCatalogService",
     "OrchestrationService",
     "PhasePackCatalogService",
     "RegisterProject",
+    "RequestDispatchService",
     "SkillCatalogService",
     "TaskDispatchService",
     "WorkflowService",
