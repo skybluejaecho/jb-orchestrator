@@ -384,6 +384,7 @@ class DispatchedRequestResponse(BaseModel):
     request: UserRequestResponse
     run: RunResponse
     workflow: WorkflowExecutionResponse
+    replayed: bool
 
 
 class ProblemDetail(BaseModel):

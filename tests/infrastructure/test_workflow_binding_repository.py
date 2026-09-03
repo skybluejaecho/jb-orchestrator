@@ -51,7 +51,12 @@ async def test_sqlalchemy_binding_and_dispatch_round_trip() -> None:
 
     configured = await service.configure_binding(project.id, definition.key, definition.version)
     fetched = await service.get_binding(project.id)
-    dispatched = await service.dispatch(project.id, "Execute the bound workflow")
+    dispatched = await service.dispatch(
+        project.id, "Execute the bound workflow", idempotency_key="sql-round-trip"
+    )
+    replayed = await service.dispatch(
+        project.id, "Execute the bound workflow", idempotency_key="sql-round-trip"
+    )
     stored = await workflow_service.get(dispatched.workflow.id)
 
     assert fetched.id == configured.id
@@ -64,5 +69,7 @@ async def test_sqlalchemy_binding_and_dispatch_round_trip() -> None:
     assert stored.snapshot.run_id == dispatched.run.id
     assert dispatched.run.status.value == "running"
     assert dispatched.run.started_at is not None
+    assert replayed.replayed is True
+    assert replayed.workflow.id == dispatched.workflow.id
 
     await engine.dispose()
