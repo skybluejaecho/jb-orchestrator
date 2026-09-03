@@ -1,13 +1,15 @@
 """FastAPI application entry point."""
 
+from collections.abc import Awaitable, Callable
 from typing import Final
 
 import uvicorn
 from fastapi import FastAPI, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from jb_orchestrator import __version__
 from jb_orchestrator.api.routes import router
+from jb_orchestrator.api.security import authenticate_request, authorize_request
 from jb_orchestrator.application.budget_services import BudgetService
 from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNotFound
 from jb_orchestrator.application.external_execution_services import ExternalExecutionService
@@ -15,6 +17,7 @@ from jb_orchestrator.application.model_services import ModelCatalogService
 from jb_orchestrator.application.phase_pack_services import PhasePackCatalogService
 from jb_orchestrator.application.project_observation_services import ProjectObservationService
 from jb_orchestrator.application.request_dispatch_services import RequestDispatchService
+from jb_orchestrator.application.security_services import SecurityService
 from jb_orchestrator.application.services import OrchestrationService
 from jb_orchestrator.application.skill_services import SkillCatalogService
 from jb_orchestrator.application.workflow_services import WorkflowService
@@ -36,10 +39,14 @@ def create_app(
     phase_pack_service: PhasePackCatalogService | None = None,
     request_dispatch_service: RequestDispatchService | None = None,
     project_observation_service: ProjectObservationService | None = None,
+    security_service: SecurityService | None = None,
+    auth_enabled: bool | None = None,
 ) -> FastAPI:
     """Build the API application."""
 
     app = FastAPI(title=SERVICE_NAME, version=__version__)
+    settings = get_settings()
+    auth_enabled = settings.api_auth_enabled if auth_enabled is None else auth_enabled
     if (
         service is None
         or skill_service is None
@@ -50,6 +57,7 @@ def create_app(
         or external_execution_service is None
         or request_dispatch_service is None
         or project_observation_service is None
+        or (auth_enabled and security_service is None)
     ):
         session_factory = create_session_factory()
     if service is None:
@@ -76,6 +84,8 @@ def create_app(
         project_observation_service = ProjectObservationService(
             lambda: SqlAlchemyUnitOfWork(session_factory)
         )
+    if auth_enabled and security_service is None:
+        security_service = SecurityService(lambda: SqlAlchemyUnitOfWork(session_factory))
     app.state.orchestration_service = service
     app.state.skill_catalog_service = skill_service
     app.state.model_catalog_service = model_service
@@ -85,6 +95,43 @@ def create_app(
     app.state.external_execution_service = external_execution_service
     app.state.request_dispatch_service = request_dispatch_service
     app.state.project_observation_service = project_observation_service
+    app.state.security_service = security_service
+    app.state.auth_enabled = auth_enabled
+
+    if auth_enabled:
+        if security_service is None:  # pragma: no cover - guarded above
+            raise RuntimeError("security service is required when API authentication is enabled")
+
+        @app.middleware("http")
+        async def bearer_security(
+            request: Request, call_next: Callable[[Request], Awaitable[Response]]
+        ) -> Response:
+            if not request.url.path.startswith("/v1"):
+                return await call_next(request)
+            authentication = await authenticate_request(request, security_service)
+            if authentication.principal is None:
+                return JSONResponse(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    headers={"WWW-Authenticate": "Bearer"},
+                    content={
+                        "type": "about:blank",
+                        "title": "Authentication required",
+                        "status": status.HTTP_401_UNAUTHORIZED,
+                        "detail": authentication.error,
+                    },
+                )
+            if not await authorize_request(request, authentication.principal, security_service):
+                return JSONResponse(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    content={
+                        "type": "about:blank",
+                        "title": "Permission denied",
+                        "status": status.HTTP_403_FORBIDDEN,
+                        "detail": "The service account cannot access this resource",
+                    },
+                )
+            request.state.principal = authentication.principal
+            return await call_next(request)
 
     @app.get("/health/live", tags=["health"])
     async def live() -> dict[str, str]:
@@ -141,6 +188,12 @@ def run() -> None:
     """Run the development ASGI server."""
 
     settings = get_settings()
+    if not settings.api_auth_enabled and settings.api_host not in {
+        "127.0.0.1",
+        "localhost",
+        "::1",
+    }:
+        raise RuntimeError("API authentication must be enabled when binding to a remote address")
     uvicorn.run(
         "jb_orchestrator.api.main:app",
         host=settings.api_host,
