@@ -114,6 +114,12 @@ class SqlAlchemyUserRequestRepository:
         record = await self._session.get(UserRequestRecord, request_id)
         return request_from_record(record) if record is not None else None
 
+    async def get_for_update(self, request_id: UUID) -> UserRequest | None:
+        record = await self._session.scalar(
+            select(UserRequestRecord).where(UserRequestRecord.id == request_id).with_for_update()
+        )
+        return request_from_record(record) if record is not None else None
+
     async def save(self, request: UserRequest) -> None:
         record = await self._session.get(UserRequestRecord, request.id)
         if record is None:
@@ -145,6 +151,12 @@ class SqlAlchemyRunRepository:
 
     async def get(self, run_id: UUID) -> Run | None:
         record = await self._session.get(RunRecord, run_id)
+        return run_from_record(record) if record is not None else None
+
+    async def get_for_update(self, run_id: UUID) -> Run | None:
+        record = await self._session.scalar(
+            select(RunRecord).where(RunRecord.id == run_id).with_for_update()
+        )
         return run_from_record(record) if record is not None else None
 
     async def save(self, run: Run) -> None:

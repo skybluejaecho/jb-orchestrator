@@ -28,21 +28,57 @@ TERMINAL_RUN_STATUSES: Final[frozenset[RunStatus]] = frozenset(
 )
 
 ALLOWED_RUN_TRANSITIONS: Final[dict[RunStatus, frozenset[RunStatus]]] = {
-    RunStatus.QUEUED: frozenset({RunStatus.PLANNING, RunStatus.CANCELLED}),
-    RunStatus.PLANNING: frozenset(
+    RunStatus.QUEUED: frozenset(
         {
+            RunStatus.PLANNING,
+            RunStatus.RUNNING,
             RunStatus.AWAITING_APPROVAL,
-            RunStatus.READY,
+            RunStatus.SUCCEEDED,
             RunStatus.FAILED,
             RunStatus.CANCELLED,
         }
     ),
-    RunStatus.AWAITING_APPROVAL: frozenset({RunStatus.READY, RunStatus.CANCELLED}),
-    RunStatus.READY: frozenset({RunStatus.RUNNING, RunStatus.CANCELLED}),
-    RunStatus.RUNNING: frozenset({RunStatus.VERIFYING, RunStatus.FAILED, RunStatus.CANCELLED}),
+    RunStatus.PLANNING: frozenset(
+        {
+            RunStatus.AWAITING_APPROVAL,
+            RunStatus.READY,
+            RunStatus.RUNNING,
+            RunStatus.SUCCEEDED,
+            RunStatus.FAILED,
+            RunStatus.CANCELLED,
+        }
+    ),
+    RunStatus.AWAITING_APPROVAL: frozenset(
+        {
+            RunStatus.READY,
+            RunStatus.RUNNING,
+            RunStatus.SUCCEEDED,
+            RunStatus.FAILED,
+            RunStatus.CANCELLED,
+        }
+    ),
+    RunStatus.READY: frozenset(
+        {
+            RunStatus.RUNNING,
+            RunStatus.AWAITING_APPROVAL,
+            RunStatus.SUCCEEDED,
+            RunStatus.FAILED,
+            RunStatus.CANCELLED,
+        }
+    ),
+    RunStatus.RUNNING: frozenset(
+        {
+            RunStatus.AWAITING_APPROVAL,
+            RunStatus.VERIFYING,
+            RunStatus.SUCCEEDED,
+            RunStatus.FAILED,
+            RunStatus.CANCELLED,
+        }
+    ),
     RunStatus.VERIFYING: frozenset(
         {
             RunStatus.RUNNING,
+            RunStatus.AWAITING_APPROVAL,
             RunStatus.SUCCEEDED,
             RunStatus.FAILED,
             RunStatus.CANCELLED,
@@ -86,11 +122,15 @@ class Run:
             raise InvalidStateTransition(f"cannot transition run from {self.status} to {target}")
 
         changed_at = at or datetime.now(UTC)
+        previous = self.status
         self.status = target
         self.updated_at = changed_at
         self.version += 1
 
-        if target is RunStatus.RUNNING and self.started_at is None:
+        if self.started_at is None and (
+            target is RunStatus.RUNNING
+            or (previous is RunStatus.QUEUED and target is not RunStatus.CANCELLED)
+        ):
             self.started_at = changed_at
         if target in TERMINAL_RUN_STATUSES:
             self.completed_at = changed_at

@@ -74,6 +74,9 @@ class MemoryUserRequestRepository:
     async def get(self, request_id: UUID) -> UserRequest | None:
         return self._store.requests.get(request_id)
 
+    async def get_for_update(self, request_id: UUID) -> UserRequest | None:
+        return self._store.requests.get(request_id)
+
     async def save(self, request: UserRequest) -> None:
         self._store.requests[request.id] = request
 
@@ -86,6 +89,9 @@ class MemoryRunRepository:
         self._store.runs[run.id] = run
 
     async def get(self, run_id: UUID) -> Run | None:
+        return self._store.runs.get(run_id)
+
+    async def get_for_update(self, run_id: UUID) -> Run | None:
         return self._store.runs.get(run_id)
 
     async def save(self, run: Run) -> None:
@@ -411,6 +417,9 @@ class MemoryWorkflowExecutionRepository:
             ),
             None,
         )
+
+    async def get_by_run_for_update(self, run_id: UUID) -> WorkflowExecution | None:
+        return await self.get_by_run(run_id)
 
     async def get_ready_for_update(
         self, executor_keys: Collection[str] | None = None
