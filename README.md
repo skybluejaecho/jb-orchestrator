@@ -170,6 +170,15 @@ ORCH-020 enforces phase output contracts:
 - contract failures routed through ordinary workflow failure edges and repair loops
 - valid successes and explicit executor failures preserved without rewriting
 
+ORCH-021 adds deterministic parallel workflow regions:
+
+- explicit non-executing fork and all-source join control nodes
+- multiple branch tasks becoming READY for concurrent workers
+- join activation only after every direct predecessor has completed
+- workflow-aggregate row locking around short claim and transition transactions
+- sibling task cancellation when a parallel path terminates or fails the workflow
+- named Phase Pack inputs combining durable artifacts from independent branches
+
 ## Prerequisites
 
 - Python 3.12
