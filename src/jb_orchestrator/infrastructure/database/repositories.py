@@ -2,15 +2,27 @@
 
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from jb_orchestrator.domain import DomainEvent, Project, Run, UserRequest
+from jb_orchestrator.domain import (
+    DomainEvent,
+    Project,
+    ProjectStatus,
+    RequestStatus,
+    Run,
+    RunStatus,
+    UserRequest,
+)
 from jb_orchestrator.infrastructure.database.models import (
+    BudgetAccountRecord,
+    BudgetReservationRecord,
     EventRecord,
+    ExternalExecutionRecord,
     ProjectRecord,
     RunRecord,
     UserRequestRecord,
+    WorkflowExecutionRecord,
 )
 
 
@@ -92,6 +104,15 @@ class SqlAlchemyProjectRepository:
         record = await self._session.scalar(select(ProjectRecord).where(ProjectRecord.key == key))
         return project_from_record(record) if record is not None else None
 
+    async def list(self, *, status: ProjectStatus | None = None, limit: int = 100) -> list[Project]:
+        statement = select(ProjectRecord)
+        if status is not None:
+            statement = statement.where(ProjectRecord.status == status)
+        records = await self._session.scalars(
+            statement.order_by(ProjectRecord.created_at.desc(), ProjectRecord.id).limit(limit)
+        )
+        return [project_from_record(record) for record in records]
+
 
 class SqlAlchemyUserRequestRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -127,6 +148,23 @@ class SqlAlchemyUserRequestRepository:
             return
         record.status = request.status
         record.updated_at = request.updated_at
+
+    async def list_by_project(
+        self,
+        project_id: UUID,
+        *,
+        status: RequestStatus | None = None,
+        limit: int = 100,
+    ) -> list[UserRequest]:
+        statement = select(UserRequestRecord).where(UserRequestRecord.project_id == project_id)
+        if status is not None:
+            statement = statement.where(UserRequestRecord.status == status)
+        records = await self._session.scalars(
+            statement.order_by(UserRequestRecord.created_at.desc(), UserRequestRecord.id).limit(
+                limit
+            )
+        )
+        return [request_from_record(record) for record in records]
 
 
 class SqlAlchemyRunRepository:
@@ -171,6 +209,21 @@ class SqlAlchemyRunRepository:
         record.completed_at = run.completed_at
         record.version = run.version
 
+    async def list_by_request(
+        self,
+        request_id: UUID,
+        *,
+        status: RunStatus | None = None,
+        limit: int = 100,
+    ) -> list[Run]:
+        statement = select(RunRecord).where(RunRecord.request_id == request_id)
+        if status is not None:
+            statement = statement.where(RunRecord.status == status)
+        records = await self._session.scalars(
+            statement.order_by(RunRecord.created_at.desc(), RunRecord.id).limit(limit)
+        )
+        return [run_from_record(record) for record in records]
+
 
 class SqlAlchemyEventRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -200,6 +253,66 @@ class SqlAlchemyEventRepository:
         limit: int = 100,
     ) -> list[DomainEvent]:
         statement = select(EventRecord).where(EventRecord.aggregate_type == aggregate_type)
+        if after is not None:
+            if after.sequence is None:
+                raise ValueError("persisted event cursor requires a sequence")
+            statement = statement.where(EventRecord.sequence > after.sequence)
+        records = await self._session.scalars(statement.order_by(EventRecord.sequence).limit(limit))
+        return [event_from_record(record) for record in records]
+
+    async def list_project_after(
+        self,
+        *,
+        project_id: UUID,
+        after: DomainEvent | None = None,
+        limit: int = 100,
+    ) -> list[DomainEvent]:
+        request_ids = select(UserRequestRecord.id).where(UserRequestRecord.project_id == project_id)
+        run_ids = select(RunRecord.id).where(RunRecord.request_id.in_(request_ids))
+        workflow_ids = select(WorkflowExecutionRecord.id).where(
+            WorkflowExecutionRecord.run_id.in_(run_ids)
+        )
+        external_ids = select(ExternalExecutionRecord.id).where(
+            ExternalExecutionRecord.run_id.in_(run_ids)
+        )
+        budget_account_ids = select(BudgetAccountRecord.id).where(
+            BudgetAccountRecord.project_id == project_id
+        )
+        budget_reservation_ids = select(BudgetReservationRecord.id).where(
+            BudgetReservationRecord.project_id == project_id
+        )
+        statement = select(EventRecord).where(
+            or_(
+                and_(
+                    EventRecord.aggregate_type == "project",
+                    EventRecord.aggregate_id == project_id,
+                ),
+                and_(
+                    EventRecord.aggregate_type == "request",
+                    EventRecord.aggregate_id.in_(request_ids),
+                ),
+                and_(
+                    EventRecord.aggregate_type == "run",
+                    EventRecord.aggregate_id.in_(run_ids),
+                ),
+                and_(
+                    EventRecord.aggregate_type == "workflow_execution",
+                    EventRecord.aggregate_id.in_(workflow_ids),
+                ),
+                and_(
+                    EventRecord.aggregate_type == "external_execution",
+                    EventRecord.aggregate_id.in_(external_ids),
+                ),
+                and_(
+                    EventRecord.aggregate_type == "budget_account",
+                    EventRecord.aggregate_id.in_(budget_account_ids),
+                ),
+                and_(
+                    EventRecord.aggregate_type == "budget_reservation",
+                    EventRecord.aggregate_id.in_(budget_reservation_ids),
+                ),
+            )
+        )
         if after is not None:
             if after.sequence is None:
                 raise ValueError("persisted event cursor requires a sequence")

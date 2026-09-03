@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from jb_orchestrator.infrastructure.database.models import (
     NodeExecutionRecord,
+    RunRecord,
+    UserRequestRecord,
     WorkflowDefinitionRecord,
     WorkflowExecutionRecord,
 )
@@ -157,6 +159,33 @@ class SqlAlchemyWorkflowExecutionRepository:
             .with_for_update()
         )
         return await self._to_execution(record)
+
+    async def list_by_project(
+        self,
+        project_id: UUID,
+        *,
+        status: WorkflowStatus | None = None,
+        limit: int = 100,
+    ) -> list[WorkflowExecution]:
+        statement = (
+            select(WorkflowExecutionRecord)
+            .join(RunRecord, WorkflowExecutionRecord.run_id == RunRecord.id)
+            .join(UserRequestRecord, RunRecord.request_id == UserRequestRecord.id)
+            .where(UserRequestRecord.project_id == project_id)
+        )
+        if status is not None:
+            statement = statement.where(WorkflowExecutionRecord.status == status)
+        records = await self._session.scalars(
+            statement.order_by(
+                WorkflowExecutionRecord.updated_at.desc(), WorkflowExecutionRecord.id
+            ).limit(limit)
+        )
+        executions: list[WorkflowExecution] = []
+        for record in records:
+            execution = await self._to_execution(record)
+            if execution is not None:
+                executions.append(execution)
+        return executions
 
     async def get_ready_for_update(
         self, executor_keys: Collection[str] | None = None

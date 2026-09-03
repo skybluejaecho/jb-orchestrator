@@ -204,6 +204,14 @@ ORCH-024 makes one-call request dispatch retry-safe:
 - normalized payload digests rejecting reuse of a key for different user intent
 - completed retries returning the original aggregates without creating execution state
 
+ORCH-025 adds project-scoped observation for local GUIs and other clients:
+
+- filterable Project, User Request, Run, and Workflow Execution list APIs
+- project membership derived from existing durable database relationships
+- one resumable SSE stream covering project, request, run, workflow, external execution, and budget events
+- catalog-global events excluded from project streams
+- common aggregate identity included in SSE payloads while preserving external-stream compatibility
+
 ## Prerequisites
 
 - Python 3.12
@@ -253,11 +261,17 @@ The API exposes:
 - `GET /health/live`
 - `GET /health/ready`
 - `POST /v1/projects`
+- `GET /v1/projects`
+- `GET /v1/projects/{project_id}`
+- `GET /v1/projects/{project_id}/requests`
+- `GET /v1/projects/{project_id}/workflow-executions`
+- `GET /v1/projects/{project_id}/events/stream`
 - `POST /v1/projects/{project_id}/requests`
 - `PUT /v1/projects/{project_id}/workflow-binding`
 - `GET /v1/projects/{project_id}/workflow-binding`
 - `POST /v1/projects/{project_id}/dispatches`
 - `GET /v1/requests/{request_id}`
+- `GET /v1/requests/{request_id}/runs`
 - `GET /v1/runs/{run_id}`
 - `POST /v1/runs/{run_id}/approve`
 - `POST /v1/runs/{run_id}/cancel`
@@ -297,6 +311,12 @@ Workflow Execution이 하나의 트랜잭션에서 생성됩니다. 선택된 �
 계속 제공됩니다. Dispatch 호출에는 프로젝트 범위에서 고유한 `Idempotency-Key` 헤더가
 필수입니다. 같은 key와 payload를 재전송하면 응답의 `replayed`가 `true`이고 최초 실행을
 그대로 반환합니다. 같은 key를 다른 payload에 사용하면 `409 Conflict`가 반환됩니다.
+
+프로젝트 관찰 API는 DB 관계를 기준으로 Request, Run, Workflow Execution을 조회합니다.
+Jarvis는 `GET /v1/projects/{project_id}/events/stream` 하나로 프로젝트에 속한 상태 변화를
+받고, 연결이 끊기면 마지막 event UUID를 `Last-Event-ID`로 보내 이어받을 수 있습니다.
+현재 상태의 복구는 목록 API가, 이후 변화의 전달은 SSE가 담당하므로 GUI 자체 캐시는
+진실의 원천이 아닙니다.
 
 ## Quality checks
 

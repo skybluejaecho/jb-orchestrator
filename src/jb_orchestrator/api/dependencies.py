@@ -8,6 +8,7 @@ from jb_orchestrator.application.budget_services import BudgetService
 from jb_orchestrator.application.external_execution_services import ExternalExecutionService
 from jb_orchestrator.application.model_services import ModelCatalogService
 from jb_orchestrator.application.phase_pack_services import PhasePackCatalogService
+from jb_orchestrator.application.project_observation_services import ProjectObservationService
 from jb_orchestrator.application.request_dispatch_services import RequestDispatchService
 from jb_orchestrator.application.services import OrchestrationService
 from jb_orchestrator.application.skill_services import SkillCatalogService
@@ -60,3 +61,9 @@ def get_external_execution_service(request: Request) -> ExternalExecutionService
     """Return the external execution query service owned by this app instance."""
 
     return cast(ExternalExecutionService, request.app.state.external_execution_service)
+
+
+def get_project_observation_service(request: Request) -> ProjectObservationService:
+    """Return the project observation service owned by this app instance."""
+
+    return cast(ProjectObservationService, request.app.state.project_observation_service)

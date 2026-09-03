@@ -8,6 +8,7 @@ from uuid import UUID
 from jb_orchestrator.workflows.models import (
     WorkflowDefinition,
     WorkflowExecution,
+    WorkflowStatus,
     WorkflowTaskCandidate,
 )
 
@@ -30,6 +31,14 @@ class WorkflowExecutionRepository(Protocol):
     async def get_by_run(self, run_id: UUID) -> WorkflowExecution | None: ...
 
     async def get_by_run_for_update(self, run_id: UUID) -> WorkflowExecution | None: ...
+
+    async def list_by_project(
+        self,
+        project_id: UUID,
+        *,
+        status: WorkflowStatus | None = None,
+        limit: int = 100,
+    ) -> list[WorkflowExecution]: ...
 
     async def get_ready_for_update(
         self, executor_keys: Collection[str] | None = None
