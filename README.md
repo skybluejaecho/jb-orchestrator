@@ -229,6 +229,9 @@ The API exposes:
 - `GET /health/ready`
 - `POST /v1/projects`
 - `POST /v1/projects/{project_id}/requests`
+- `PUT /v1/projects/{project_id}/workflow-binding`
+- `GET /v1/projects/{project_id}/workflow-binding`
+- `POST /v1/projects/{project_id}/dispatches`
 - `GET /v1/requests/{request_id}`
 - `GET /v1/runs/{run_id}`
 - `POST /v1/runs/{run_id}/approve`
@@ -261,6 +264,13 @@ The API exposes:
 작은 도메인 이벤트도 기록합니다. SSE 엔드포인트는 저장된 이벤트를 먼저 재생한 뒤 새
 이벤트를 전달하며, 재연결 시 `Last-Event-ID` 이후부터 이어서 받을 수 있습니다.
 
+프로젝트에는 정확한 Workflow 정의 버전을 기본값으로 연결할 수 있습니다. 사용자는
+`POST /v1/projects/{project_id}/dispatches`에 요청을 한 번 보내면 User Request, Run,
+Workflow Execution이 하나의 트랜잭션에서 생성됩니다. 선택된 정의와 요청 문맥은 실행
+스냅샷에 고정되므로 이후 프로젝트 바인딩을 변경해도 이미 시작된 실행에는 영향을 주지
+않습니다. 기존의 요청 생성 및 수동 Workflow 시작 API도 명시적 실행이 필요한 도구를 위해
+계속 제공됩니다.
+
 ## Quality checks
 
 ```powershell
@@ -281,7 +291,7 @@ uv run pytest
 Commits follow Conventional Commits, for example:
 
 ```text
-feat(workflow): add node state transitions
-test(api): cover request lifecycle
-docs(adr): record job queue decision
+feat(workflow): 노드 상태 전이 추가
+test(api): 요청 생명주기 검증
+docs(adr): 작업 큐 결정 기록
 ```

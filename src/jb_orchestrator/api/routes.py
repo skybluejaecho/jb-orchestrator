@@ -12,6 +12,7 @@ from jb_orchestrator.api.dependencies import (
     get_model_catalog_service,
     get_orchestration_service,
     get_phase_pack_catalog_service,
+    get_request_dispatch_service,
     get_skill_catalog_service,
     get_workflow_service,
 )
@@ -20,6 +21,7 @@ from jb_orchestrator.api.schemas import (
     BudgetConfigure,
     BudgetResponse,
     CreatedRequestResponse,
+    DispatchedRequestResponse,
     ExternalExecutionResponse,
     ModelProfileCreate,
     ModelProfileResponse,
@@ -28,6 +30,8 @@ from jb_orchestrator.api.schemas import (
     PhasePackResponse,
     ProjectCreate,
     ProjectResponse,
+    ProjectWorkflowBindingConfigure,
+    ProjectWorkflowBindingResponse,
     RunResponse,
     SkillCreate,
     SkillResponse,
@@ -52,6 +56,7 @@ from jb_orchestrator.application import (
     OrchestrationService,
     PhasePackCatalogService,
     RegisterProject,
+    RequestDispatchService,
     SkillCatalogService,
     WorkflowService,
 )
@@ -80,6 +85,9 @@ ModelService = Annotated[ModelCatalogService, Depends(get_model_catalog_service)
 PhasePackService = Annotated[PhasePackCatalogService, Depends(get_phase_pack_catalog_service)]
 BudgetServiceDependency = Annotated[BudgetService, Depends(get_budget_service)]
 WorkflowServiceDependency = Annotated[WorkflowService, Depends(get_workflow_service)]
+RequestDispatchServiceDependency = Annotated[
+    RequestDispatchService, Depends(get_request_dispatch_service)
+]
 ExternalExecutionServiceDependency = Annotated[
     ExternalExecutionService, Depends(get_external_execution_service)
 ]
@@ -185,6 +193,49 @@ async def register_project(payload: ProjectCreate, service: Service) -> ProjectR
 @router.get("/projects/{project_id}", response_model=ProjectResponse)
 async def get_project(project_id: UUID, service: Service) -> ProjectResponse:
     return ProjectResponse.model_validate(await service.get_project(project_id))
+
+
+@router.put(
+    "/projects/{project_id}/workflow-binding",
+    response_model=ProjectWorkflowBindingResponse,
+)
+async def configure_project_workflow_binding(
+    project_id: UUID,
+    payload: ProjectWorkflowBindingConfigure,
+    service: RequestDispatchServiceDependency,
+) -> ProjectWorkflowBindingResponse:
+    binding = await service.configure_binding(
+        project_id, payload.definition_key, payload.definition_version
+    )
+    return ProjectWorkflowBindingResponse.model_validate(binding)
+
+
+@router.get(
+    "/projects/{project_id}/workflow-binding",
+    response_model=ProjectWorkflowBindingResponse,
+)
+async def get_project_workflow_binding(
+    project_id: UUID, service: RequestDispatchServiceDependency
+) -> ProjectWorkflowBindingResponse:
+    return ProjectWorkflowBindingResponse.model_validate(await service.get_binding(project_id))
+
+
+@router.post(
+    "/projects/{project_id}/dispatches",
+    response_model=DispatchedRequestResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def dispatch_project_request(
+    project_id: UUID,
+    payload: UserRequestCreate,
+    service: RequestDispatchServiceDependency,
+) -> DispatchedRequestResponse:
+    dispatched = await service.dispatch(project_id, payload.prompt, payload.title)
+    return DispatchedRequestResponse(
+        request=UserRequestResponse.model_validate(dispatched.request),
+        run=RunResponse.model_validate(dispatched.run),
+        workflow=workflow_execution_response(dispatched.workflow),
+    )
 
 
 @router.post(
