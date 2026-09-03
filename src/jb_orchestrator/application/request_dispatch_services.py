@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from uuid import UUID
 
+from jb_orchestrator.application.commands import DispatchProjectRequest
 from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNotFound
 from jb_orchestrator.application.unit_of_work import UnitOfWork
 from jb_orchestrator.application.workflow_services import WorkflowService
@@ -14,6 +15,7 @@ from jb_orchestrator.domain import (
     DomainEvent,
     ProjectStatus,
     RequestDispatchReceipt,
+    RequestOrigin,
     Run,
     UserRequest,
 )
@@ -98,29 +100,28 @@ class RequestDispatchService:
             raise ResourceNotFound(f"project workflow binding not found: {project_id}")
         return binding
 
-    async def dispatch(
-        self,
-        project_id: UUID,
-        prompt: str,
-        title: str | None = None,
-        *,
-        idempotency_key: str,
-    ) -> DispatchedRequest:
-        normalized_prompt = prompt.strip()
-        normalized_title = title.strip() if title else None
+    async def dispatch(self, command: DispatchProjectRequest) -> DispatchedRequest:
+        normalized_prompt = command.prompt.strip()
+        normalized_title = command.title.strip() if command.title else None
         normalized_title = normalized_title or None
         async with self._unit_of_work_factory() as unit_of_work:
-            project = await unit_of_work.projects.get(project_id)
+            project = await unit_of_work.projects.get(command.project_id)
             if project is None:
-                raise ResourceNotFound(f"project not found: {project_id}")
+                raise ResourceNotFound(f"project not found: {command.project_id}")
             receipt = RequestDispatchReceipt(
-                project_id=project_id,
-                idempotency_key=idempotency_key,
-                payload_digest=self._payload_digest(normalized_prompt, normalized_title),
+                project_id=command.project_id,
+                ingress_key=command.origin.ingress_key,
+                idempotency_key=command.idempotency_key,
+                payload_digest=self._payload_digest(
+                    normalized_prompt, normalized_title, command.origin
+                ),
             )
             if not await unit_of_work.request_dispatch_receipts.try_claim(receipt):
                 existing = await unit_of_work.request_dispatch_receipts.get(
-                    project_id, receipt.idempotency_key, for_update=True
+                    command.project_id,
+                    receipt.ingress_key,
+                    receipt.idempotency_key,
+                    for_update=True,
                 )
                 if existing is None:
                     raise RuntimeError("claimed dispatch receipt could not be loaded")
@@ -130,22 +131,27 @@ class RequestDispatchService:
                     )
                 return await self._replay(unit_of_work, existing)
             if project.status is not ProjectStatus.ACTIVE:
-                raise ResourceConflict(f"project is not active: {project_id}")
+                raise ResourceConflict(f"project is not active: {command.project_id}")
             binding = await unit_of_work.project_workflow_bindings.get_by_project(
-                project_id, for_update=True
+                command.project_id, for_update=True
             )
             if binding is None:
-                raise ResourceConflict(f"project workflow binding is not configured: {project_id}")
+                raise ResourceConflict(
+                    f"project workflow binding is not configured: {command.project_id}"
+                )
             definition = await unit_of_work.workflow_definitions.get(
                 binding.definition_key, binding.definition_version
             )
             if definition is None or definition.id != binding.definition_id:
-                raise ResourceConflict(f"bound workflow definition is unavailable: {project_id}")
+                raise ResourceConflict(
+                    f"bound workflow definition is unavailable: {command.project_id}"
+                )
 
             request = UserRequest(
                 project_id=project.id,
                 prompt=normalized_prompt,
                 title=normalized_title,
+                origin=command.origin,
             )
             request.activate()
             run = Run(request_id=request.id)
@@ -156,7 +162,16 @@ class RequestDispatchService:
                     aggregate_type="request",
                     aggregate_id=request.id,
                     event_type="request.created",
-                    payload={"project_id": str(project.id), "run_id": str(run.id)},
+                    payload={
+                        "project_id": str(project.id),
+                        "run_id": str(run.id),
+                        "origin": {
+                            "ingress_key": command.origin.ingress_key,
+                            "external_request_id": command.origin.external_request_id,
+                            "actor_id": command.origin.actor_id,
+                            "conversation_id": command.origin.conversation_id,
+                        },
+                    },
                 )
             )
             workflow = await self._workflow_service.create_execution(
@@ -186,10 +201,19 @@ class RequestDispatchService:
         )
 
     @staticmethod
-    def _payload_digest(prompt: str, title: str | None) -> str:
+    def _payload_digest(prompt: str, title: str | None, origin: RequestOrigin) -> str:
         normalized_title = title.strip() if title else None
         payload = json.dumps(
-            {"prompt": prompt.strip(), "title": normalized_title or None},
+            {
+                "prompt": prompt.strip(),
+                "title": normalized_title or None,
+                "origin": {
+                    "ingress_key": origin.ingress_key,
+                    "external_request_id": origin.external_request_id,
+                    "actor_id": origin.actor_id,
+                    "conversation_id": origin.conversation_id,
+                },
+            },
             ensure_ascii=False,
             separators=(",", ":"),
             sort_keys=True,

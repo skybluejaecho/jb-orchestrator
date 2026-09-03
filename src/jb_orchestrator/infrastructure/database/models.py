@@ -101,7 +101,12 @@ class RequestDispatchReceiptRecord(Base):
 
     __tablename__ = "request_dispatch_receipts"
     __table_args__ = (
-        UniqueConstraint("project_id", "idempotency_key", name="uq_dispatch_receipts_project_key"),
+        UniqueConstraint(
+            "project_id",
+            "ingress_key",
+            "idempotency_key",
+            name="uq_dispatch_receipts_project_ingress_key",
+        ),
         CheckConstraint(
             "(request_id IS NULL AND run_id IS NULL AND workflow_execution_id IS NULL "
             "AND completed_at IS NULL) OR "
@@ -116,6 +121,7 @@ class RequestDispatchReceiptRecord(Base):
         ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    ingress_key: Mapped[str] = mapped_column(String(64), nullable=False)
     payload_digest: Mapped[str] = mapped_column(String(71), nullable=False)
     request_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("user_requests.id", ondelete="CASCADE")
@@ -132,6 +138,15 @@ class UserRequestRecord(TimestampMixin, Base):
     """Stored original user intent."""
 
     __tablename__ = "user_requests"
+    __table_args__ = (
+        CheckConstraint(
+            "(ingress_key IS NULL AND external_request_id IS NULL "
+            "AND origin_actor_id IS NULL AND origin_conversation_id IS NULL) OR "
+            "(ingress_key IS NOT NULL AND external_request_id IS NOT NULL)",
+            name="user_request_origin_required_fields",
+        ),
+        Index("ix_user_requests_origin", "ingress_key", "external_request_id"),
+    )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     project_id: Mapped[UUID] = mapped_column(
@@ -139,6 +154,10 @@ class UserRequestRecord(TimestampMixin, Base):
     )
     title: Mapped[str | None] = mapped_column(String(255))
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    ingress_key: Mapped[str | None] = mapped_column(String(64))
+    external_request_id: Mapped[str | None] = mapped_column(String(255))
+    origin_actor_id: Mapped[str | None] = mapped_column(String(255))
+    origin_conversation_id: Mapped[str | None] = mapped_column(String(512))
     status: Mapped[RequestStatus] = mapped_column(
         string_enum(RequestStatus, "request_status"),
         nullable=False,

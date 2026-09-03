@@ -1,7 +1,11 @@
 """Application use-case package."""
 
 from jb_orchestrator.application.budget_services import BudgetService, BudgetUsageRequired
-from jb_orchestrator.application.commands import CreateUserRequest, RegisterProject
+from jb_orchestrator.application.commands import (
+    CreateUserRequest,
+    DispatchProjectRequest,
+    RegisterProject,
+)
 from jb_orchestrator.application.external_execution_services import ExternalExecutionService
 from jb_orchestrator.application.model_services import ModelCatalogService
 from jb_orchestrator.application.phase_pack_services import PhasePackCatalogService
@@ -20,6 +24,7 @@ __all__ = [
     "BudgetUsageRequired",
     "CreateUserRequest",
     "CreatedRequest",
+    "DispatchProjectRequest",
     "DispatchedRequest",
     "ExternalExecutionService",
     "ModelCatalogService",

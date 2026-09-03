@@ -16,6 +16,7 @@ class RequestDispatchReceipt:
     project_id: UUID
     idempotency_key: str
     payload_digest: str
+    ingress_key: str = "legacy"
     id: UUID = field(default_factory=uuid4)
     request_id: UUID | None = None
     run_id: UUID | None = None
@@ -25,6 +26,9 @@ class RequestDispatchReceipt:
 
     def __post_init__(self) -> None:
         self.idempotency_key = self.idempotency_key.strip()
+        self.ingress_key = self.ingress_key.strip()
+        if re.fullmatch(r"[a-z][a-z0-9._-]{0,63}", self.ingress_key) is None:
+            raise DomainValidationError("dispatch receipt ingress key is invalid")
         if not self.idempotency_key or len(self.idempotency_key) > 128:
             raise DomainValidationError("idempotency key must contain 1-128 characters")
         if re.fullmatch(r"sha256:[0-9a-f]{64}", self.payload_digest) is None:
@@ -66,7 +70,12 @@ class RequestDispatchReceiptRepository(Protocol):
     async def try_claim(self, receipt: RequestDispatchReceipt) -> bool: ...
 
     async def get(
-        self, project_id: UUID, idempotency_key: str, *, for_update: bool = False
+        self,
+        project_id: UUID,
+        ingress_key: str,
+        idempotency_key: str,
+        *,
+        for_update: bool = False,
     ) -> RequestDispatchReceipt | None: ...
 
     async def save(self, receipt: RequestDispatchReceipt) -> None: ...

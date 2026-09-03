@@ -45,6 +45,15 @@ class UserRequestCreate(BaseModel):
     prompt: str = Field(min_length=1)
 
 
+class RequestOriginResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    ingress_key: str
+    external_request_id: str
+    actor_id: str | None
+    conversation_id: str | None
+
+
 class UserRequestResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -52,6 +61,7 @@ class UserRequestResponse(BaseModel):
     project_id: UUID
     title: str | None
     prompt: str
+    origin: RequestOriginResponse | None
     status: RequestStatus
     created_at: datetime
     updated_at: datetime

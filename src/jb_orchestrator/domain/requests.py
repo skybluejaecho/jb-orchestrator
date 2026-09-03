@@ -7,6 +7,7 @@ from typing import Final
 from uuid import UUID, uuid4
 
 from jb_orchestrator.domain.exceptions import DomainValidationError, InvalidStateTransition
+from jb_orchestrator.domain.ingress import RequestOrigin
 
 
 class RequestStatus(StrEnum):
@@ -33,6 +34,7 @@ class UserRequest:
     project_id: UUID
     prompt: str
     title: str | None = None
+    origin: RequestOrigin | None = None
     id: UUID = field(default_factory=uuid4)
     status: RequestStatus = RequestStatus.RECEIVED
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))

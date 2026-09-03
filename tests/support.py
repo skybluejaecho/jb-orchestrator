@@ -42,7 +42,7 @@ from jb_orchestrator.workflows import (
 class MemoryStore:
     projects: dict[UUID, Project] = field(default_factory=dict)
     requests: dict[UUID, UserRequest] = field(default_factory=dict)
-    request_dispatch_receipts: dict[tuple[UUID, str], RequestDispatchReceipt] = field(
+    request_dispatch_receipts: dict[tuple[UUID, str, str], RequestDispatchReceipt] = field(
         default_factory=dict
     )
     runs: dict[UUID, Run] = field(default_factory=dict)
@@ -151,21 +151,26 @@ class MemoryRequestDispatchReceiptRepository:
         self._store = store
 
     async def try_claim(self, receipt: RequestDispatchReceipt) -> bool:
-        key = (receipt.project_id, receipt.idempotency_key)
+        key = (receipt.project_id, receipt.ingress_key, receipt.idempotency_key)
         if key in self._store.request_dispatch_receipts:
             return False
         self._store.request_dispatch_receipts[key] = receipt
         return True
 
     async def get(
-        self, project_id: UUID, idempotency_key: str, *, for_update: bool = False
+        self,
+        project_id: UUID,
+        ingress_key: str,
+        idempotency_key: str,
+        *,
+        for_update: bool = False,
     ) -> RequestDispatchReceipt | None:
-        return self._store.request_dispatch_receipts.get((project_id, idempotency_key))
+        return self._store.request_dispatch_receipts.get((project_id, ingress_key, idempotency_key))
 
     async def save(self, receipt: RequestDispatchReceipt) -> None:
-        self._store.request_dispatch_receipts[(receipt.project_id, receipt.idempotency_key)] = (
-            receipt
-        )
+        self._store.request_dispatch_receipts[
+            (receipt.project_id, receipt.ingress_key, receipt.idempotency_key)
+        ] = receipt
 
 
 class MemoryExternalExecutionRepository:

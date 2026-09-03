@@ -52,6 +52,7 @@ from jb_orchestrator.api.schemas import (
 from jb_orchestrator.application import (
     BudgetService,
     CreateUserRequest,
+    DispatchProjectRequest,
     ExternalExecutionService,
     ModelCatalogService,
     OrchestrationService,
@@ -66,6 +67,7 @@ from jb_orchestrator.config import get_settings
 from jb_orchestrator.domain import (
     DomainValidationError,
     ProjectStatus,
+    RequestOrigin,
     RequestStatus,
     RunStatus,
 )
@@ -316,12 +318,39 @@ async def dispatch_project_request(
     payload: UserRequestCreate,
     service: RequestDispatchServiceDependency,
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=128)],
+    ingress_key: Annotated[
+        str,
+        Header(
+            alias="X-JB-Ingress-Key",
+            pattern=r"^[a-z][a-z0-9._-]{0,63}$",
+            max_length=64,
+        ),
+    ] = "rest",
+    external_request_id: Annotated[
+        str | None,
+        Header(alias="X-JB-External-Request-ID", min_length=1, max_length=255),
+    ] = None,
+    actor_id: Annotated[
+        str | None, Header(alias="X-JB-Actor-ID", min_length=1, max_length=255)
+    ] = None,
+    conversation_id: Annotated[
+        str | None,
+        Header(alias="X-JB-Conversation-ID", min_length=1, max_length=512),
+    ] = None,
 ) -> DispatchedRequestResponse:
     dispatched = await service.dispatch(
-        project_id,
-        payload.prompt,
-        payload.title,
-        idempotency_key=idempotency_key,
+        DispatchProjectRequest(
+            project_id=project_id,
+            prompt=payload.prompt,
+            title=payload.title,
+            idempotency_key=idempotency_key,
+            origin=RequestOrigin(
+                ingress_key=ingress_key,
+                external_request_id=external_request_id or idempotency_key,
+                actor_id=actor_id,
+                conversation_id=conversation_id,
+            ),
+        )
     )
     return DispatchedRequestResponse(
         request=UserRequestResponse.model_validate(dispatched.request),

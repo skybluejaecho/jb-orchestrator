@@ -17,6 +17,7 @@ def receipt_from_record(record: RequestDispatchReceiptRecord) -> RequestDispatch
         project_id=record.project_id,
         idempotency_key=record.idempotency_key,
         payload_digest=record.payload_digest,
+        ingress_key=record.ingress_key,
         request_id=record.request_id,
         run_id=record.run_id,
         workflow_execution_id=record.workflow_execution_id,
@@ -35,6 +36,7 @@ class SqlAlchemyRequestDispatchReceiptRepository:
             "project_id": receipt.project_id,
             "idempotency_key": receipt.idempotency_key,
             "payload_digest": receipt.payload_digest,
+            "ingress_key": receipt.ingress_key,
             "created_at": receipt.created_at,
         }
         dialect_name = self._session.get_bind().dialect.name
@@ -42,14 +44,18 @@ class SqlAlchemyRequestDispatchReceiptRepository:
             claimed_id = await self._session.scalar(
                 postgresql_insert(RequestDispatchReceiptRecord)
                 .values(**values)
-                .on_conflict_do_nothing(index_elements=["project_id", "idempotency_key"])
+                .on_conflict_do_nothing(
+                    index_elements=["project_id", "ingress_key", "idempotency_key"]
+                )
                 .returning(RequestDispatchReceiptRecord.id)
             )
         elif dialect_name == "sqlite":
             claimed_id = await self._session.scalar(
                 sqlite_insert(RequestDispatchReceiptRecord)
                 .values(**values)
-                .on_conflict_do_nothing(index_elements=["project_id", "idempotency_key"])
+                .on_conflict_do_nothing(
+                    index_elements=["project_id", "ingress_key", "idempotency_key"]
+                )
                 .returning(RequestDispatchReceiptRecord.id)
             )
         else:
@@ -57,10 +63,16 @@ class SqlAlchemyRequestDispatchReceiptRepository:
         return claimed_id is not None
 
     async def get(
-        self, project_id: UUID, idempotency_key: str, *, for_update: bool = False
+        self,
+        project_id: UUID,
+        ingress_key: str,
+        idempotency_key: str,
+        *,
+        for_update: bool = False,
     ) -> RequestDispatchReceipt | None:
         statement = select(RequestDispatchReceiptRecord).where(
             RequestDispatchReceiptRecord.project_id == project_id,
+            RequestDispatchReceiptRecord.ingress_key == ingress_key,
             RequestDispatchReceiptRecord.idempotency_key == idempotency_key,
         )
         if for_update:

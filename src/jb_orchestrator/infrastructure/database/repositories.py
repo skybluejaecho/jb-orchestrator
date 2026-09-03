@@ -9,6 +9,7 @@ from jb_orchestrator.domain import (
     DomainEvent,
     Project,
     ProjectStatus,
+    RequestOrigin,
     RequestStatus,
     Run,
     RunStatus,
@@ -45,6 +46,16 @@ def request_from_record(record: UserRequestRecord) -> UserRequest:
         project_id=record.project_id,
         title=record.title,
         prompt=record.prompt,
+        origin=(
+            RequestOrigin(
+                ingress_key=record.ingress_key,
+                external_request_id=record.external_request_id,
+                actor_id=record.origin_actor_id,
+                conversation_id=record.origin_conversation_id,
+            )
+            if record.ingress_key is not None and record.external_request_id is not None
+            else None
+        ),
         status=record.status,
         created_at=record.created_at,
         updated_at=record.updated_at,
@@ -125,6 +136,14 @@ class SqlAlchemyUserRequestRepository:
                 project_id=request.project_id,
                 title=request.title,
                 prompt=request.prompt,
+                ingress_key=request.origin.ingress_key if request.origin is not None else None,
+                external_request_id=(
+                    request.origin.external_request_id if request.origin is not None else None
+                ),
+                origin_actor_id=request.origin.actor_id if request.origin is not None else None,
+                origin_conversation_id=(
+                    request.origin.conversation_id if request.origin is not None else None
+                ),
                 status=request.status,
                 created_at=request.created_at,
                 updated_at=request.updated_at,
