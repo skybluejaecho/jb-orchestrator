@@ -18,6 +18,7 @@ from jb_orchestrator.workflows.models import (
     NodeKind,
     NodeOutcome,
     WorkflowDefinition,
+    WorkflowRequestContext,
     WorkflowSnapshot,
     WorkflowStatus,
 )
@@ -100,6 +101,32 @@ def definition_from_dict(data: dict[str, Any]) -> WorkflowDefinition:
     )
 
 
+def request_context_to_dict(context: WorkflowRequestContext) -> dict[str, Any]:
+    return {
+        "request_id": str(context.request_id),
+        "project_id": str(context.project_id),
+        "project_key": context.project_key,
+        "project_name": context.project_name,
+        "repository_url": context.repository_url,
+        "default_branch": context.default_branch,
+        "prompt": context.prompt,
+        "title": context.title,
+    }
+
+
+def request_context_from_dict(data: dict[str, Any]) -> WorkflowRequestContext:
+    return WorkflowRequestContext(
+        request_id=UUID(str(data["request_id"])),
+        project_id=UUID(str(data["project_id"])),
+        project_key=str(data["project_key"]),
+        project_name=str(data["project_name"]),
+        repository_url=str(data["repository_url"]),
+        default_branch=str(data["default_branch"]),
+        prompt=str(data["prompt"]),
+        title=str(data["title"]) if data.get("title") is not None else None,
+    )
+
+
 def snapshot_to_dict(snapshot: WorkflowSnapshot) -> dict[str, Any]:
     return {
         "id": str(snapshot.id),
@@ -110,6 +137,11 @@ def snapshot_to_dict(snapshot: WorkflowSnapshot) -> dict[str, Any]:
         "entry_node": snapshot.entry_node,
         "nodes": [node_to_dict(node) for node in snapshot.nodes],
         "edges": [edge_to_dict(edge) for edge in snapshot.edges],
+        "request_context": (
+            request_context_to_dict(snapshot.request_context)
+            if snapshot.request_context is not None
+            else None
+        ),
         "created_at": snapshot.created_at.isoformat(),
         "skills": [skill_to_dict(skill) for skill in snapshot.skills],
         "model_selections": [node_selection_to_dict(value) for value in snapshot.model_selections],
@@ -117,6 +149,7 @@ def snapshot_to_dict(snapshot: WorkflowSnapshot) -> dict[str, Any]:
 
 
 def snapshot_from_dict(data: dict[str, Any]) -> WorkflowSnapshot:
+    request_context = data.get("request_context")
     return WorkflowSnapshot(
         id=UUID(str(data["id"])),
         run_id=UUID(str(data["run_id"])),
@@ -126,6 +159,11 @@ def snapshot_from_dict(data: dict[str, Any]) -> WorkflowSnapshot:
         entry_node=str(data["entry_node"]),
         nodes=tuple(node_from_dict(node) for node in data["nodes"]),
         edges=tuple(edge_from_dict(edge) for edge in data["edges"]),
+        request_context=(
+            request_context_from_dict(request_context)
+            if isinstance(request_context, dict)
+            else None
+        ),
         created_at=datetime.fromisoformat(str(data["created_at"])),
         skills=tuple(skill_from_dict(skill) for skill in data.get("skills", [])),
         model_selections=tuple(

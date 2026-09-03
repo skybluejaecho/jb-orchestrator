@@ -7,8 +7,9 @@ from uuid import UUID
 
 from jb_orchestrator.application.exceptions import ResourceNotFound
 from jb_orchestrator.application.unit_of_work import UnitOfWork
+from jb_orchestrator.artifacts import TaskArtifact
 from jb_orchestrator.domain import DomainEvent
-from jb_orchestrator.worker.models import TaskClaim, TaskResult
+from jb_orchestrator.worker.models import TaskClaim, TaskContextEnvelope, TaskResult
 from jb_orchestrator.workflows import WorkflowEngine, WorkflowExecution
 
 
@@ -51,6 +52,11 @@ class TaskDispatchService:
             )
             if node.lease_token is None:
                 raise RuntimeError("claimed node did not receive a lease token")
+            request_context = execution.snapshot.request_context
+            upstream_artifacts = await unit_of_work.artifacts.list_latest_for_nodes(
+                execution.id,
+                execution.snapshot.incoming_sources(node.node_key),
+            )
             claim = TaskClaim(
                 execution_id=execution.id,
                 run_id=execution.snapshot.run_id,
@@ -68,6 +74,14 @@ class TaskDispatchService:
                 configuration=dict(definition.configuration),
                 skills=tuple(
                     execution.snapshot.skill(reference) for reference in definition.skills
+                ),
+                context=(
+                    TaskContextEnvelope(
+                        request=request_context,
+                        upstream_artifacts=tuple(upstream_artifacts),
+                    )
+                    if request_context is not None
+                    else None
                 ),
                 model_selection=execution.snapshot.model_selection(node.node_key),
             )
@@ -125,6 +139,15 @@ class TaskDispatchService:
                 lease_token=claim.lease_token,
                 at=changed_at,
             )
+            artifact = TaskArtifact(
+                execution_id=execution.id,
+                producer_node_key=claim.node_key,
+                visit_count=claim.visit_count,
+                outcome=result.outcome,
+                content=result.output,
+                created_at=changed_at,
+            )
+            await unit_of_work.artifacts.add(artifact)
             await unit_of_work.workflow_executions.save(execution)
             await self._append_event(
                 unit_of_work,
@@ -133,6 +156,7 @@ class TaskDispatchService:
                 node_key=claim.node_key,
                 worker_id=claim.worker_id,
                 outcome=result.outcome.value,
+                artifact_id=str(artifact.id),
             )
             await unit_of_work.commit()
         return execution

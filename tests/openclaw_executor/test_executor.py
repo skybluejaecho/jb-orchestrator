@@ -4,9 +4,10 @@ from uuid import uuid4
 from jb_openclaw_executor import OpenClawExecutor
 
 from jb_orchestrator.application import ExternalExecutionService
+from jb_orchestrator.artifacts import TaskArtifact
 from jb_orchestrator.external_executions import ExternalExecutionStatus
-from jb_orchestrator.worker import TaskClaim
-from jb_orchestrator.workflows import NodeOutcome
+from jb_orchestrator.worker import TaskClaim, TaskContextEnvelope
+from jb_orchestrator.workflows import NodeOutcome, WorkflowRequestContext
 from tests.support import MemoryStore, MemoryUnitOfWork
 
 
@@ -35,8 +36,9 @@ class FakeBridge:
 
 
 def task_claim() -> TaskClaim:
+    execution_id = uuid4()
     return TaskClaim(
-        execution_id=uuid4(),
+        execution_id=execution_id,
         run_id=uuid4(),
         node_key="review",
         executor_key="openclaw",
@@ -51,6 +53,27 @@ def task_claim() -> TaskClaim:
         instructions="Review the implementation.",
         configuration={"agent_id": "reviewer", "thinking": "low"},
         skills=(),
+        context=TaskContextEnvelope(
+            request=WorkflowRequestContext(
+                request_id=uuid4(),
+                project_id=uuid4(),
+                project_key="delivery-project",
+                project_name="Delivery Project",
+                repository_url="https://example.com/delivery.git",
+                default_branch="develop",
+                prompt="Implement the approved change.",
+                title="Delivery request",
+            ),
+            upstream_artifacts=(
+                TaskArtifact(
+                    execution_id=execution_id,
+                    producer_node_key="plan",
+                    visit_count=1,
+                    outcome=NodeOutcome.SUCCESS,
+                    content={"requirements": ["keep context durable"]},
+                ),
+            ),
+        ),
         skill_paths={"review@1": "C:/skills/review/SKILL.md"},
     )
 
@@ -72,6 +95,9 @@ async def test_executor_persists_run_and_normalizes_terminal_result() -> None:
     assert bridge.starts[0]["sessionKey"].startswith("agent:reviewer:jb:")
     assert bridge.starts[0]["idempotencyKey"] == claim.idempotency_key
     assert "C:/skills/review/SKILL.md" in bridge.starts[0]["message"]
+    assert "Implement the approved change." in bridge.starts[0]["message"]
+    assert "https://example.com/delivery.git" in bridge.starts[0]["message"]
+    assert "keep context durable" in bridge.starts[0]["message"]
     assert bridge.waits == [("openclaw-run-1", 300_000)]
 
 

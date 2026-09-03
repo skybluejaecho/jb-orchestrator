@@ -134,11 +134,15 @@ async def test_application_service_round_trip_with_sqlalchemy() -> None:
         TaskResult(outcome=NodeOutcome.SUCCESS, output={"commit": "abc123"}),
     )
     stored_execution = await workflow_service.get(execution.id)
+    artifacts = await workflow_service.list_artifacts(execution.id)
     assert stored_execution.status is WorkflowStatus.SUCCEEDED
     assert stored_execution.nodes["implement"].status is NodeExecutionStatus.SUCCEEDED
     assert stored_execution.nodes["implement"].output == {"commit": "abc123"}
     assert stored_execution.nodes["implement"].lease_token is None
     assert stored_execution.version == completed_execution.version
+    assert len(artifacts) == 1
+    assert artifacts[0].producer_node_key == "implement"
+    assert artifacts[0].content == {"commit": "abc123"}
 
     cancelled = await service.cancel_run(created.run.id)
     assert cancelled.status is RunStatus.CANCELLED

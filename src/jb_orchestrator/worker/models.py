@@ -1,12 +1,25 @@
 """Worker/executor boundary models."""
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 from uuid import UUID
 
+from jb_orchestrator.artifacts import TaskArtifact
 from jb_orchestrator.model_routing import ModelSelection
 from jb_orchestrator.skills import SkillDefinition
-from jb_orchestrator.workflows import NodeOutcome
+from jb_orchestrator.workflows import NodeOutcome, WorkflowRequestContext
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class TaskContextEnvelope:
+    """Pinned request context plus direct durable inputs for one task claim."""
+
+    request: WorkflowRequestContext
+    upstream_artifacts: tuple[TaskArtifact, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "upstream_artifacts", deepcopy(self.upstream_artifacts))
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -28,6 +41,7 @@ class TaskClaim:
     instructions: str | None
     configuration: dict[str, Any]
     skills: tuple[SkillDefinition, ...]
+    context: TaskContextEnvelope | None = None
     model_selection: ModelSelection | None = None
     skill_paths: dict[str, str] = field(default_factory=dict)
 
