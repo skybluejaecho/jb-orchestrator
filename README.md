@@ -212,6 +212,14 @@ ORCH-025 adds project-scoped observation for local GUIs and other clients:
 - catalog-global events excluded from project streams
 - common aggregate identity included in SSE payloads while preserving external-stream compatibility
 
+ORCH-026 separates request ingress from execution runtimes:
+
+- transport-neutral request origin persisted with each dispatched User Request
+- one application command shared by REST and future MCP, CLI, webhook, or scheduler adapters
+- extensible string ingress keys avoiding catalog migrations for new client types
+- project-and-ingress-scoped idempotency preventing unrelated clients from colliding
+- external request, actor, and conversation identifiers returned through observation APIs
+
 ## Prerequisites
 
 - Python 3.12
@@ -311,6 +319,11 @@ Workflow Execution이 하나의 트랜잭션에서 생성됩니다. 선택된 �
 계속 제공됩니다. Dispatch 호출에는 프로젝트 범위에서 고유한 `Idempotency-Key` 헤더가
 필수입니다. 같은 key와 payload를 재전송하면 응답의 `replayed`가 `true`이고 최초 실행을
 그대로 반환합니다. 같은 key를 다른 payload에 사용하면 `409 Conflict`가 반환됩니다.
+입력 어댑터는 선택적으로 `X-JB-Ingress-Key`, `X-JB-External-Request-ID`,
+`X-JB-Actor-ID`, `X-JB-Conversation-ID`를 전달할 수 있습니다. 멱등성 key는 프로젝트와
+ingress 안에서 고유하므로 OpenClaw와 Jarvis가 우연히 같은 key를 사용해도 서로 충돌하지
+않습니다. 현재 이 origin 값은 호출자가 주장한 메타데이터이며, 원격 연결 전에 별도의 API
+인증과 프로젝트 권한 검증이 필요합니다.
 
 프로젝트 관찰 API는 DB 관계를 기준으로 Request, Run, Workflow Execution을 조회합니다.
 Jarvis는 `GET /v1/projects/{project_id}/events/stream` 하나로 프로젝트에 속한 상태 변화를
