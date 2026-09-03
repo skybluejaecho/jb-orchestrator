@@ -384,6 +384,9 @@ class MemoryWorkflowExecutionRepository:
     async def get(self, execution_id: UUID) -> WorkflowExecution | None:
         return self._store.workflow_executions.get(execution_id)
 
+    async def get_for_update(self, execution_id: UUID) -> WorkflowExecution | None:
+        return self._store.workflow_executions.get(execution_id)
+
     async def get_by_run(self, run_id: UUID) -> WorkflowExecution | None:
         return next(
             (

@@ -1,8 +1,10 @@
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from jb_orchestrator.infrastructure.database import Base
 from jb_orchestrator.infrastructure.database.workflow_repositories import (
     SqlAlchemyWorkflowDefinitionRepository,
+    SqlAlchemyWorkflowExecutionRepository,
 )
 from jb_orchestrator.workflows import (
     NodeDefinition,
@@ -46,3 +48,28 @@ async def test_workflow_repository_lists_latest_version_per_key() -> None:
 
     assert [(item.key, item.version) for item in stored] == [("alpha", 2), ("beta", 1)]
     await engine.dispose()
+
+
+class RecordingSession:
+    def __init__(self) -> None:
+        self.statement = None
+
+    async def scalar(self, statement):
+        self.statement = statement
+        return None
+
+
+async def test_ready_claim_locks_the_workflow_aggregate_with_skip_locked() -> None:
+    session = RecordingSession()
+    repository = SqlAlchemyWorkflowExecutionRepository(session)  # type: ignore[arg-type]
+
+    assert await repository.get_ready_for_update() is None
+
+    assert session.statement is not None
+    sql = str(
+        session.statement.compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+    assert "FOR UPDATE OF workflow_executions SKIP LOCKED" in sql

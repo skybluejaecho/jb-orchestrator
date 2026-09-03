@@ -153,7 +153,7 @@ class WorkflowService:
 
     async def begin_task(self, execution_id: UUID, node_key: str) -> WorkflowExecution:
         async with self._unit_of_work_factory() as unit_of_work:
-            execution = await self._get_execution(unit_of_work, execution_id)
+            execution = await self._get_execution(unit_of_work, execution_id, for_update=True)
             self._engine.begin_task(execution, node_key)
             await unit_of_work.workflow_executions.save(execution)
             await self._append_event(
@@ -170,7 +170,7 @@ class WorkflowService:
         output: dict[str, Any] | None = None,
     ) -> WorkflowExecution:
         async with self._unit_of_work_factory() as unit_of_work:
-            execution = await self._get_execution(unit_of_work, execution_id)
+            execution = await self._get_execution(unit_of_work, execution_id, for_update=True)
             visit_count = execution.nodes[node_key].visit_count
             definition = execution.snapshot.node(node_key)
             phase_pack = (
@@ -214,7 +214,7 @@ class WorkflowService:
 
     async def fail_task(self, execution_id: UUID, node_key: str, reason: str) -> WorkflowExecution:
         async with self._unit_of_work_factory() as unit_of_work:
-            execution = await self._get_execution(unit_of_work, execution_id)
+            execution = await self._get_execution(unit_of_work, execution_id, for_update=True)
             self._engine.fail_task(execution, node_key, reason)
             await unit_of_work.workflow_executions.save(execution)
             await self._append_event(
@@ -231,7 +231,7 @@ class WorkflowService:
         self, execution_id: UUID, node_key: str, *, approved: bool
     ) -> WorkflowExecution:
         async with self._unit_of_work_factory() as unit_of_work:
-            execution = await self._get_execution(unit_of_work, execution_id)
+            execution = await self._get_execution(unit_of_work, execution_id, for_update=True)
             self._engine.resolve_approval(execution, node_key, approved=approved)
             await unit_of_work.workflow_executions.save(execution)
             await self._append_event(
@@ -246,7 +246,7 @@ class WorkflowService:
 
     async def cancel(self, execution_id: UUID) -> WorkflowExecution:
         async with self._unit_of_work_factory() as unit_of_work:
-            execution = await self._get_execution(unit_of_work, execution_id)
+            execution = await self._get_execution(unit_of_work, execution_id, for_update=True)
             self._engine.cancel(execution)
             await release_run_reservations(
                 unit_of_work,
@@ -259,8 +259,17 @@ class WorkflowService:
         return execution
 
     @staticmethod
-    async def _get_execution(unit_of_work: UnitOfWork, execution_id: UUID) -> WorkflowExecution:
-        execution = await unit_of_work.workflow_executions.get(execution_id)
+    async def _get_execution(
+        unit_of_work: UnitOfWork,
+        execution_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> WorkflowExecution:
+        execution = (
+            await unit_of_work.workflow_executions.get_for_update(execution_id)
+            if for_update
+            else await unit_of_work.workflow_executions.get(execution_id)
+        )
         if execution is None:
             raise ResourceNotFound(f"workflow execution not found: {execution_id}")
         return execution

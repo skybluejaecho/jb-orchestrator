@@ -276,7 +276,7 @@ class TaskDispatchService:
 
     @staticmethod
     async def _get_execution(unit_of_work: UnitOfWork, execution_id: UUID) -> WorkflowExecution:
-        execution = await unit_of_work.workflow_executions.get(execution_id)
+        execution = await unit_of_work.workflow_executions.get_for_update(execution_id)
         if execution is None:
             raise ResourceNotFound(f"workflow execution not found: {execution_id}")
         return execution
