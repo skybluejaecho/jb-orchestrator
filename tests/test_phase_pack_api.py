@@ -39,11 +39,24 @@ async def test_phase_pack_catalog_registers_versions_and_lists_latest() -> None:
 
         latest = await client.get("/v1/phase-packs")
         exact = await client.get("/v1/phase-packs/implementation", params={"version": 1})
+        invalid_schema = await client.post(
+            "/v1/phase-packs",
+            json={
+                "key": "invalid-output",
+                "version": 1,
+                "name": "Invalid output",
+                "description": "Contains a malformed schema.",
+                "instructions": "This phase must not be registered.",
+                "output_contract": {"type": "not-a-json-type"},
+            },
+        )
 
     assert latest.status_code == 200
     assert latest.json()[0]["version"] == 2
     assert exact.status_code == 200
     assert exact.json()["inputs"][0]["key"] == "approved_plan"
+    assert invalid_schema.status_code == 422
+    assert "valid JSON Schema" in invalid_schema.json()["detail"]
     assert [event.event_type for event in store.events] == [
         "phase_pack.registered",
         "phase_pack.registered",

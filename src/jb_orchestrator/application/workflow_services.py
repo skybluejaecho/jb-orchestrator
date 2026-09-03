@@ -6,6 +6,7 @@ from uuid import UUID
 
 from jb_orchestrator.application.budget_services import release_run_reservations
 from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNotFound
+from jb_orchestrator.application.output_contracts import enforce_output_contract
 from jb_orchestrator.application.unit_of_work import UnitOfWork
 from jb_orchestrator.artifacts import TaskArtifact
 from jb_orchestrator.domain import DomainEvent
@@ -171,13 +172,26 @@ class WorkflowService:
         async with self._unit_of_work_factory() as unit_of_work:
             execution = await self._get_execution(unit_of_work, execution_id)
             visit_count = execution.nodes[node_key].visit_count
-            self._engine.complete_task(execution, node_key, outcome, output=output)
+            definition = execution.snapshot.node(node_key)
+            phase_pack = (
+                execution.snapshot.phase_pack(definition.phase_pack)
+                if definition.phase_pack is not None
+                else None
+            )
+            decision = enforce_output_contract(phase_pack, outcome, output or {})
+            effective_output = decision.output if decision.rejected else output
+            self._engine.complete_task(
+                execution,
+                node_key,
+                decision.outcome,
+                output=effective_output,
+            )
             artifact = TaskArtifact(
                 execution_id=execution.id,
                 producer_node_key=node_key,
                 visit_count=visit_count,
-                outcome=outcome,
-                content=output or {},
+                outcome=decision.outcome,
+                content=decision.output,
             )
             await unit_of_work.artifacts.add(artifact)
             await unit_of_work.workflow_executions.save(execution)
@@ -186,8 +200,9 @@ class WorkflowService:
                 execution,
                 "workflow.node_completed",
                 node_key=node_key,
-                outcome=outcome.value,
+                outcome=decision.outcome.value,
                 artifact_id=str(artifact.id),
+                output_contract_rejected=decision.rejected,
             )
             await unit_of_work.commit()
         return execution

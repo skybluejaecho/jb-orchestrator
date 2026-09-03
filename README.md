@@ -161,6 +161,15 @@ ORCH-019 adds composable, versioned phase packs:
 - named inputs and output contracts rendered for OpenClaw execution
 - legacy nodes retaining automatic direct-predecessor artifact delivery
 
+ORCH-020 enforces phase output contracts:
+
+- phase output contracts validated as JSON Schema Draft 2020-12
+- malformed schemas rejected before a phase-pack version is registered
+- invalid successful outputs converted into structured failure artifacts
+- original rejected output and deterministic validation details retained for repair
+- contract failures routed through ordinary workflow failure edges and repair loops
+- valid successes and explicit executor failures preserved without rewriting
+
 ## Prerequisites
 
 - Python 3.12
