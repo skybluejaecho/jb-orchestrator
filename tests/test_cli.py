@@ -7,6 +7,7 @@ from pytest import MonkeyPatch
 from typer.testing import CliRunner
 
 from jb_orchestrator.cli.main import app
+from jb_orchestrator.config import get_settings
 
 runner = CliRunner()
 
@@ -57,9 +58,10 @@ def test_project_register_calls_control_plane(monkeypatch: MonkeyPatch) -> None:
         url: str,
         *,
         json: dict[str, Any] | None,
+        headers: dict[str, str],
         timeout: float,
     ) -> httpx.Response:
-        captured.update(method=method, url=url, payload=json, timeout=timeout)
+        captured.update(method=method, url=url, payload=json, headers=headers, timeout=timeout)
         request = httpx.Request(method, url)
         return httpx.Response(
             201,
@@ -92,3 +94,29 @@ def test_project_register_calls_control_plane(monkeypatch: MonkeyPatch) -> None:
     assert captured["method"] == "POST"
     assert captured["url"] == "http://127.0.0.1:8000/v1/projects"
     assert captured["payload"]["default_branch"] == "develop"
+
+
+def test_control_plane_call_includes_configured_token(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("JB_API_TOKEN", "secret-token")
+    get_settings.cache_clear()
+    captured: dict[str, Any] = {}
+
+    def fake_request(
+        method: str,
+        url: str,
+        *,
+        json: dict[str, Any] | None,
+        headers: dict[str, str],
+        timeout: float,
+    ) -> httpx.Response:
+        captured["headers"] = headers
+        return httpx.Response(200, request=httpx.Request(method, url), json={})
+
+    monkeypatch.setattr(httpx, "request", fake_request)
+    try:
+        result = runner.invoke(app, ["request", "get", "00000000-0000-0000-0000-000000000001"])
+    finally:
+        get_settings.cache_clear()
+
+    assert result.exit_code == 0
+    assert captured["headers"] == {"Authorization": "Bearer secret-token"}

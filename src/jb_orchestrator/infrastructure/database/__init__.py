@@ -30,6 +30,7 @@ from jb_orchestrator.infrastructure.database.models import (
     ProjectWorkflowBindingRecord,
     RequestDispatchReceiptRecord,
     RunRecord,
+    ServiceAccountRecord,
     SkillDefinitionRecord,
     TaskArtifactRecord,
     UsageRecordRecord,
@@ -45,6 +46,9 @@ from jb_orchestrator.infrastructure.database.repositories import (
     SqlAlchemyProjectRepository,
     SqlAlchemyRunRepository,
     SqlAlchemyUserRequestRepository,
+)
+from jb_orchestrator.infrastructure.database.security_repositories import (
+    SqlAlchemyServiceAccountRepository,
 )
 from jb_orchestrator.infrastructure.database.session import create_session_factory
 from jb_orchestrator.infrastructure.database.skill_repositories import SqlAlchemySkillRepository
@@ -70,6 +74,7 @@ __all__ = [
     "ProjectWorkflowBindingRecord",
     "RequestDispatchReceiptRecord",
     "RunRecord",
+    "ServiceAccountRecord",
     "SkillDefinitionRecord",
     "SqlAlchemyBudgetAccountRepository",
     "SqlAlchemyBudgetReservationRepository",
@@ -81,6 +86,7 @@ __all__ = [
     "SqlAlchemyProjectWorkflowBindingRepository",
     "SqlAlchemyRequestDispatchReceiptRepository",
     "SqlAlchemyRunRepository",
+    "SqlAlchemyServiceAccountRepository",
     "SqlAlchemySkillRepository",
     "SqlAlchemyTaskArtifactRepository",
     "SqlAlchemyUnitOfWork",

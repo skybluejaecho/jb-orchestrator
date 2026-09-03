@@ -80,6 +80,22 @@ class ProjectRecord(TimestampMixin, Base):
     )
 
 
+class ServiceAccountRecord(Base):
+    """Hashed bearer credential with explicit permissions and project scope."""
+
+    __tablename__ = "service_accounts"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    token_digest: Mapped[str] = mapped_column(String(71), nullable=False)
+    permissions: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    project_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    all_projects: Mapped[bool] = mapped_column(nullable=False, default=False)
+    enabled: Mapped[bool] = mapped_column(nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class ProjectWorkflowBindingRecord(TimestampMixin, Base):
     """Current exact workflow version selected for a project."""
 

@@ -28,6 +28,7 @@ def test_metadata_creates_initial_domain_schema() -> None:
         "projects",
         "request_dispatch_receipts",
         "runs",
+        "service_accounts",
         "skill_definitions",
         "task_artifacts",
         "user_requests",

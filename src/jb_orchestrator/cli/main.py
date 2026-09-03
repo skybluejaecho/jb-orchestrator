@@ -1,5 +1,6 @@
 """Administration CLI entry point."""
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Annotated, Any, cast
@@ -9,7 +10,10 @@ import httpx
 import typer
 
 from jb_orchestrator import __version__
+from jb_orchestrator.application import SecurityService
 from jb_orchestrator.config import get_settings
+from jb_orchestrator.infrastructure.database import SqlAlchemyUnitOfWork, create_session_factory
+from jb_orchestrator.security import ApiPermission
 from jb_orchestrator.skills.materialization import (
     SkillMaterializationError,
     compute_directory_digest,
@@ -20,18 +24,26 @@ project_app = typer.Typer(no_args_is_help=True, help="Manage registered projects
 request_app = typer.Typer(no_args_is_help=True, help="Submit and inspect user requests.")
 run_app = typer.Typer(no_args_is_help=True, help="Inspect and control runs.")
 skill_app = typer.Typer(no_args_is_help=True, help="Inspect and prepare skills.")
+auth_app = typer.Typer(no_args_is_help=True, help="Manage API service accounts.")
 app.add_typer(project_app, name="project")
 app.add_typer(request_app, name="request")
 app.add_typer(run_app, name="run")
 app.add_typer(skill_app, name="skill")
+app.add_typer(auth_app, name="auth")
 
 
 def call_api(method: str, path: str, *, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     """Call the configured control-plane API and render failures consistently."""
 
-    base_url = get_settings().control_plane_url.rstrip("/")
+    settings = get_settings()
+    base_url = settings.control_plane_url.rstrip("/")
+    headers = {}
+    if settings.api_token is not None:
+        headers["Authorization"] = f"Bearer {settings.api_token.get_secret_value()}"
     try:
-        response = httpx.request(method, f"{base_url}{path}", json=payload, timeout=10.0)
+        response = httpx.request(
+            method, f"{base_url}{path}", json=payload, headers=headers, timeout=10.0
+        )
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
         typer.echo(exc.response.text, err=True)
@@ -60,6 +72,8 @@ def doctor() -> None:
     settings = get_settings()
     result = {
         "api": f"{settings.api_host}:{settings.api_port}",
+        "api_auth_enabled": settings.api_auth_enabled,
+        "api_token_configured": settings.api_token is not None,
         "database_configured": bool(settings.database_url),
         "environment": settings.environment,
         "control_plane_url": settings.control_plane_url,
@@ -67,6 +81,53 @@ def doctor() -> None:
         "version": __version__,
     }
     typer.echo(json.dumps(result, indent=2, sort_keys=True))
+
+
+def security_service() -> SecurityService:
+    session_factory = create_session_factory()
+    return SecurityService(lambda: SqlAlchemyUnitOfWork(session_factory))
+
+
+@auth_app.command("issue")
+def issue_service_account(
+    *,
+    key: Annotated[str, typer.Option(help="Stable service-account key.")],
+    name: Annotated[str, typer.Option(help="Human-readable service-account name.")],
+    permission: Annotated[
+        list[ApiPermission], typer.Option(help="Permission to grant; repeat as needed.")
+    ],
+    project_id: Annotated[
+        list[UUID] | None, typer.Option(help="Project scope; repeat as needed.")
+    ] = None,
+    all_projects: Annotated[bool, typer.Option(help="Grant access to every project.")] = False,
+) -> None:
+    """Issue a service-account bearer token and print it once."""
+
+    issued = asyncio.run(
+        security_service().issue(
+            key=key,
+            name=name,
+            permissions=permission,
+            project_ids=project_id or (),
+            all_projects=all_projects,
+        )
+    )
+    echo_json(
+        {
+            "account_id": str(issued.account.id),
+            "key": issued.account.key,
+            "token": issued.token,
+            "warning": "Store this token now; it cannot be retrieved later.",
+        }
+    )
+
+
+@auth_app.command("revoke")
+def revoke_service_account(account_id: UUID) -> None:
+    """Revoke a service account immediately."""
+
+    asyncio.run(security_service().revoke(account_id))
+    echo_json({"account_id": str(account_id), "revoked": True})
 
 
 @skill_app.command("digest")
