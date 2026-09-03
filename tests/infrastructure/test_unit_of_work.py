@@ -11,6 +11,7 @@ from jb_orchestrator.application import (
     ModelCatalogService,
     OrchestrationService,
     PhasePackCatalogService,
+    ProjectObservationService,
     RegisterProject,
     SkillCatalogService,
     TaskDispatchService,
@@ -161,6 +162,19 @@ async def test_application_service_round_trip_with_sqlalchemy() -> None:
 
     assert (await service.get_run(created.run.id)).status is RunStatus.SUCCEEDED
     assert (await service.get_request(created.request.id)).status is RequestStatus.COMPLETED
+
+    observation_service = ProjectObservationService(lambda: SqlAlchemyUnitOfWork(session_factory))
+    observed_requests = await observation_service.list_requests(project.id)
+    observed_runs = await observation_service.list_runs(created.request.id)
+    observed_workflows = await observation_service.list_workflow_executions(project.id)
+    observed_events = await observation_service.list_events(project.id)
+    assert [value.id for value in observed_requests] == [created.request.id]
+    assert [value.id for value in observed_runs] == [created.run.id]
+    assert [value.id for value in observed_workflows] == [execution.id]
+    assert "project.registered" in {event.event_type for event in observed_events}
+    assert "workflow.started" in {event.event_type for event in observed_events}
+    assert "budget.settled" in {event.event_type for event in observed_events}
+    assert "skill.registered" not in {event.event_type for event in observed_events}
 
     async with session_factory() as session:
         event_types = list(await session.scalars(select(EventRecord.event_type)))

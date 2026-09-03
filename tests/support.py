@@ -14,7 +14,16 @@ from jb_orchestrator.budgets import (
     BudgetReservationStatus,
     UsageRecord,
 )
-from jb_orchestrator.domain import DomainEvent, Project, RequestDispatchReceipt, Run, UserRequest
+from jb_orchestrator.domain import (
+    DomainEvent,
+    Project,
+    ProjectStatus,
+    RequestDispatchReceipt,
+    RequestStatus,
+    Run,
+    RunStatus,
+    UserRequest,
+)
 from jb_orchestrator.external_executions import ExternalExecution, ExternalExecutionStatus
 from jb_orchestrator.model_routing import ModelProfile
 from jb_orchestrator.phase_packs import PhasePackDefinition
@@ -66,6 +75,14 @@ class MemoryProjectRepository:
             (project for project in self._store.projects.values() if project.key == key), None
         )
 
+    async def list(self, *, status: ProjectStatus | None = None, limit: int = 100) -> list[Project]:
+        matches = [
+            project
+            for project in self._store.projects.values()
+            if status is None or project.status is status
+        ]
+        return sorted(matches, key=lambda value: (value.created_at, value.id), reverse=True)[:limit]
+
 
 class MemoryUserRequestRepository:
     def __init__(self, store: MemoryStore) -> None:
@@ -83,6 +100,20 @@ class MemoryUserRequestRepository:
     async def save(self, request: UserRequest) -> None:
         self._store.requests[request.id] = request
 
+    async def list_by_project(
+        self,
+        project_id: UUID,
+        *,
+        status: RequestStatus | None = None,
+        limit: int = 100,
+    ) -> list[UserRequest]:
+        matches = [
+            request
+            for request in self._store.requests.values()
+            if request.project_id == project_id and (status is None or request.status is status)
+        ]
+        return sorted(matches, key=lambda value: (value.created_at, value.id), reverse=True)[:limit]
+
 
 class MemoryRunRepository:
     def __init__(self, store: MemoryStore) -> None:
@@ -99,6 +130,20 @@ class MemoryRunRepository:
 
     async def save(self, run: Run) -> None:
         self._store.runs[run.id] = run
+
+    async def list_by_request(
+        self,
+        request_id: UUID,
+        *,
+        status: RunStatus | None = None,
+        limit: int = 100,
+    ) -> list[Run]:
+        matches = [
+            run
+            for run in self._store.runs.values()
+            if run.request_id == request_id and (status is None or run.status is status)
+        ]
+        return sorted(matches, key=lambda value: (value.created_at, value.id), reverse=True)[:limit]
 
 
 class MemoryRequestDispatchReceiptRepository:
@@ -192,6 +237,60 @@ class MemoryEventRepository:
             if event.aggregate_type == aggregate_type
             and event.sequence is not None
             and event.sequence > after_sequence
+        ][:limit]
+
+    async def list_project_after(
+        self,
+        *,
+        project_id: UUID,
+        after: DomainEvent | None = None,
+        limit: int = 100,
+    ) -> list[DomainEvent]:
+        after_sequence = after.sequence if after is not None else 0
+        if after_sequence is None:
+            raise ValueError("persisted event cursor requires a sequence")
+
+        request_ids = {
+            request.id
+            for request in self._store.requests.values()
+            if request.project_id == project_id
+        }
+        run_ids = {run.id for run in self._store.runs.values() if run.request_id in request_ids}
+        workflow_ids = {
+            execution.id
+            for execution in self._store.workflow_executions.values()
+            if execution.snapshot.run_id in run_ids
+        }
+        external_ids = {
+            execution.id
+            for execution in self._store.external_executions.values()
+            if execution.run_id in run_ids
+        }
+        budget_account_ids = {
+            account.id
+            for account in self._store.budget_accounts.values()
+            if account.project_id == project_id
+        }
+        budget_reservation_ids = {
+            reservation.id
+            for reservation in self._store.budget_reservations.values()
+            if reservation.project_id == project_id
+        }
+        aggregate_ids = {
+            "project": {project_id},
+            "request": request_ids,
+            "run": run_ids,
+            "workflow_execution": workflow_ids,
+            "external_execution": external_ids,
+            "budget_account": budget_account_ids,
+            "budget_reservation": budget_reservation_ids,
+        }
+        return [
+            event
+            for event in self._store.events
+            if event.sequence is not None
+            and event.sequence > after_sequence
+            and event.aggregate_id in aggregate_ids.get(event.aggregate_type, set())
         ][:limit]
 
 
@@ -445,6 +544,27 @@ class MemoryWorkflowExecutionRepository:
 
     async def get_by_run_for_update(self, run_id: UUID) -> WorkflowExecution | None:
         return await self.get_by_run(run_id)
+
+    async def list_by_project(
+        self,
+        project_id: UUID,
+        *,
+        status: WorkflowStatus | None = None,
+        limit: int = 100,
+    ) -> list[WorkflowExecution]:
+        request_ids = {
+            request.id
+            for request in self._store.requests.values()
+            if request.project_id == project_id
+        }
+        run_ids = {run.id for run in self._store.runs.values() if run.request_id in request_ids}
+        matches = [
+            execution
+            for execution in self._store.workflow_executions.values()
+            if execution.snapshot.run_id in run_ids
+            and (status is None or execution.status is status)
+        ]
+        return sorted(matches, key=lambda value: (value.updated_at, value.id), reverse=True)[:limit]
 
     async def get_ready_for_update(
         self, executor_keys: Collection[str] | None = None
