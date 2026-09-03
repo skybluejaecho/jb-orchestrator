@@ -179,6 +179,23 @@ ORCH-021 adds deterministic parallel workflow regions:
 - sibling task cancellation when a parallel path terminates or fails the workflow
 - named Phase Pack inputs combining durable artifacts from independent branches
 
+ORCH-022 adds project-level workflow selection and one-call request dispatch:
+
+- one exact workflow definition version bound to each project
+- atomic User Request, Run, Workflow Execution, and event creation
+- selected definition and request context pinned into the execution snapshot
+- binding changes affecting only future dispatches
+- explicit manual workflow startup retained for administrative use
+
+ORCH-023 synchronizes the complete execution lifecycle:
+
+- workflow status projected transactionally to its parent Run
+- successful workflows completing their User Request
+- failed Runs retaining an active Request for a later retry attempt
+- cancellation from either Run or Workflow closing the complete active hierarchy
+- phase-neutral Run states for freely composed workflows
+- row locks and durable lifecycle events protecting concurrent state changes
+
 ## Prerequisites
 
 - Python 3.12
