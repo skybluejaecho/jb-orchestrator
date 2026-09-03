@@ -58,6 +58,6 @@ async def test_project_binding_and_one_call_dispatch_api() -> None:
     assert fetched.json() == bound.json()
     assert dispatched.status_code == 201
     assert dispatched.json()["request"]["status"] == "active"
-    assert dispatched.json()["run"]["status"] == "queued"
+    assert dispatched.json()["run"]["status"] == "running"
     assert dispatched.json()["workflow"]["definition_version"] == 1
     assert dispatched.json()["workflow"]["request_context"]["prompt"] == "Implement this"

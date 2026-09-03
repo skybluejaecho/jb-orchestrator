@@ -6,6 +6,7 @@ from typing import Any
 from uuid import UUID
 
 from jb_orchestrator.application.exceptions import ResourceNotFound
+from jb_orchestrator.application.execution_lifecycle import synchronize_execution_lifecycle
 from jb_orchestrator.application.output_contracts import enforce_output_contract
 from jb_orchestrator.application.unit_of_work import UnitOfWork
 from jb_orchestrator.artifacts import TaskArtifact
@@ -221,6 +222,7 @@ class TaskDispatchService:
                 artifact_id=str(artifact.id),
                 output_contract_rejected=decision.rejected,
             )
+            await synchronize_execution_lifecycle(unit_of_work, execution)
             await unit_of_work.commit()
         return execution
 
@@ -250,6 +252,7 @@ class TaskDispatchService:
                 worker_id=claim.worker_id,
                 reason=reason,
             )
+            await synchronize_execution_lifecycle(unit_of_work, execution)
             await unit_of_work.commit()
         return execution
 
@@ -271,6 +274,7 @@ class TaskDispatchService:
                 node_key=candidate.node_key,
                 worker_id=expired_worker_id,
             )
+            await synchronize_execution_lifecycle(unit_of_work, execution)
             await unit_of_work.commit()
         return True
 

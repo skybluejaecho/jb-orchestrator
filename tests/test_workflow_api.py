@@ -82,6 +82,8 @@ async def test_workflow_control_api_registration_execution_and_approval() -> Non
             f"/v1/workflow-executions/{execution_id}/approvals/approval",
             json={"approved": True},
         )
+        completed_run = await client.get(f"/v1/runs/{run_id}")
+        completed_request = await client.get(f"/v1/requests/{completed_run.json()['request_id']}")
 
     assert first.status_code == 201
     assert latest.status_code == 201
@@ -101,11 +103,14 @@ async def test_workflow_control_api_registration_execution_and_approval() -> Non
     assert approved.status_code == 200
     assert approved.json()["status"] == "succeeded"
     assert approved.json()["nodes"][0]["outcome"] == "approved"
-    assert [event.event_type for event in store.events][-4:] == [
-        "workflow.definition_registered",
-        "workflow.definition_registered",
+    assert completed_run.json()["status"] == "succeeded"
+    assert completed_request.json()["status"] == "completed"
+    assert [event.event_type for event in store.events][-5:] == [
         "workflow.started",
+        "run.status_changed",
         "workflow.approval_resolved",
+        "run.status_changed",
+        "request.completed",
     ]
 
 
@@ -127,6 +132,8 @@ async def test_workflow_control_api_conflicts_validation_and_cancellation() -> N
             json={"definition_key": "approval-flow"},
         )
         cancelled = await client.post(f"/v1/workflow-executions/{started.json()['id']}/cancel")
+        run = await client.get(f"/v1/runs/{run_id}")
+        request = await client.get(f"/v1/requests/{run.json()['request_id']}")
         missing = await client.get("/v1/workflows/missing")
 
     assert duplicate.status_code == 409
@@ -139,6 +146,8 @@ async def test_workflow_control_api_conflicts_validation_and_cancellation() -> N
         "pending",
         "pending",
     ]
+    assert run.json()["status"] == "cancelled"
+    assert request.json()["status"] == "cancelled"
     assert missing.status_code == 404
 
 
