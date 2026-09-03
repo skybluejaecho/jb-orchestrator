@@ -152,6 +152,15 @@ ORCH-018 adds durable task context and artifacts:
 - structured request, project, artifact, and verified-skill context rendered for OpenClaw
 - workflow artifact history exposed through the control-plane API
 
+ORCH-019 adds composable, versioned phase packs:
+
+- reusable phase roles, instructions, skill references, and JSON output contracts
+- named required or optional phase inputs independent of a workflow graph
+- explicit workflow-node mappings from input names to producer-node artifacts
+- exact phase-pack versions pinned into each workflow execution snapshot
+- named inputs and output contracts rendered for OpenClaw execution
+- legacy nodes retaining automatic direct-predecessor artifact delivery
+
 ## Prerequisites
 
 - Python 3.12
