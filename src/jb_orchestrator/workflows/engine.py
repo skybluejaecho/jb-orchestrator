@@ -206,15 +206,20 @@ class WorkflowEngine:
         outcome: NodeOutcome,
         changed_at: datetime,
     ) -> None:
-        target = execution.snapshot.target(source, outcome)
-        if target is None:
+        targets = execution.snapshot.targets(source, outcome)
+        if not targets:
             self._fail(execution, f"no edge for {source}:{outcome}", changed_at)
             return
-        self._activate(execution, target, changed_at)
+        for target in targets:
+            self._activate(execution, target, changed_at)
+            if execution.is_terminal:
+                return
 
     def _activate(self, execution: WorkflowExecution, node_key: str, changed_at: datetime) -> None:
         node = self._node_execution(execution, node_key)
         definition = execution.snapshot.node(node_key)
+        if definition.kind is NodeKind.JOIN and not self._join_is_ready(execution, node_key):
+            return
         if node.visit_count >= definition.max_visits:
             self._fail(execution, f"node visit limit exceeded: {node_key}", changed_at)
             return
@@ -233,21 +238,51 @@ class WorkflowEngine:
         elif definition.kind is NodeKind.APPROVAL:
             node.status = NodeExecutionStatus.AWAITING_APPROVAL
             execution.status = WorkflowStatus.AWAITING_APPROVAL
+        elif definition.kind in {NodeKind.FORK, NodeKind.JOIN}:
+            node.status = NodeExecutionStatus.SUCCEEDED
+            node.outcome = NodeOutcome.SUCCESS
+            node.completed_at = changed_at
+            self._touch(execution, changed_at)
+            self._route(execution, node_key, NodeOutcome.SUCCESS, changed_at)
+            return
         else:
             node.status = NodeExecutionStatus.SUCCEEDED
             node.outcome = NodeOutcome.SUCCESS
             node.completed_at = changed_at
             execution.status = definition.terminal_status or WorkflowStatus.FAILED
             execution.completed_at = changed_at
+            self._cancel_active_nodes(execution, changed_at)
             if execution.status is WorkflowStatus.FAILED:
                 execution.failure_reason = f"workflow reached failure terminal: {node_key}"
         self._touch(execution, changed_at)
 
     def _fail(self, execution: WorkflowExecution, reason: str, changed_at: datetime) -> None:
+        self._cancel_active_nodes(execution, changed_at)
         execution.status = WorkflowStatus.FAILED
         execution.failure_reason = reason
         execution.completed_at = changed_at
         self._touch(execution, changed_at)
+
+    @staticmethod
+    def _join_is_ready(execution: WorkflowExecution, node_key: str) -> bool:
+        sources = execution.snapshot.incoming_sources(node_key)
+        return all(
+            execution.nodes[source].status is NodeExecutionStatus.SUCCEEDED for source in sources
+        )
+
+    @classmethod
+    def _cancel_active_nodes(cls, execution: WorkflowExecution, changed_at: datetime) -> None:
+        for node in execution.nodes.values():
+            if node.status not in {
+                NodeExecutionStatus.READY,
+                NodeExecutionStatus.RUNNING,
+                NodeExecutionStatus.AWAITING_APPROVAL,
+            }:
+                continue
+            node.status = NodeExecutionStatus.CANCELLED
+            node.completed_at = changed_at
+            node.updated_at = changed_at
+            cls._clear_lease(node)
 
     @staticmethod
     def _node_execution(execution: WorkflowExecution, node_key: str) -> NodeExecution:

@@ -32,6 +32,8 @@ class WorkflowStatus(StrEnum):
 class NodeKind(StrEnum):
     TASK = "task"
     APPROVAL = "approval"
+    FORK = "fork"
+    JOIN = "join"
     TERMINAL = "terminal"
 
 
@@ -116,6 +118,8 @@ class NodeDefinition:
             raise WorkflowDefinitionError("node max_visits must be greater than zero")
         if self.timeout_seconds < 1:
             raise WorkflowDefinitionError("node timeout_seconds must be greater than zero")
+        if self.kind in {NodeKind.FORK, NodeKind.JOIN} and self.max_visits != 1:
+            raise WorkflowDefinitionError("fork and join nodes currently allow only one visit")
         terminal_statuses = {WorkflowStatus.SUCCEEDED, WorkflowStatus.FAILED}
         if self.kind is NodeKind.TERMINAL and self.terminal_status not in terminal_statuses:
             raise WorkflowDefinitionError("terminal node requires succeeded or failed status")
@@ -178,27 +182,40 @@ class WorkflowDefinition:
 
         outgoing: dict[str, set[NodeOutcome]] = {key: set() for key in nodes_by_key}
         adjacency: dict[str, set[str]] = {key: set() for key in nodes_by_key}
+        incoming: dict[str, set[str]] = {key: set() for key in nodes_by_key}
         for edge in self.edges:
             if edge.source not in nodes_by_key or edge.target not in nodes_by_key:
                 raise WorkflowDefinitionError("workflow edge references an unknown node")
-            if edge.outcome in outgoing[edge.source]:
-                raise WorkflowDefinitionError("node outcomes may have only one target")
             source_kind = nodes_by_key[edge.source].kind
+            if edge.outcome in outgoing[edge.source] and source_kind is not NodeKind.FORK:
+                raise WorkflowDefinitionError("node outcomes may have only one target")
+            if edge.target in adjacency[edge.source]:
+                raise WorkflowDefinitionError("duplicate workflow edges are not allowed")
             allowed_outcomes = {
                 NodeKind.TASK: {NodeOutcome.SUCCESS, NodeOutcome.FAILURE},
                 NodeKind.APPROVAL: {NodeOutcome.APPROVED, NodeOutcome.REJECTED},
+                NodeKind.FORK: {NodeOutcome.SUCCESS},
+                NodeKind.JOIN: {NodeOutcome.SUCCESS},
                 NodeKind.TERMINAL: set(),
             }[source_kind]
             if edge.outcome not in allowed_outcomes:
                 raise WorkflowDefinitionError("edge outcome is invalid for its source node")
             outgoing[edge.source].add(edge.outcome)
             adjacency[edge.source].add(edge.target)
+            incoming[edge.target].add(edge.source)
 
         for node in self.nodes:
             if node.kind is NodeKind.TERMINAL and outgoing[node.key]:
                 raise WorkflowDefinitionError("terminal nodes cannot have outgoing edges")
             if node.kind is not NodeKind.TERMINAL and not outgoing[node.key]:
                 raise WorkflowDefinitionError("non-terminal nodes require an outgoing edge")
+            if node.kind is NodeKind.FORK and len(adjacency[node.key]) < 2:
+                raise WorkflowDefinitionError("fork nodes require at least two targets")
+            if node.kind is NodeKind.JOIN:
+                if node.key == self.entry_node:
+                    raise WorkflowDefinitionError("join nodes cannot be workflow entry nodes")
+                if len(incoming[node.key]) < 2:
+                    raise WorkflowDefinitionError("join nodes require at least two sources")
             for mapping in node.input_mappings:
                 source = nodes_by_key.get(mapping.source_node)
                 if source is None:
@@ -230,6 +247,11 @@ class WorkflowDefinition:
             pending.extend(adjacency[current] - reachable)
         if reachable != set(nodes_by_key):
             raise WorkflowDefinitionError("all workflow nodes must be reachable from the entry")
+        for node in self.nodes:
+            if node.kind in {NodeKind.FORK, NodeKind.JOIN} and _can_reach(
+                adjacency, node.key, node.key, skip_initial=True
+            ):
+                raise WorkflowDefinitionError("fork and join nodes cannot participate in loops")
 
     def node(self, key: str) -> NodeDefinition:
         return next(node for node in self.nodes if node.key == key)
@@ -242,6 +264,15 @@ class WorkflowDefinition:
                 if edge.source == source and edge.outcome is outcome
             ),
             None,
+        )
+
+    def targets(self, source: str, outcome: NodeOutcome) -> tuple[str, ...]:
+        return tuple(
+            sorted(
+                edge.target
+                for edge in self.edges
+                if edge.source == source and edge.outcome is outcome
+            )
         )
 
 
@@ -337,6 +368,15 @@ class WorkflowSnapshot:
             None,
         )
 
+    def targets(self, source: str, outcome: NodeOutcome) -> tuple[str, ...]:
+        return tuple(
+            sorted(
+                edge.target
+                for edge in self.edges
+                if edge.source == source and edge.outcome is outcome
+            )
+        )
+
     def incoming_sources(self, target: str) -> tuple[str, ...]:
         """Return deterministic direct predecessors that may provide task artifacts."""
 
@@ -414,3 +454,23 @@ class WorkflowExecution:
             WorkflowStatus.FAILED,
             WorkflowStatus.CANCELLED,
         }
+
+
+def _can_reach(
+    adjacency: dict[str, set[str]],
+    source: str,
+    target: str,
+    *,
+    skip_initial: bool = False,
+) -> bool:
+    pending = list(adjacency[source]) if skip_initial else [source]
+    visited: set[str] = set()
+    while pending:
+        current = pending.pop()
+        if current == target:
+            return True
+        if current in visited:
+            continue
+        visited.add(current)
+        pending.extend(adjacency[current] - visited)
+    return False

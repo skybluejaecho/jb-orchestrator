@@ -140,3 +140,52 @@ async def test_workflow_control_api_conflicts_validation_and_cancellation() -> N
         "pending",
     ]
     assert missing.status_code == 404
+
+
+async def test_workflow_api_accepts_explicit_parallel_fork_and_join() -> None:
+    app, _ = build_app()
+    payload = {
+        "key": "parallel-flow",
+        "version": 1,
+        "entry_node": "fork",
+        "nodes": [
+            {"key": "fork", "kind": "fork"},
+            {"key": "research", "kind": "task"},
+            {"key": "design", "kind": "task"},
+            {"key": "join", "kind": "join"},
+            {"key": "done", "kind": "terminal", "terminal_status": "succeeded"},
+        ],
+        "edges": [
+            {"source": "fork", "outcome": "success", "target": "research"},
+            {"source": "fork", "outcome": "success", "target": "design"},
+            {"source": "research", "outcome": "success", "target": "join"},
+            {"source": "design", "outcome": "success", "target": "join"},
+            {"source": "join", "outcome": "success", "target": "done"},
+        ],
+    }
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        registered = await client.post("/v1/workflows", json=payload)
+        run_id = await create_run(client)
+        started = await client.post(
+            f"/v1/runs/{run_id}/workflow",
+            json={"definition_key": "parallel-flow"},
+        )
+
+    assert registered.status_code == 201
+    assert [node["kind"] for node in registered.json()["nodes"]] == [
+        "fork",
+        "task",
+        "task",
+        "join",
+        "terminal",
+    ]
+    statuses = {node["node_key"]: node["status"] for node in started.json()["nodes"]}
+    assert started.status_code == 201
+    assert statuses == {
+        "fork": "succeeded",
+        "research": "ready",
+        "design": "ready",
+        "join": "pending",
+        "done": "pending",
+    }
