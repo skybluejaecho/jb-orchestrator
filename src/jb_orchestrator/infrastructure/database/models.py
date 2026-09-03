@@ -151,6 +151,33 @@ class EventRecord(Base):
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class TaskArtifactRecord(Base):
+    """Immutable output produced by one workflow task node visit."""
+
+    __tablename__ = "task_artifacts"
+    __table_args__ = (
+        UniqueConstraint(
+            "execution_id",
+            "producer_node_key",
+            "visit_count",
+            name="uq_task_artifacts_execution_node_visit",
+        ),
+        Index("ix_task_artifacts_execution_created", "execution_id", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    execution_id: Mapped[UUID] = mapped_column(
+        ForeignKey("workflow_executions.id", ondelete="CASCADE"), nullable=False
+    )
+    producer_node_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    visit_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    outcome: Mapped[NodeOutcome] = mapped_column(
+        string_enum(NodeOutcome, "task_artifact_outcome"), nullable=False
+    )
+    content: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class SkillDefinitionRecord(Base):
     """Immutable catalog entry for one skill version."""
 

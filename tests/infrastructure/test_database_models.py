@@ -26,6 +26,7 @@ def test_metadata_creates_initial_domain_schema() -> None:
         "projects",
         "runs",
         "skill_definitions",
+        "task_artifacts",
         "user_requests",
         "usage_records",
         "workflow_definitions",
@@ -44,6 +45,9 @@ def test_metadata_creates_initial_domain_schema() -> None:
         "ix_external_executions_execution_id",
         "ix_external_executions_run_id",
         "ix_external_executions_status_updated",
+    }
+    assert {index["name"] for index in inspector.get_indexes("task_artifacts")} >= {
+        "ix_task_artifacts_execution_created"
     }
 
 

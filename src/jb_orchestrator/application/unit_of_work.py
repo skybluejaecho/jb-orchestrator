@@ -3,6 +3,7 @@
 from types import TracebackType
 from typing import Protocol, Self
 
+from jb_orchestrator.artifacts import TaskArtifactRepository
 from jb_orchestrator.budgets.repositories import (
     BudgetAccountRepository,
     BudgetReservationRepository,
@@ -37,6 +38,9 @@ class UnitOfWork(Protocol):
 
     @property
     def events(self) -> EventRepository: ...
+
+    @property
+    def artifacts(self) -> TaskArtifactRepository: ...
 
     @property
     def skills(self) -> SkillRepository: ...

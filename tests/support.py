@@ -7,6 +7,7 @@ from types import TracebackType
 from typing import Self
 from uuid import UUID
 
+from jb_orchestrator.artifacts import TaskArtifact
 from jb_orchestrator.budgets import (
     BudgetAccount,
     BudgetReservation,
@@ -32,6 +33,7 @@ class MemoryStore:
     requests: dict[UUID, UserRequest] = field(default_factory=dict)
     runs: dict[UUID, Run] = field(default_factory=dict)
     events: list[DomainEvent] = field(default_factory=list)
+    artifacts: list[TaskArtifact] = field(default_factory=list)
     workflow_definitions: dict[tuple[str, int], WorkflowDefinition] = field(default_factory=dict)
     workflow_executions: dict[UUID, WorkflowExecution] = field(default_factory=dict)
     skills: dict[tuple[str, int], SkillDefinition] = field(default_factory=dict)
@@ -156,6 +158,31 @@ class MemoryEventRepository:
             and event.sequence is not None
             and event.sequence > after_sequence
         ][:limit]
+
+
+class MemoryTaskArtifactRepository:
+    def __init__(self, store: MemoryStore) -> None:
+        self._store = store
+
+    async def add(self, artifact: TaskArtifact) -> None:
+        self._store.artifacts.append(artifact)
+
+    async def list_for_execution(self, execution_id: UUID) -> list[TaskArtifact]:
+        return [
+            artifact for artifact in self._store.artifacts if artifact.execution_id == execution_id
+        ]
+
+    async def list_latest_for_nodes(
+        self, execution_id: UUID, node_keys: Collection[str]
+    ) -> list[TaskArtifact]:
+        latest: dict[str, TaskArtifact] = {}
+        for artifact in self._store.artifacts:
+            if artifact.execution_id != execution_id or artifact.producer_node_key not in node_keys:
+                continue
+            current = latest.get(artifact.producer_node_key)
+            if current is None or artifact.visit_count > current.visit_count:
+                latest[artifact.producer_node_key] = artifact
+        return [latest[key] for key in sorted(latest)]
 
 
 class MemorySkillRepository:
@@ -379,6 +406,7 @@ class MemoryUnitOfWork:
         self.requests = MemoryUserRequestRepository(store)
         self.runs = MemoryRunRepository(store)
         self.events = MemoryEventRepository(store)
+        self.artifacts = MemoryTaskArtifactRepository(store)
         self.skills = MemorySkillRepository(store)
         self.model_profiles = MemoryModelProfileRepository(store)
         self.budget_accounts = MemoryBudgetAccountRepository(store)
