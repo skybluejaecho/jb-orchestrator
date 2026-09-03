@@ -220,6 +220,14 @@ ORCH-026 separates request ingress from execution runtimes:
 - project-and-ingress-scoped idempotency preventing unrelated clients from colliding
 - external request, actor, and conversation identifiers returned through observation APIs
 
+ORCH-027 protects remote control-plane access:
+
+- hashed bearer credentials issued to named service accounts
+- explicit read, dispatch, approval, cancellation, and administration permissions
+- project-scoped authorization for Jarvis, OpenClaw, CLI, and future ingress adapters
+- public health probes with authenticated `/v1` APIs
+- fail-closed startup when an unauthenticated API is bound outside loopback
+
 ## Prerequisites
 
 - Python 3.12
@@ -234,6 +242,23 @@ uv sync --extra dev
 docker compose up -d postgres
 uv run alembic upgrade head
 ```
+
+원격 클라이언트를 연결하려면 먼저 서비스 계정을 발급합니다. Token 원문은 이 명령에서만
+표시되므로 즉시 안전한 secret 저장소에 보관해야 합니다.
+
+```powershell
+uv run jb auth issue `
+  --key openclaw-control `
+  --name "OpenClaw Control Agent" `
+  --permission project.read `
+  --permission request.dispatch `
+  --project-id <project-uuid>
+```
+
+서버에는 `JB_API_AUTH_ENABLED=true`를 설정합니다. CLI client에는 별도로
+`JB_API_TOKEN=<발급된-token>`을 설정합니다. `JB_API_AUTH_ENABLED=false`인 서버는
+`127.0.0.1`, `localhost`, `::1` 외 주소에 바인딩되지 않습니다. 계정을 폐기하려면
+`uv run jb auth revoke <account-uuid>`를 실행합니다.
 
 ## Run
 
@@ -322,8 +347,10 @@ Workflow Execution이 하나의 트랜잭션에서 생성됩니다. 선택된 �
 입력 어댑터는 선택적으로 `X-JB-Ingress-Key`, `X-JB-External-Request-ID`,
 `X-JB-Actor-ID`, `X-JB-Conversation-ID`를 전달할 수 있습니다. 멱등성 key는 프로젝트와
 ingress 안에서 고유하므로 OpenClaw와 Jarvis가 우연히 같은 key를 사용해도 서로 충돌하지
-않습니다. 현재 이 origin 값은 호출자가 주장한 메타데이터이며, 원격 연결 전에 별도의 API
-인증과 프로젝트 권한 검증이 필요합니다.
+않습니다. origin 값은 호출자가 주장한 출처 메타데이터이고 인증된 identity와 분리됩니다.
+인증을 활성화하면 bearer service account의 permission과 DB에서 계산한 project scope가
+모든 `/v1` 요청에 적용됩니다. 프로젝트가 정해지지 않는 전역 목록 및 catalog API는
+`all_projects` 계정만 사용할 수 있습니다.
 
 프로젝트 관찰 API는 DB 관계를 기준으로 Request, Run, Workflow Execution을 조회합니다.
 Jarvis는 `GET /v1/projects/{project_id}/events/stream` 하나로 프로젝트에 속한 상태 변화를

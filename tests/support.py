@@ -27,6 +27,7 @@ from jb_orchestrator.domain import (
 from jb_orchestrator.external_executions import ExternalExecution, ExternalExecutionStatus
 from jb_orchestrator.model_routing import ModelProfile
 from jb_orchestrator.phase_packs import PhasePackDefinition
+from jb_orchestrator.security import ServiceAccount
 from jb_orchestrator.skills import SkillDefinition
 from jb_orchestrator.workflows import (
     NodeExecutionStatus,
@@ -58,6 +59,7 @@ class MemoryStore:
     budget_reservations: dict[str, BudgetReservation] = field(default_factory=dict)
     usage_records: list[UsageRecord] = field(default_factory=list)
     external_executions: dict[str, ExternalExecution] = field(default_factory=dict)
+    service_accounts: dict[UUID, ServiceAccount] = field(default_factory=dict)
 
 
 class MemoryProjectRepository:
@@ -82,6 +84,28 @@ class MemoryProjectRepository:
             if status is None or project.status is status
         ]
         return sorted(matches, key=lambda value: (value.created_at, value.id), reverse=True)[:limit]
+
+
+class MemoryServiceAccountRepository:
+    def __init__(self, store: MemoryStore) -> None:
+        self._store = store
+
+    async def add(self, account: ServiceAccount) -> None:
+        self._store.service_accounts[account.id] = account
+
+    async def get(self, account_id: UUID) -> ServiceAccount | None:
+        return self._store.service_accounts.get(account_id)
+
+    async def get_by_key(self, key: str) -> ServiceAccount | None:
+        return next(
+            (account for account in self._store.service_accounts.values() if account.key == key),
+            None,
+        )
+
+    async def disable(self, account_id: UUID) -> None:
+        account = self._store.service_accounts.get(account_id)
+        if account is not None:
+            self._store.service_accounts[account_id] = replace(account, enabled=False)
 
 
 class MemoryUserRequestRepository:
@@ -627,6 +651,7 @@ class MemoryUnitOfWork:
         self.workflow_definitions = MemoryWorkflowDefinitionRepository(store)
         self.workflow_executions = MemoryWorkflowExecutionRepository(store)
         self.project_workflow_bindings = MemoryProjectWorkflowBindingRepository(store)
+        self.service_accounts = MemoryServiceAccountRepository(store)
         self.committed = False
         self.rolled_back = False
 
