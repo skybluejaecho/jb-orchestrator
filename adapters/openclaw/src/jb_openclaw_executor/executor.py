@@ -99,8 +99,38 @@ class OpenClawExecutor:
 
     @staticmethod
     def _prompt(claim: TaskClaim) -> str:
-        instructions = claim.instructions or "Complete the assigned workflow task."
-        sections = [f"Task instructions:\n{instructions}"]
+        sections: list[str] = []
+        if claim.phase_pack is not None:
+            sections.append(
+                "Phase pack:\n"
+                f"- key: {claim.phase_pack.key}@{claim.phase_pack.version}\n"
+                f"- role: {claim.phase_pack.name}\n"
+                f"- purpose: {claim.phase_pack.description}"
+            )
+            sections.append(f"Phase instructions:\n{claim.phase_pack.instructions}")
+            if claim.phase_pack.inputs:
+                input_contract = [
+                    {
+                        "name": value.key,
+                        "description": value.description,
+                        "required": value.required,
+                    }
+                    for value in claim.phase_pack.inputs
+                ]
+                sections.append(
+                    "Phase input contract:\n"
+                    + json.dumps(
+                        input_contract,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        indent=2,
+                    )
+                )
+        instructions = claim.instructions
+        if instructions is not None:
+            sections.append(f"Node-specific instructions:\n{instructions}")
+        elif claim.phase_pack is None:
+            sections.append("Task instructions:\nComplete the assigned workflow task.")
         if claim.context is not None:
             request = claim.context.request
             sections.append(f"Original user request:\n{request.prompt}")
@@ -111,7 +141,21 @@ class OpenClawExecutor:
                 f"- repository: {request.repository_url}\n"
                 f"- default branch: {request.default_branch}"
             )
-            if claim.context.upstream_artifacts:
+            if claim.context.named_inputs:
+                inputs = {
+                    value.name: {
+                        "producer_node_key": value.artifact.producer_node_key,
+                        "visit_count": value.artifact.visit_count,
+                        "outcome": value.artifact.outcome.value,
+                        "content": value.artifact.content,
+                    }
+                    for value in claim.context.named_inputs
+                }
+                sections.append(
+                    "Named phase inputs:\n"
+                    + json.dumps(inputs, ensure_ascii=False, sort_keys=True, indent=2)
+                )
+            elif claim.context.upstream_artifacts:
                 artifacts = [
                     {
                         "producer_node_key": artifact.producer_node_key,
@@ -125,6 +169,16 @@ class OpenClawExecutor:
                     "Direct upstream artifacts:\n"
                     + json.dumps(artifacts, ensure_ascii=False, sort_keys=True, indent=2)
                 )
+        if claim.phase_pack is not None and claim.phase_pack.output_contract:
+            sections.append(
+                "Required output contract:\n"
+                + json.dumps(
+                    claim.phase_pack.output_contract,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    indent=2,
+                )
+            )
         if claim.skill_paths:
             skills = "\n".join(
                 f"- {key}: {path}" for key, path in sorted(claim.skill_paths.items())

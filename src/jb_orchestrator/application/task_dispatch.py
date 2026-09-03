@@ -9,8 +9,13 @@ from jb_orchestrator.application.exceptions import ResourceNotFound
 from jb_orchestrator.application.unit_of_work import UnitOfWork
 from jb_orchestrator.artifacts import TaskArtifact
 from jb_orchestrator.domain import DomainEvent
-from jb_orchestrator.worker.models import TaskClaim, TaskContextEnvelope, TaskResult
-from jb_orchestrator.workflows import WorkflowEngine, WorkflowExecution
+from jb_orchestrator.worker.models import (
+    TaskArtifactInput,
+    TaskClaim,
+    TaskContextEnvelope,
+    TaskResult,
+)
+from jb_orchestrator.workflows import WorkflowEngine, WorkflowExecution, WorkflowExecutionError
 
 
 class TaskDispatchService:
@@ -43,6 +48,14 @@ class TaskDispatchService:
                 return None
             execution = candidate.execution
             definition = execution.snapshot.node(candidate.node_key)
+            phase_pack = (
+                execution.snapshot.phase_pack(definition.phase_pack)
+                if definition.phase_pack is not None
+                else None
+            )
+            upstream_artifacts, named_inputs = await self._resolve_artifact_inputs(
+                unit_of_work, execution, candidate.node_key
+            )
             node = self._engine.claim_task(
                 execution,
                 candidate.node_key,
@@ -53,10 +66,9 @@ class TaskDispatchService:
             if node.lease_token is None:
                 raise RuntimeError("claimed node did not receive a lease token")
             request_context = execution.snapshot.request_context
-            upstream_artifacts = await unit_of_work.artifacts.list_latest_for_nodes(
-                execution.id,
-                execution.snapshot.incoming_sources(node.node_key),
-            )
+            skill_references = set(definition.skills)
+            if phase_pack is not None:
+                skill_references.update(phase_pack.skills)
             claim = TaskClaim(
                 execution_id=execution.id,
                 run_id=execution.snapshot.run_id,
@@ -73,12 +85,17 @@ class TaskDispatchService:
                 instructions=definition.instructions,
                 configuration=dict(definition.configuration),
                 skills=tuple(
-                    execution.snapshot.skill(reference) for reference in definition.skills
+                    execution.snapshot.skill(reference)
+                    for reference in sorted(
+                        skill_references, key=lambda value: (value.key, value.version)
+                    )
                 ),
+                phase_pack=phase_pack,
                 context=(
                     TaskContextEnvelope(
                         request=request_context,
                         upstream_artifacts=tuple(upstream_artifacts),
+                        named_inputs=named_inputs,
                     )
                     if request_context is not None
                     else None
@@ -97,6 +114,39 @@ class TaskDispatchService:
             )
             await unit_of_work.commit()
         return claim
+
+    @staticmethod
+    async def _resolve_artifact_inputs(
+        unit_of_work: UnitOfWork,
+        execution: WorkflowExecution,
+        node_key: str,
+    ) -> tuple[list[TaskArtifact], tuple[TaskArtifactInput, ...]]:
+        node = execution.snapshot.node(node_key)
+        if node.phase_pack is None:
+            artifacts = await unit_of_work.artifacts.list_latest_for_nodes(
+                execution.id, execution.snapshot.incoming_sources(node_key)
+            )
+            return artifacts, ()
+
+        phase_pack = execution.snapshot.phase_pack(node.phase_pack)
+        source_nodes = {value.source_node for value in node.input_mappings}
+        artifacts = await unit_of_work.artifacts.list_latest_for_nodes(execution.id, source_nodes)
+        artifacts_by_node = {value.producer_node_key: value for value in artifacts}
+        inputs = tuple(
+            TaskArtifactInput(
+                name=mapping.input_key,
+                artifact=artifacts_by_node[mapping.source_node],
+            )
+            for mapping in node.input_mappings
+            if mapping.source_node in artifacts_by_node
+        )
+        required = {value.key for value in phase_pack.inputs if value.required}
+        missing = sorted(required - {value.name for value in inputs})
+        if missing:
+            raise WorkflowExecutionError(
+                f"task {node_key} is missing required artifact inputs: {', '.join(missing)}"
+            )
+        return artifacts, inputs
 
     async def heartbeat(self, claim: TaskClaim, *, at: datetime | None = None) -> WorkflowExecution:
         changed_at = at or datetime.now(UTC)

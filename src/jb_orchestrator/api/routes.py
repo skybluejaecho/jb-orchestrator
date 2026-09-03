@@ -11,6 +11,7 @@ from jb_orchestrator.api.dependencies import (
     get_external_execution_service,
     get_model_catalog_service,
     get_orchestration_service,
+    get_phase_pack_catalog_service,
     get_skill_catalog_service,
     get_workflow_service,
 )
@@ -23,6 +24,8 @@ from jb_orchestrator.api.schemas import (
     ModelProfileCreate,
     ModelProfileResponse,
     NodeExecutionResponse,
+    PhasePackCreate,
+    PhasePackResponse,
     ProjectCreate,
     ProjectResponse,
     RunResponse,
@@ -47,6 +50,7 @@ from jb_orchestrator.application import (
     ExternalExecutionService,
     ModelCatalogService,
     OrchestrationService,
+    PhasePackCatalogService,
     RegisterProject,
     SkillCatalogService,
     WorkflowService,
@@ -55,10 +59,16 @@ from jb_orchestrator.config import get_settings
 from jb_orchestrator.domain import DomainValidationError
 from jb_orchestrator.external_executions import ExternalExecutionStatus
 from jb_orchestrator.model_routing import ModelProfile, ModelRoutingRequest
+from jb_orchestrator.phase_packs import (
+    PhaseInputDefinition,
+    PhasePackDefinition,
+    PhasePackReference,
+)
 from jb_orchestrator.skills import SkillDefinition, SkillReference
 from jb_orchestrator.workflows import (
     EdgeDefinition,
     NodeDefinition,
+    NodeInputMapping,
     WorkflowDefinition,
     WorkflowExecution,
 )
@@ -67,6 +77,7 @@ router = APIRouter(prefix="/v1")
 Service = Annotated[OrchestrationService, Depends(get_orchestration_service)]
 SkillService = Annotated[SkillCatalogService, Depends(get_skill_catalog_service)]
 ModelService = Annotated[ModelCatalogService, Depends(get_model_catalog_service)]
+PhasePackService = Annotated[PhasePackCatalogService, Depends(get_phase_pack_catalog_service)]
 BudgetServiceDependency = Annotated[BudgetService, Depends(get_budget_service)]
 WorkflowServiceDependency = Annotated[WorkflowService, Depends(get_workflow_service)]
 ExternalExecutionServiceDependency = Annotated[
@@ -138,6 +149,15 @@ def workflow_definition_from_payload(
                     ModelRoutingRequest(**node.model_routing.model_dump())
                     if node.model_routing is not None
                     else None
+                ),
+                phase_pack=(
+                    PhasePackReference(key=node.phase_pack.key, version=node.phase_pack.version)
+                    if node.phase_pack is not None
+                    else None
+                ),
+                input_mappings=tuple(
+                    NodeInputMapping(input_key=value.input_key, source_node=value.source_node)
+                    for value in node.input_mappings
                 ),
             )
             for node in payload.nodes
@@ -323,6 +343,38 @@ async def list_skills(service: SkillService) -> list[SkillResponse]:
 @router.get("/skills/{key}", response_model=SkillResponse)
 async def get_skill(key: str, service: SkillService, version: int | None = None) -> SkillResponse:
     return SkillResponse.model_validate(await service.get(key, version))
+
+
+@router.post("/phase-packs", response_model=PhasePackResponse, status_code=status.HTTP_201_CREATED)
+async def register_phase_pack(
+    payload: PhasePackCreate, service: PhasePackService
+) -> PhasePackResponse:
+    phase_pack = PhasePackDefinition(
+        key=payload.key,
+        version=payload.version,
+        name=payload.name,
+        description=payload.description,
+        instructions=payload.instructions,
+        inputs=tuple(PhaseInputDefinition(**value.model_dump()) for value in payload.inputs),
+        output_contract=payload.output_contract,
+        skills=tuple(
+            SkillReference(key=value.key, version=value.version) for value in payload.skills
+        ),
+        metadata=payload.metadata,
+    )
+    return PhasePackResponse.model_validate(await service.register(phase_pack))
+
+
+@router.get("/phase-packs", response_model=list[PhasePackResponse])
+async def list_phase_packs(service: PhasePackService) -> list[PhasePackResponse]:
+    return [PhasePackResponse.model_validate(value) for value in await service.list_latest()]
+
+
+@router.get("/phase-packs/{key}", response_model=PhasePackResponse)
+async def get_phase_pack(
+    key: str, service: PhasePackService, version: int | None = None
+) -> PhasePackResponse:
+    return PhasePackResponse.model_validate(await service.get(key, version))
 
 
 @router.post("/models", response_model=ModelProfileResponse, status_code=status.HTTP_201_CREATED)

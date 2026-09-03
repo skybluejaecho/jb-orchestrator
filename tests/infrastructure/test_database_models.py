@@ -23,6 +23,7 @@ def test_metadata_creates_initial_domain_schema() -> None:
         "budget_reservations",
         "model_profiles",
         "node_executions",
+        "phase_pack_definitions",
         "projects",
         "runs",
         "skill_definitions",

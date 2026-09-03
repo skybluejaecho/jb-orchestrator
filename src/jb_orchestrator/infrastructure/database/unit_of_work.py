@@ -19,6 +19,9 @@ from jb_orchestrator.infrastructure.database.external_execution_repositories imp
 from jb_orchestrator.infrastructure.database.model_repositories import (
     SqlAlchemyModelProfileRepository,
 )
+from jb_orchestrator.infrastructure.database.phase_pack_repositories import (
+    SqlAlchemyPhasePackRepository,
+)
 from jb_orchestrator.infrastructure.database.repositories import (
     SqlAlchemyEventRepository,
     SqlAlchemyProjectRepository,
@@ -41,6 +44,7 @@ class SqlAlchemyUnitOfWork:
     events: SqlAlchemyEventRepository
     artifacts: SqlAlchemyTaskArtifactRepository
     skills: SqlAlchemySkillRepository
+    phase_packs: SqlAlchemyPhasePackRepository
     model_profiles: SqlAlchemyModelProfileRepository
     budget_accounts: SqlAlchemyBudgetAccountRepository
     budget_reservations: SqlAlchemyBudgetReservationRepository
@@ -61,6 +65,7 @@ class SqlAlchemyUnitOfWork:
         self.events = SqlAlchemyEventRepository(self._session)
         self.artifacts = SqlAlchemyTaskArtifactRepository(self._session)
         self.skills = SqlAlchemySkillRepository(self._session)
+        self.phase_packs = SqlAlchemyPhasePackRepository(self._session)
         self.model_profiles = SqlAlchemyModelProfileRepository(self._session)
         self.budget_accounts = SqlAlchemyBudgetAccountRepository(self._session)
         self.budget_reservations = SqlAlchemyBudgetReservationRepository(self._session)

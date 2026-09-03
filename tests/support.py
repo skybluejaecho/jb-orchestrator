@@ -17,6 +17,7 @@ from jb_orchestrator.budgets import (
 from jb_orchestrator.domain import DomainEvent, Project, Run, UserRequest
 from jb_orchestrator.external_executions import ExternalExecution, ExternalExecutionStatus
 from jb_orchestrator.model_routing import ModelProfile
+from jb_orchestrator.phase_packs import PhasePackDefinition
 from jb_orchestrator.skills import SkillDefinition
 from jb_orchestrator.workflows import (
     NodeExecutionStatus,
@@ -37,6 +38,7 @@ class MemoryStore:
     workflow_definitions: dict[tuple[str, int], WorkflowDefinition] = field(default_factory=dict)
     workflow_executions: dict[UUID, WorkflowExecution] = field(default_factory=dict)
     skills: dict[tuple[str, int], SkillDefinition] = field(default_factory=dict)
+    phase_packs: dict[tuple[str, int], PhasePackDefinition] = field(default_factory=dict)
     model_profiles: dict[tuple[str, int], ModelProfile] = field(default_factory=dict)
     budget_accounts: dict[UUID, BudgetAccount] = field(default_factory=dict)
     budget_reservations: dict[str, BudgetReservation] = field(default_factory=dict)
@@ -210,6 +212,36 @@ class MemorySkillRepository:
                     if stored_key == key
                 ),
                 key=lambda skill: skill.version,
+            )
+            for key in keys
+        ]
+
+
+class MemoryPhasePackRepository:
+    def __init__(self, store: MemoryStore) -> None:
+        self._store = store
+
+    async def add(self, phase_pack: PhasePackDefinition) -> None:
+        self._store.phase_packs[(phase_pack.key, phase_pack.version)] = phase_pack
+
+    async def get(self, key: str, version: int | None = None) -> PhasePackDefinition | None:
+        if version is not None:
+            return self._store.phase_packs.get((key, version))
+        matches = [
+            value for (stored_key, _), value in self._store.phase_packs.items() if stored_key == key
+        ]
+        return max(matches, key=lambda value: value.version, default=None)
+
+    async def list_latest(self) -> list[PhasePackDefinition]:
+        keys = sorted({key for key, _ in self._store.phase_packs})
+        return [
+            max(
+                (
+                    value
+                    for (stored_key, _), value in self._store.phase_packs.items()
+                    if stored_key == key
+                ),
+                key=lambda value: value.version,
             )
             for key in keys
         ]
@@ -408,6 +440,7 @@ class MemoryUnitOfWork:
         self.events = MemoryEventRepository(store)
         self.artifacts = MemoryTaskArtifactRepository(store)
         self.skills = MemorySkillRepository(store)
+        self.phase_packs = MemoryPhasePackRepository(store)
         self.model_profiles = MemoryModelProfileRepository(store)
         self.budget_accounts = MemoryBudgetAccountRepository(store)
         self.budget_reservations = MemoryBudgetReservationRepository(store)

@@ -10,6 +10,7 @@ from jb_orchestrator.application import (
     CreateUserRequest,
     ModelCatalogService,
     OrchestrationService,
+    PhasePackCatalogService,
     RegisterProject,
     SkillCatalogService,
     TaskDispatchService,
@@ -22,6 +23,7 @@ from jb_orchestrator.model_routing import (
     ModelRoutingRequest,
     ModelTier,
 )
+from jb_orchestrator.phase_packs import PhasePackDefinition, PhasePackReference
 from jb_orchestrator.skills import SkillDefinition, SkillReference, SkillSourceKind
 from jb_orchestrator.worker.models import TaskResult, TokenUsage
 from jb_orchestrator.workflows import (
@@ -63,6 +65,7 @@ async def test_application_service_round_trip_with_sqlalchemy() -> None:
     workflow_service = WorkflowService(lambda: SqlAlchemyUnitOfWork(session_factory))
     skill_service = SkillCatalogService(lambda: SqlAlchemyUnitOfWork(session_factory))
     model_service = ModelCatalogService(lambda: SqlAlchemyUnitOfWork(session_factory))
+    phase_pack_service = PhasePackCatalogService(lambda: SqlAlchemyUnitOfWork(session_factory))
     skill = await skill_service.register(
         SkillDefinition(
             key="implementation",
@@ -89,6 +92,16 @@ async def test_application_service_round_trip_with_sqlalchemy() -> None:
             executor_keys=("integration",),
         )
     )
+    phase_pack = await phase_pack_service.register(
+        PhasePackDefinition(
+            key="implementation",
+            version=1,
+            name="Implementation",
+            description="Implement an approved task.",
+            instructions="Apply changes and verify the result.",
+            skills=(SkillReference(key=skill.key, version=skill.version),),
+        )
+    )
     definition = WorkflowDefinition(
         key="delivery",
         version=1,
@@ -99,6 +112,7 @@ async def test_application_service_round_trip_with_sqlalchemy() -> None:
                 kind=NodeKind.TASK,
                 executor_key="integration",
                 skills=(SkillReference(key=skill.key, version=skill.version),),
+                phase_pack=PhasePackReference(key=phase_pack.key, version=phase_pack.version),
                 model_routing=ModelRoutingRequest(required_capabilities=("coding",)),
             ),
             NodeDefinition(
@@ -113,6 +127,7 @@ async def test_application_service_round_trip_with_sqlalchemy() -> None:
     claim = await dispatch.claim_next("integration-worker", {"integration"})
     assert claim is not None
     assert claim.executor_key == "integration"
+    assert claim.phase_pack == phase_pack
     leased_execution = await workflow_service.get(execution.id)
     assert leased_execution.nodes["implement"].worker_id == "integration-worker"
     assert leased_execution.nodes["implement"].lease_token == claim.lease_token
@@ -156,6 +171,7 @@ async def test_application_service_round_trip_with_sqlalchemy() -> None:
             "request.created",
             "workflow.definition_registered",
             "model.registered",
+            "phase_pack.registered",
             "skill.registered",
             "workflow.started",
             "task.claimed",

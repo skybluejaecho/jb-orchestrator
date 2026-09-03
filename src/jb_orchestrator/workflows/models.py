@@ -1,5 +1,6 @@
 """Workflow definition, snapshot, and execution state."""
 
+import re
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -12,8 +13,11 @@ from jb_orchestrator.model_routing import (
     ModelSelection,
     NodeModelSelection,
 )
+from jb_orchestrator.phase_packs import PhasePackDefinition, PhasePackReference
 from jb_orchestrator.skills import SkillDefinition, SkillReference
 from jb_orchestrator.workflows.exceptions import WorkflowDefinitionError
+
+NODE_INPUT_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
 class WorkflowStatus(StrEnum):
@@ -74,6 +78,20 @@ class WorkflowRequestContext:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class NodeInputMapping:
+    """Bind one phase-pack input name to a producer node's latest artifact."""
+
+    input_key: str
+    source_node: str
+
+    def __post_init__(self) -> None:
+        if not NODE_INPUT_KEY_PATTERN.fullmatch(self.input_key):
+            raise WorkflowDefinitionError("node input mapping key must be lower snake_case")
+        if not self.source_node.strip():
+            raise WorkflowDefinitionError("node input mapping fields must not be empty")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class NodeDefinition:
     key: str
     kind: NodeKind
@@ -86,6 +104,8 @@ class NodeDefinition:
     configuration: dict[str, Any] = field(default_factory=dict)
     skills: tuple[SkillReference, ...] = ()
     model_routing: ModelRoutingRequest | None = None
+    phase_pack: PhasePackReference | None = None
+    input_mappings: tuple[NodeInputMapping, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.key.strip():
@@ -116,6 +136,14 @@ class NodeDefinition:
             raise WorkflowDefinitionError("only task nodes may reference skills")
         if self.kind is not NodeKind.TASK and self.model_routing is not None:
             raise WorkflowDefinitionError("only task nodes may define model routing")
+        if self.kind is not NodeKind.TASK and self.phase_pack is not None:
+            raise WorkflowDefinitionError("only task nodes may reference phase packs")
+        if self.kind is not NodeKind.TASK and self.input_mappings:
+            raise WorkflowDefinitionError("only task nodes may define input mappings")
+        if self.phase_pack is None and self.input_mappings:
+            raise WorkflowDefinitionError("node input mappings require a phase pack")
+        if len({value.input_key for value in self.input_mappings}) != len(self.input_mappings):
+            raise WorkflowDefinitionError("node input mapping keys must be unique")
         if len(set(self.skills)) != len(self.skills):
             raise WorkflowDefinitionError("node skill references must be unique")
 
@@ -171,6 +199,26 @@ class WorkflowDefinition:
                 raise WorkflowDefinitionError("terminal nodes cannot have outgoing edges")
             if node.kind is not NodeKind.TERMINAL and not outgoing[node.key]:
                 raise WorkflowDefinitionError("non-terminal nodes require an outgoing edge")
+            for mapping in node.input_mappings:
+                source = nodes_by_key.get(mapping.source_node)
+                if source is None:
+                    raise WorkflowDefinitionError("node input mapping references an unknown node")
+                if source.kind is not NodeKind.TASK:
+                    raise WorkflowDefinitionError("node input mapping source must be a task node")
+                if source.key == node.key:
+                    raise WorkflowDefinitionError("node input mapping cannot reference itself")
+                reachable_from_source: set[str] = set()
+                pending_from_source = [source.key]
+                while pending_from_source:
+                    current = pending_from_source.pop()
+                    if current in reachable_from_source:
+                        continue
+                    reachable_from_source.add(current)
+                    pending_from_source.extend(adjacency[current] - reachable_from_source)
+                if node.key not in reachable_from_source:
+                    raise WorkflowDefinitionError(
+                        "node input mapping source must precede its target in the graph"
+                    )
 
         reachable: set[str] = set()
         pending = [self.entry_node]
@@ -207,16 +255,39 @@ class WorkflowSnapshot:
     nodes: tuple[NodeDefinition, ...]
     edges: tuple[EdgeDefinition, ...]
     request_context: WorkflowRequestContext | None = None
+    phase_packs: tuple[PhasePackDefinition, ...] = ()
     skills: tuple[SkillDefinition, ...] = ()
     model_selections: tuple[NodeModelSelection, ...] = ()
     id: UUID = field(default_factory=uuid4)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def __post_init__(self) -> None:
+        phase_packs_by_ref = {value.reference: value for value in self.phase_packs}
+        if len(phase_packs_by_ref) != len(self.phase_packs):
+            raise WorkflowDefinitionError("snapshot phase packs must be unique by key and version")
+        required_phase_packs = {
+            node.phase_pack for node in self.nodes if node.phase_pack is not None
+        }
+        if required_phase_packs != set(phase_packs_by_ref):
+            raise WorkflowDefinitionError(
+                "snapshot phase packs must exactly resolve node references"
+            )
+        for node in self.nodes:
+            if node.phase_pack is None:
+                continue
+            phase_pack = phase_packs_by_ref[node.phase_pack]
+            declared_inputs = {value.key: value for value in phase_pack.inputs}
+            mapped_inputs = {value.input_key for value in node.input_mappings}
+            if not mapped_inputs <= set(declared_inputs):
+                raise WorkflowDefinitionError("node maps an undeclared phase pack input")
+            required_inputs = {key for key, value in declared_inputs.items() if value.required}
+            if not required_inputs <= mapped_inputs:
+                raise WorkflowDefinitionError("node must map every required phase pack input")
         skills_by_ref = {skill.reference: skill for skill in self.skills}
         if len(skills_by_ref) != len(self.skills):
             raise WorkflowDefinitionError("snapshot skills must be unique by key and version")
         required = {reference for node in self.nodes for reference in node.skills}
+        required.update(reference for value in self.phase_packs for reference in value.skills)
         if required != set(skills_by_ref):
             raise WorkflowDefinitionError("snapshot skills must exactly resolve node references")
         selections_by_node = {value.node_key: value for value in self.model_selections}
@@ -235,6 +306,7 @@ class WorkflowSnapshot:
         *,
         run_id: UUID,
         request_context: WorkflowRequestContext | None = None,
+        phase_packs: tuple[PhasePackDefinition, ...] = (),
         skills: tuple[SkillDefinition, ...] = (),
         model_selections: tuple[NodeModelSelection, ...] = (),
     ) -> "WorkflowSnapshot":
@@ -247,6 +319,7 @@ class WorkflowSnapshot:
             nodes=deepcopy(definition.nodes),
             edges=definition.edges,
             request_context=deepcopy(request_context),
+            phase_packs=deepcopy(phase_packs),
             skills=deepcopy(skills),
             model_selections=deepcopy(model_selections),
         )
@@ -268,6 +341,9 @@ class WorkflowSnapshot:
         """Return deterministic direct predecessors that may provide task artifacts."""
 
         return tuple(sorted({edge.source for edge in self.edges if edge.target == target}))
+
+    def phase_pack(self, reference: PhasePackReference) -> PhasePackDefinition:
+        return next(value for value in self.phase_packs if value.reference == reference)
 
     def skill(self, reference: SkillReference) -> SkillDefinition:
         return next(skill for skill in self.skills if skill.reference == reference)

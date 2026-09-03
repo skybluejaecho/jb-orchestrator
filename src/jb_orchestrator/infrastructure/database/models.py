@@ -200,6 +200,27 @@ class SkillDefinitionRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class PhasePackDefinitionRecord(Base):
+    """Immutable reusable phase-pack version."""
+
+    __tablename__ = "phase_pack_definitions"
+    __table_args__ = (
+        UniqueConstraint("key", "version", name="uq_phase_pack_definitions_key_version"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    key: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    instructions: Mapped[str] = mapped_column(Text, nullable=False)
+    inputs: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
+    output_contract: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    skills: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
+    phase_metadata: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class ModelProfileRecord(Base):
     """Immutable catalog entry for one executable model profile version."""
 

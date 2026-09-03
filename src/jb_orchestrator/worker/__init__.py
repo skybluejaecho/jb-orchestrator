@@ -2,6 +2,7 @@
 
 from jb_orchestrator.worker.models import (
     CancellableTaskExecutor,
+    TaskArtifactInput,
     TaskClaim,
     TaskContextEnvelope,
     TaskExecutor,
@@ -13,6 +14,7 @@ from jb_orchestrator.worker.registry import ExecutorRegistry
 __all__ = [
     "CancellableTaskExecutor",
     "ExecutorRegistry",
+    "TaskArtifactInput",
     "TaskClaim",
     "TaskContextEnvelope",
     "TaskExecutor",

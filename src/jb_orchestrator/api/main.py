@@ -12,6 +12,7 @@ from jb_orchestrator.application.budget_services import BudgetService
 from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNotFound
 from jb_orchestrator.application.external_execution_services import ExternalExecutionService
 from jb_orchestrator.application.model_services import ModelCatalogService
+from jb_orchestrator.application.phase_pack_services import PhasePackCatalogService
 from jb_orchestrator.application.services import OrchestrationService
 from jb_orchestrator.application.skill_services import SkillCatalogService
 from jb_orchestrator.application.workflow_services import WorkflowService
@@ -30,6 +31,7 @@ def create_app(
     budget_service: BudgetService | None = None,
     workflow_service: WorkflowService | None = None,
     external_execution_service: ExternalExecutionService | None = None,
+    phase_pack_service: PhasePackCatalogService | None = None,
 ) -> FastAPI:
     """Build the API application."""
 
@@ -38,6 +40,7 @@ def create_app(
         service is None
         or skill_service is None
         or model_service is None
+        or phase_pack_service is None
         or budget_service is None
         or workflow_service is None
         or external_execution_service is None
@@ -49,6 +52,8 @@ def create_app(
         skill_service = SkillCatalogService(lambda: SqlAlchemyUnitOfWork(session_factory))
     if model_service is None:
         model_service = ModelCatalogService(lambda: SqlAlchemyUnitOfWork(session_factory))
+    if phase_pack_service is None:
+        phase_pack_service = PhasePackCatalogService(lambda: SqlAlchemyUnitOfWork(session_factory))
     if budget_service is None:
         budget_service = BudgetService(lambda: SqlAlchemyUnitOfWork(session_factory))
     if workflow_service is None:
@@ -60,6 +65,7 @@ def create_app(
     app.state.orchestration_service = service
     app.state.skill_catalog_service = skill_service
     app.state.model_catalog_service = model_service
+    app.state.phase_pack_catalog_service = phase_pack_service
     app.state.budget_service = budget_service
     app.state.workflow_service = workflow_service
     app.state.external_execution_service = external_execution_service

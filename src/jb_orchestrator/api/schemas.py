@@ -206,6 +206,47 @@ class SkillReferencePayload(BaseModel):
     version: int = Field(ge=1)
 
 
+class PhaseInputPayload(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    key: str = Field(pattern=r"^[a-z][a-z0-9_]*$", max_length=128)
+    description: str = Field(min_length=1)
+    required: bool = True
+
+
+class PhasePackReferencePayload(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    key: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$", max_length=128)
+    version: int = Field(ge=1)
+
+
+class PhasePackCreate(BaseModel):
+    key: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$", max_length=128)
+    version: int = Field(ge=1)
+    name: str = Field(min_length=1, max_length=255)
+    description: str = Field(min_length=1)
+    instructions: str = Field(min_length=1)
+    inputs: tuple[PhaseInputPayload, ...] = ()
+    output_contract: dict[str, Any] = Field(default_factory=dict)
+    skills: tuple[SkillReferencePayload, ...] = ()
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class PhasePackResponse(PhasePackCreate):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    created_at: datetime
+
+
+class NodeInputMappingPayload(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    input_key: str = Field(pattern=r"^[a-z][a-z0-9_]*$", max_length=128)
+    source_node: str = Field(min_length=1, max_length=128)
+
+
 class ModelRoutingPayload(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -232,6 +273,8 @@ class WorkflowNodePayload(BaseModel):
     configuration: dict[str, Any] = Field(default_factory=dict)
     skills: tuple[SkillReferencePayload, ...] = ()
     model_routing: ModelRoutingPayload | None = None
+    phase_pack: PhasePackReferencePayload | None = None
+    input_mappings: tuple[NodeInputMappingPayload, ...] = ()
 
 
 class WorkflowEdgePayload(BaseModel):

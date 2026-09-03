@@ -7,8 +7,17 @@ from uuid import UUID
 
 from jb_orchestrator.artifacts import TaskArtifact
 from jb_orchestrator.model_routing import ModelSelection
+from jb_orchestrator.phase_packs import PhasePackDefinition
 from jb_orchestrator.skills import SkillDefinition
 from jb_orchestrator.workflows import NodeOutcome, WorkflowRequestContext
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class TaskArtifactInput:
+    """A named phase input resolved to one immutable artifact."""
+
+    name: str
+    artifact: TaskArtifact
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -17,9 +26,11 @@ class TaskContextEnvelope:
 
     request: WorkflowRequestContext
     upstream_artifacts: tuple[TaskArtifact, ...] = ()
+    named_inputs: tuple[TaskArtifactInput, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "upstream_artifacts", deepcopy(self.upstream_artifacts))
+        object.__setattr__(self, "named_inputs", deepcopy(self.named_inputs))
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -41,6 +52,7 @@ class TaskClaim:
     instructions: str | None
     configuration: dict[str, Any]
     skills: tuple[SkillDefinition, ...]
+    phase_pack: PhasePackDefinition | None = None
     context: TaskContextEnvelope | None = None
     model_selection: ModelSelection | None = None
     skill_paths: dict[str, str] = field(default_factory=dict)

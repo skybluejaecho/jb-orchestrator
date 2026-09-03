@@ -4,6 +4,7 @@ import pytest
 
 from jb_orchestrator.application import (
     ModelCatalogService,
+    PhasePackCatalogService,
     SkillCatalogService,
     TaskDispatchService,
     WorkflowService,
@@ -16,15 +17,22 @@ from jb_orchestrator.model_routing import (
     ModelTier,
     RequirementLevel,
 )
+from jb_orchestrator.phase_packs import (
+    PhaseInputDefinition,
+    PhasePackDefinition,
+    PhasePackReference,
+)
 from jb_orchestrator.skills import SkillDefinition, SkillReference, SkillSourceKind
 from jb_orchestrator.worker import TaskResult
 from jb_orchestrator.workflows import (
     EdgeDefinition,
     NodeDefinition,
     NodeExecutionStatus,
+    NodeInputMapping,
     NodeKind,
     NodeOutcome,
     WorkflowDefinition,
+    WorkflowDefinitionError,
     WorkflowStatus,
 )
 from tests.support import MemoryStore, MemoryUnitOfWork
@@ -295,3 +303,108 @@ async def test_next_task_claim_receives_request_context_and_direct_artifact() ->
     assert artifact.producer_node_key == "plan"
     assert artifact.visit_count == 1
     assert artifact.content == {"requirements": ["preserve context", "verify output"]}
+
+
+async def test_phase_pack_pins_contract_and_maps_named_artifact_input() -> None:
+    store = MemoryStore()
+    run = store_run_context(store)
+
+    def unit_of_work_factory() -> MemoryUnitOfWork:
+        return MemoryUnitOfWork(store)
+
+    phase_pack = await PhasePackCatalogService(unit_of_work_factory).register(
+        PhasePackDefinition(
+            key="implementation",
+            version=1,
+            name="Implementation",
+            description="Implement an approved plan.",
+            instructions="Change the repository and verify the result.",
+            inputs=(
+                PhaseInputDefinition(
+                    key="approved_plan", description="The approved implementation plan."
+                ),
+            ),
+            output_contract={"required": ["summary", "tests"]},
+        )
+    )
+    definition = WorkflowDefinition(
+        key="phase-composition",
+        version=1,
+        entry_node="plan",
+        nodes=(
+            NodeDefinition(key="plan", kind=NodeKind.TASK, executor_key="fake"),
+            NodeDefinition(
+                key="implement",
+                kind=NodeKind.TASK,
+                executor_key="fake",
+                phase_pack=PhasePackReference(key=phase_pack.key, version=phase_pack.version),
+                input_mappings=(NodeInputMapping(input_key="approved_plan", source_node="plan"),),
+            ),
+            NodeDefinition(
+                key="done", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.SUCCEEDED
+            ),
+        ),
+        edges=(
+            EdgeDefinition(source="plan", outcome=NodeOutcome.SUCCESS, target="implement"),
+            EdgeDefinition(source="implement", outcome=NodeOutcome.SUCCESS, target="done"),
+        ),
+    )
+    workflow_service = WorkflowService(unit_of_work_factory)
+    dispatch = TaskDispatchService(unit_of_work_factory)
+    await workflow_service.register_definition(definition)
+    execution = await workflow_service.start(run.id, definition.key)
+
+    planning = await dispatch.claim_next("planner", {"fake"})
+    assert planning is not None
+    await dispatch.complete(
+        planning,
+        TaskResult(outcome=NodeOutcome.SUCCESS, output={"steps": ["edit", "test"]}),
+    )
+    implementation = await dispatch.claim_next("implementer", {"fake"})
+
+    assert implementation is not None
+    assert implementation.phase_pack == phase_pack
+    assert execution.snapshot.phase_packs == (phase_pack,)
+    assert implementation.context is not None
+    assert len(implementation.context.named_inputs) == 1
+    resolved_input = implementation.context.named_inputs[0]
+    assert resolved_input.name == "approved_plan"
+    assert resolved_input.artifact.producer_node_key == "plan"
+    assert resolved_input.artifact.content == {"steps": ["edit", "test"]}
+
+
+async def test_workflow_rejects_missing_required_phase_input_mapping() -> None:
+    store = MemoryStore()
+
+    def unit_of_work_factory() -> MemoryUnitOfWork:
+        return MemoryUnitOfWork(store)
+
+    phase_pack = await PhasePackCatalogService(unit_of_work_factory).register(
+        PhasePackDefinition(
+            key="verification",
+            version=1,
+            name="Verification",
+            description="Verify an implementation.",
+            instructions="Check the implementation evidence.",
+            inputs=(PhaseInputDefinition(key="implementation", description="Implemented change"),),
+        )
+    )
+    definition = WorkflowDefinition(
+        key="invalid-phase-inputs",
+        version=1,
+        entry_node="verify",
+        nodes=(
+            NodeDefinition(
+                key="verify",
+                kind=NodeKind.TASK,
+                phase_pack=phase_pack.reference,
+            ),
+            NodeDefinition(
+                key="done", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.SUCCEEDED
+            ),
+        ),
+        edges=(EdgeDefinition(source="verify", outcome=NodeOutcome.SUCCESS, target="done"),),
+    )
+
+    with pytest.raises(WorkflowDefinitionError, match="missing required phase inputs"):
+        await WorkflowService(unit_of_work_factory).register_definition(definition)
