@@ -17,6 +17,7 @@ from jb_orchestrator.domain.repositories import (
 )
 from jb_orchestrator.external_executions import ExternalExecutionRepository
 from jb_orchestrator.model_routing.repositories import ModelProfileRepository
+from jb_orchestrator.phase_packs import PhasePackRepository
 from jb_orchestrator.skills.repositories import SkillRepository
 from jb_orchestrator.workflows.repositories import (
     WorkflowDefinitionRepository,
@@ -44,6 +45,9 @@ class UnitOfWork(Protocol):
 
     @property
     def skills(self) -> SkillRepository: ...
+
+    @property
+    def phase_packs(self) -> PhasePackRepository: ...
 
     @property
     def model_profiles(self) -> ModelProfileRepository: ...

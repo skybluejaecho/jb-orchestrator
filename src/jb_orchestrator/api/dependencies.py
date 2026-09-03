@@ -7,6 +7,7 @@ from fastapi import Request
 from jb_orchestrator.application.budget_services import BudgetService
 from jb_orchestrator.application.external_execution_services import ExternalExecutionService
 from jb_orchestrator.application.model_services import ModelCatalogService
+from jb_orchestrator.application.phase_pack_services import PhasePackCatalogService
 from jb_orchestrator.application.services import OrchestrationService
 from jb_orchestrator.application.skill_services import SkillCatalogService
 from jb_orchestrator.application.workflow_services import WorkflowService
@@ -28,6 +29,12 @@ def get_model_catalog_service(request: Request) -> ModelCatalogService:
     """Return the model profile catalog service owned by this app instance."""
 
     return cast(ModelCatalogService, request.app.state.model_catalog_service)
+
+
+def get_phase_pack_catalog_service(request: Request) -> PhasePackCatalogService:
+    """Return the phase-pack catalog service owned by this app instance."""
+
+    return cast(PhasePackCatalogService, request.app.state.phase_pack_catalog_service)
 
 
 def get_budget_service(request: Request) -> BudgetService:

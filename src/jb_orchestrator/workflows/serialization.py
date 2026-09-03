@@ -10,11 +10,14 @@ from jb_orchestrator.model_routing.serialization import (
     request_from_dict,
     request_to_dict,
 )
+from jb_orchestrator.phase_packs import PhasePackReference
+from jb_orchestrator.phase_packs.serialization import phase_pack_from_dict, phase_pack_to_dict
 from jb_orchestrator.skills import SkillReference
 from jb_orchestrator.skills.serialization import skill_from_dict, skill_to_dict
 from jb_orchestrator.workflows.models import (
     EdgeDefinition,
     NodeDefinition,
+    NodeInputMapping,
     NodeKind,
     NodeOutcome,
     WorkflowDefinition,
@@ -41,12 +44,22 @@ def node_to_dict(node: NodeDefinition) -> dict[str, Any]:
         "model_routing": (
             request_to_dict(node.model_routing) if node.model_routing is not None else None
         ),
+        "phase_pack": (
+            {"key": node.phase_pack.key, "version": node.phase_pack.version}
+            if node.phase_pack is not None
+            else None
+        ),
+        "input_mappings": [
+            {"input_key": value.input_key, "source_node": value.source_node}
+            for value in node.input_mappings
+        ],
     }
 
 
 def node_from_dict(data: dict[str, Any]) -> NodeDefinition:
     terminal = data.get("terminal_status")
     model_routing = data.get("model_routing")
+    phase_pack = data.get("phase_pack")
     return NodeDefinition(
         key=str(data["key"]),
         kind=NodeKind(str(data["kind"])),
@@ -63,6 +76,17 @@ def node_from_dict(data: dict[str, Any]) -> NodeDefinition:
         ),
         model_routing=(
             request_from_dict(dict(model_routing)) if model_routing is not None else None
+        ),
+        phase_pack=(
+            PhasePackReference(key=str(phase_pack["key"]), version=int(phase_pack["version"]))
+            if isinstance(phase_pack, dict)
+            else None
+        ),
+        input_mappings=tuple(
+            NodeInputMapping(
+                input_key=str(value["input_key"]), source_node=str(value["source_node"])
+            )
+            for value in data.get("input_mappings", [])
         ),
     )
 
@@ -142,6 +166,7 @@ def snapshot_to_dict(snapshot: WorkflowSnapshot) -> dict[str, Any]:
             if snapshot.request_context is not None
             else None
         ),
+        "phase_packs": [phase_pack_to_dict(value) for value in snapshot.phase_packs],
         "created_at": snapshot.created_at.isoformat(),
         "skills": [skill_to_dict(skill) for skill in snapshot.skills],
         "model_selections": [node_selection_to_dict(value) for value in snapshot.model_selections],
@@ -164,6 +189,7 @@ def snapshot_from_dict(data: dict[str, Any]) -> WorkflowSnapshot:
             if isinstance(request_context, dict)
             else None
         ),
+        phase_packs=tuple(phase_pack_from_dict(value) for value in data.get("phase_packs", [])),
         created_at=datetime.fromisoformat(str(data["created_at"])),
         skills=tuple(skill_from_dict(skill) for skill in data.get("skills", [])),
         model_selections=tuple(

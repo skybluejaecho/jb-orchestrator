@@ -22,6 +22,7 @@ from jb_orchestrator.infrastructure.database.models import (
     ExternalExecutionRecord,
     ModelProfileRecord,
     NodeExecutionRecord,
+    PhasePackDefinitionRecord,
     ProjectRecord,
     RunRecord,
     SkillDefinitionRecord,
@@ -30,6 +31,9 @@ from jb_orchestrator.infrastructure.database.models import (
     UserRequestRecord,
     WorkflowDefinitionRecord,
     WorkflowExecutionRecord,
+)
+from jb_orchestrator.infrastructure.database.phase_pack_repositories import (
+    SqlAlchemyPhasePackRepository,
 )
 from jb_orchestrator.infrastructure.database.repositories import (
     SqlAlchemyEventRepository,
@@ -53,6 +57,7 @@ __all__ = [
     "ExternalExecutionRecord",
     "ModelProfileRecord",
     "NodeExecutionRecord",
+    "PhasePackDefinitionRecord",
     "ProjectRecord",
     "RunRecord",
     "SkillDefinitionRecord",
@@ -61,6 +66,7 @@ __all__ = [
     "SqlAlchemyEventRepository",
     "SqlAlchemyExternalExecutionRepository",
     "SqlAlchemyModelProfileRepository",
+    "SqlAlchemyPhasePackRepository",
     "SqlAlchemyProjectRepository",
     "SqlAlchemyRunRepository",
     "SqlAlchemySkillRepository",

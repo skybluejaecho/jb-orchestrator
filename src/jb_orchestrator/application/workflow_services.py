@@ -13,10 +13,12 @@ from jb_orchestrator.model_routing import (
     DeterministicModelRouter,
     NodeModelSelection,
 )
+from jb_orchestrator.phase_packs import PhasePackDefinition
 from jb_orchestrator.skills import SkillDefinition
 from jb_orchestrator.workflows import (
     NodeOutcome,
     WorkflowDefinition,
+    WorkflowDefinitionError,
     WorkflowEngine,
     WorkflowExecution,
     WorkflowRequestContext,
@@ -44,7 +46,9 @@ class WorkflowService:
                 raise ResourceConflict(
                     f"workflow definition already exists: {definition.key}@{definition.version}"
                 )
-            await self._resolve_skills(unit_of_work, definition)
+            phase_packs = await self._resolve_phase_packs(unit_of_work, definition)
+            await self._resolve_skills(unit_of_work, definition, phase_packs)
+            self._validate_phase_inputs(definition, phase_packs)
             await unit_of_work.workflow_definitions.add(definition)
             await unit_of_work.events.append(
                 DomainEvent(
@@ -89,7 +93,8 @@ class WorkflowService:
                 suffix = f"@{version}" if version is not None else ""
                 raise ResourceNotFound(f"workflow definition not found: {definition_key}{suffix}")
 
-            skills = await self._resolve_skills(unit_of_work, definition)
+            phase_packs = await self._resolve_phase_packs(unit_of_work, definition)
+            skills = await self._resolve_skills(unit_of_work, definition, phase_packs)
             model_selections = await self._route_models(unit_of_work, definition)
 
             execution = WorkflowExecution.create(
@@ -106,6 +111,7 @@ class WorkflowService:
                         prompt=request.prompt,
                         title=request.title,
                     ),
+                    phase_packs=phase_packs,
                     skills=skills,
                     model_selections=model_selections,
                 )
@@ -262,9 +268,12 @@ class WorkflowService:
 
     @staticmethod
     async def _resolve_skills(
-        unit_of_work: UnitOfWork, definition: WorkflowDefinition
+        unit_of_work: UnitOfWork,
+        definition: WorkflowDefinition,
+        phase_packs: tuple[PhasePackDefinition, ...] = (),
     ) -> tuple[SkillDefinition, ...]:
         references = {reference for node in definition.nodes for reference in node.skills}
+        references.update(reference for value in phase_packs for reference in value.skills)
         resolved: list[SkillDefinition] = []
         for reference in sorted(references, key=lambda item: (item.key, item.version)):
             skill = await unit_of_work.skills.get(reference.key, reference.version)
@@ -272,6 +281,42 @@ class WorkflowService:
                 raise ResourceNotFound(f"skill not found: {reference.key}@{reference.version}")
             resolved.append(skill)
         return tuple(resolved)
+
+    @staticmethod
+    async def _resolve_phase_packs(
+        unit_of_work: UnitOfWork, definition: WorkflowDefinition
+    ) -> tuple[PhasePackDefinition, ...]:
+        references = {node.phase_pack for node in definition.nodes if node.phase_pack is not None}
+        resolved: list[PhasePackDefinition] = []
+        for reference in sorted(references, key=lambda item: (item.key, item.version)):
+            phase_pack = await unit_of_work.phase_packs.get(reference.key, reference.version)
+            if phase_pack is None:
+                raise ResourceNotFound(f"phase pack not found: {reference.key}@{reference.version}")
+            resolved.append(phase_pack)
+        return tuple(resolved)
+
+    @staticmethod
+    def _validate_phase_inputs(
+        definition: WorkflowDefinition, phase_packs: tuple[PhasePackDefinition, ...]
+    ) -> None:
+        by_reference = {value.reference: value for value in phase_packs}
+        for node in definition.nodes:
+            if node.phase_pack is None:
+                continue
+            phase_pack = by_reference[node.phase_pack]
+            declared = {value.key: value for value in phase_pack.inputs}
+            mapped = {value.input_key for value in node.input_mappings}
+            if not mapped <= set(declared):
+                raise WorkflowDefinitionError(
+                    f"node {node.key} maps an undeclared input from {phase_pack.key}"
+                )
+            missing = sorted(
+                key for key, value in declared.items() if value.required and key not in mapped
+            )
+            if missing:
+                raise WorkflowDefinitionError(
+                    f"node {node.key} is missing required phase inputs: {', '.join(missing)}"
+                )
 
     async def _route_models(
         self, unit_of_work: UnitOfWork, definition: WorkflowDefinition
