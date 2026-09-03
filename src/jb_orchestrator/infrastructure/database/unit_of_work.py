@@ -13,6 +13,9 @@ from jb_orchestrator.infrastructure.database.budget_repositories import (
     SqlAlchemyBudgetReservationRepository,
     SqlAlchemyUsageRecordRepository,
 )
+from jb_orchestrator.infrastructure.database.dispatch_repositories import (
+    SqlAlchemyRequestDispatchReceiptRepository,
+)
 from jb_orchestrator.infrastructure.database.external_execution_repositories import (
     SqlAlchemyExternalExecutionRepository,
 )
@@ -43,6 +46,7 @@ class SqlAlchemyUnitOfWork:
 
     projects: SqlAlchemyProjectRepository
     requests: SqlAlchemyUserRequestRepository
+    request_dispatch_receipts: SqlAlchemyRequestDispatchReceiptRepository
     runs: SqlAlchemyRunRepository
     events: SqlAlchemyEventRepository
     artifacts: SqlAlchemyTaskArtifactRepository
@@ -65,6 +69,7 @@ class SqlAlchemyUnitOfWork:
         self._session = self._session_factory()
         self.projects = SqlAlchemyProjectRepository(self._session)
         self.requests = SqlAlchemyUserRequestRepository(self._session)
+        self.request_dispatch_receipts = SqlAlchemyRequestDispatchReceiptRepository(self._session)
         self.runs = SqlAlchemyRunRepository(self._session)
         self.events = SqlAlchemyEventRepository(self._session)
         self.artifacts = SqlAlchemyTaskArtifactRepository(self._session)

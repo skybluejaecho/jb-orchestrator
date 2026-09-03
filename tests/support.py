@@ -14,7 +14,7 @@ from jb_orchestrator.budgets import (
     BudgetReservationStatus,
     UsageRecord,
 )
-from jb_orchestrator.domain import DomainEvent, Project, Run, UserRequest
+from jb_orchestrator.domain import DomainEvent, Project, RequestDispatchReceipt, Run, UserRequest
 from jb_orchestrator.external_executions import ExternalExecution, ExternalExecutionStatus
 from jb_orchestrator.model_routing import ModelProfile
 from jb_orchestrator.phase_packs import PhasePackDefinition
@@ -33,6 +33,9 @@ from jb_orchestrator.workflows import (
 class MemoryStore:
     projects: dict[UUID, Project] = field(default_factory=dict)
     requests: dict[UUID, UserRequest] = field(default_factory=dict)
+    request_dispatch_receipts: dict[tuple[UUID, str], RequestDispatchReceipt] = field(
+        default_factory=dict
+    )
     runs: dict[UUID, Run] = field(default_factory=dict)
     events: list[DomainEvent] = field(default_factory=list)
     artifacts: list[TaskArtifact] = field(default_factory=list)
@@ -96,6 +99,28 @@ class MemoryRunRepository:
 
     async def save(self, run: Run) -> None:
         self._store.runs[run.id] = run
+
+
+class MemoryRequestDispatchReceiptRepository:
+    def __init__(self, store: MemoryStore) -> None:
+        self._store = store
+
+    async def try_claim(self, receipt: RequestDispatchReceipt) -> bool:
+        key = (receipt.project_id, receipt.idempotency_key)
+        if key in self._store.request_dispatch_receipts:
+            return False
+        self._store.request_dispatch_receipts[key] = receipt
+        return True
+
+    async def get(
+        self, project_id: UUID, idempotency_key: str, *, for_update: bool = False
+    ) -> RequestDispatchReceipt | None:
+        return self._store.request_dispatch_receipts.get((project_id, idempotency_key))
+
+    async def save(self, receipt: RequestDispatchReceipt) -> None:
+        self._store.request_dispatch_receipts[(receipt.project_id, receipt.idempotency_key)] = (
+            receipt
+        )
 
 
 class MemoryExternalExecutionRepository:
@@ -463,6 +488,7 @@ class MemoryUnitOfWork:
     def __init__(self, store: MemoryStore) -> None:
         self.projects = MemoryProjectRepository(store)
         self.requests = MemoryUserRequestRepository(store)
+        self.request_dispatch_receipts = MemoryRequestDispatchReceiptRepository(store)
         self.runs = MemoryRunRepository(store)
         self.events = MemoryEventRepository(store)
         self.artifacts = MemoryTaskArtifactRepository(store)

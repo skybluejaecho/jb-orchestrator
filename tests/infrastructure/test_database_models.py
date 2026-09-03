@@ -26,6 +26,7 @@ def test_metadata_creates_initial_domain_schema() -> None:
         "phase_pack_definitions",
         "project_workflow_bindings",
         "projects",
+        "request_dispatch_receipts",
         "runs",
         "skill_definitions",
         "task_artifacts",
