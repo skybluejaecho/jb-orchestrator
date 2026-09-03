@@ -5,6 +5,9 @@ from typing import Self
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from jb_orchestrator.infrastructure.database.artifact_repositories import (
+    SqlAlchemyTaskArtifactRepository,
+)
 from jb_orchestrator.infrastructure.database.budget_repositories import (
     SqlAlchemyBudgetAccountRepository,
     SqlAlchemyBudgetReservationRepository,
@@ -36,6 +39,7 @@ class SqlAlchemyUnitOfWork:
     requests: SqlAlchemyUserRequestRepository
     runs: SqlAlchemyRunRepository
     events: SqlAlchemyEventRepository
+    artifacts: SqlAlchemyTaskArtifactRepository
     skills: SqlAlchemySkillRepository
     model_profiles: SqlAlchemyModelProfileRepository
     budget_accounts: SqlAlchemyBudgetAccountRepository
@@ -55,6 +59,7 @@ class SqlAlchemyUnitOfWork:
         self.requests = SqlAlchemyUserRequestRepository(self._session)
         self.runs = SqlAlchemyRunRepository(self._session)
         self.events = SqlAlchemyEventRepository(self._session)
+        self.artifacts = SqlAlchemyTaskArtifactRepository(self._session)
         self.skills = SqlAlchemySkillRepository(self._session)
         self.model_profiles = SqlAlchemyModelProfileRepository(self._session)
         self.budget_accounts = SqlAlchemyBudgetAccountRepository(self._session)

@@ -1,5 +1,4 @@
 from decimal import Decimal
-from uuid import uuid4
 
 import pytest
 
@@ -10,7 +9,7 @@ from jb_orchestrator.application import (
     WorkflowService,
 )
 from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNotFound
-from jb_orchestrator.domain import Run
+from jb_orchestrator.domain import Project, Run, UserRequest
 from jb_orchestrator.model_routing import (
     ModelProfile,
     ModelRoutingRequest,
@@ -18,6 +17,7 @@ from jb_orchestrator.model_routing import (
     RequirementLevel,
 )
 from jb_orchestrator.skills import SkillDefinition, SkillReference, SkillSourceKind
+from jb_orchestrator.worker import TaskResult
 from jb_orchestrator.workflows import (
     EdgeDefinition,
     NodeDefinition,
@@ -45,10 +45,28 @@ def simple_definition(*, version: int = 1) -> WorkflowDefinition:
     )
 
 
+def store_run_context(store: MemoryStore) -> Run:
+    project = Project(
+        key="test-project",
+        name="Test Project",
+        repository_url="https://example.com/project.git",
+        default_branch="develop",
+    )
+    request = UserRequest(
+        project_id=project.id,
+        prompt="Implement and verify the requested change.",
+        title="Test request",
+    )
+    run = Run(request_id=request.id)
+    store.projects[project.id] = project
+    store.requests[request.id] = request
+    store.runs[run.id] = run
+    return run
+
+
 async def test_service_persists_versioned_snapshot_and_events() -> None:
     store = MemoryStore()
-    run = Run(request_id=uuid4())
-    store.runs[run.id] = run
+    run = store_run_context(store)
     service = WorkflowService(lambda: MemoryUnitOfWork(store))
     await service.register_definition(simple_definition(version=1))
     latest = await service.register_definition(simple_definition(version=2))
@@ -56,6 +74,9 @@ async def test_service_persists_versioned_snapshot_and_events() -> None:
     execution = await service.start(run.id, "simple")
     assert execution.snapshot.definition_id == latest.id
     assert execution.snapshot.definition_version == 2
+    assert execution.snapshot.request_context is not None
+    assert execution.snapshot.request_context.prompt == "Implement and verify the requested change."
+    assert execution.snapshot.request_context.default_branch == "develop"
     assert execution.nodes["work"].status is NodeExecutionStatus.READY
 
     await service.begin_task(execution.id, "work")
@@ -65,6 +86,8 @@ async def test_service_persists_versioned_snapshot_and_events() -> None:
 
     assert completed.status is WorkflowStatus.SUCCEEDED
     assert completed.nodes["work"].output == {"artifact": "result.md"}
+    assert len(store.artifacts) == 1
+    assert store.artifacts[0].content == {"artifact": "result.md"}
     assert [event.event_type for event in store.events] == [
         "workflow.definition_registered",
         "workflow.definition_registered",
@@ -108,8 +131,7 @@ async def test_service_lists_latest_definitions_and_gets_exact_version() -> None
 
 async def test_service_allows_only_one_execution_per_run() -> None:
     store = MemoryStore()
-    run = Run(request_id=uuid4())
-    store.runs[run.id] = run
+    run = store_run_context(store)
     service = WorkflowService(lambda: MemoryUnitOfWork(store))
     await service.register_definition(simple_definition())
     await service.start(run.id, "simple")
@@ -120,8 +142,7 @@ async def test_service_allows_only_one_execution_per_run() -> None:
 
 async def test_workflow_snapshot_resolves_exact_skill_versions() -> None:
     store = MemoryStore()
-    run = Run(request_id=uuid4())
-    store.runs[run.id] = run
+    run = store_run_context(store)
 
     def unit_of_work_factory() -> MemoryUnitOfWork:
         return MemoryUnitOfWork(store)
@@ -167,8 +188,7 @@ async def test_workflow_snapshot_resolves_exact_skill_versions() -> None:
 
 async def test_workflow_snapshot_pins_model_routing_decision_in_task_claim() -> None:
     store = MemoryStore()
-    run = Run(request_id=uuid4())
-    store.runs[run.id] = run
+    run = store_run_context(store)
 
     def unit_of_work_factory() -> MemoryUnitOfWork:
         return MemoryUnitOfWork(store)
@@ -223,3 +243,55 @@ async def test_workflow_snapshot_pins_model_routing_decision_in_task_claim() -> 
     assert claim.model_selection.profile.model_id == "gpt-codex-advanced"
     assert claim.model_selection.policy_version == 1
     assert claim.model_selection.estimated_cost_usd == Decimal("0.036")
+
+
+async def test_next_task_claim_receives_request_context_and_direct_artifact() -> None:
+    store = MemoryStore()
+    run = store_run_context(store)
+    definition = WorkflowDefinition(
+        key="context-flow",
+        version=1,
+        entry_node="plan",
+        nodes=(
+            NodeDefinition(key="plan", kind=NodeKind.TASK, executor_key="fake"),
+            NodeDefinition(key="implement", kind=NodeKind.TASK, executor_key="fake"),
+            NodeDefinition(
+                key="done", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.SUCCEEDED
+            ),
+        ),
+        edges=(
+            EdgeDefinition(source="plan", outcome=NodeOutcome.SUCCESS, target="implement"),
+            EdgeDefinition(source="implement", outcome=NodeOutcome.SUCCESS, target="done"),
+        ),
+    )
+
+    def unit_of_work_factory() -> MemoryUnitOfWork:
+        return MemoryUnitOfWork(store)
+
+    workflow_service = WorkflowService(unit_of_work_factory)
+    dispatch = TaskDispatchService(unit_of_work_factory)
+    await workflow_service.register_definition(definition)
+    execution = await workflow_service.start(run.id, definition.key)
+
+    planning = await dispatch.claim_next("worker-a", {"fake"})
+    assert planning is not None
+    await dispatch.complete(
+        planning,
+        TaskResult(
+            outcome=NodeOutcome.SUCCESS,
+            output={"requirements": ["preserve context", "verify output"]},
+        ),
+    )
+    implementation = await dispatch.claim_next("worker-b", {"fake"})
+
+    assert implementation is not None
+    assert implementation.node_key == "implement"
+    assert implementation.context is not None
+    assert implementation.context.request.request_id == run.request_id
+    assert implementation.context.request.prompt == "Implement and verify the requested change."
+    assert len(implementation.context.upstream_artifacts) == 1
+    artifact = implementation.context.upstream_artifacts[0]
+    assert artifact.execution_id == execution.id
+    assert artifact.producer_node_key == "plan"
+    assert artifact.visit_count == 1
+    assert artifact.content == {"requirements": ["preserve context", "verify output"]}

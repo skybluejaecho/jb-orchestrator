@@ -14,6 +14,7 @@ from jb_orchestrator.workflows import (
     NodeKind,
     NodeOutcome,
     WorkflowDefinition,
+    WorkflowRequestContext,
     WorkflowSnapshot,
     WorkflowStatus,
 )
@@ -68,6 +69,16 @@ def test_definition_and_snapshot_json_round_trip() -> None:
     snapshot = WorkflowSnapshot.from_definition(
         definition,
         run_id=uuid4(),
+        request_context=WorkflowRequestContext(
+            request_id=uuid4(),
+            project_id=uuid4(),
+            project_key="serialized-project",
+            project_name="Serialized Project",
+            repository_url="https://example.com/project.git",
+            default_branch="develop",
+            prompt="Implement the serialized workflow.",
+            title="Serialized request",
+        ),
         model_selections=(NodeModelSelection(node_key="task", selection=selection),),
     )
 

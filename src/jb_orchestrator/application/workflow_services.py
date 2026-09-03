@@ -7,6 +7,7 @@ from uuid import UUID
 from jb_orchestrator.application.budget_services import release_run_reservations
 from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNotFound
 from jb_orchestrator.application.unit_of_work import UnitOfWork
+from jb_orchestrator.artifacts import TaskArtifact
 from jb_orchestrator.domain import DomainEvent
 from jb_orchestrator.model_routing import (
     DeterministicModelRouter,
@@ -18,6 +19,7 @@ from jb_orchestrator.workflows import (
     WorkflowDefinition,
     WorkflowEngine,
     WorkflowExecution,
+    WorkflowRequestContext,
     WorkflowSnapshot,
 )
 
@@ -71,8 +73,15 @@ class WorkflowService:
         self, run_id: UUID, definition_key: str, version: int | None = None
     ) -> WorkflowExecution:
         async with self._unit_of_work_factory() as unit_of_work:
-            if await unit_of_work.runs.get(run_id) is None:
+            run = await unit_of_work.runs.get(run_id)
+            if run is None:
                 raise ResourceNotFound(f"run not found: {run_id}")
+            request = await unit_of_work.requests.get(run.request_id)
+            if request is None:
+                raise ResourceNotFound(f"request not found: {run.request_id}")
+            project = await unit_of_work.projects.get(request.project_id)
+            if project is None:
+                raise ResourceNotFound(f"project not found: {request.project_id}")
             if await unit_of_work.workflow_executions.get_by_run(run_id) is not None:
                 raise ResourceConflict(f"workflow execution already exists for run: {run_id}")
             definition = await unit_of_work.workflow_definitions.get(definition_key, version)
@@ -87,6 +96,16 @@ class WorkflowService:
                 WorkflowSnapshot.from_definition(
                     definition,
                     run_id=run_id,
+                    request_context=WorkflowRequestContext(
+                        request_id=request.id,
+                        project_id=project.id,
+                        project_key=project.key,
+                        project_name=project.name,
+                        repository_url=project.repository_url,
+                        default_branch=project.default_branch,
+                        prompt=request.prompt,
+                        title=request.title,
+                    ),
                     skills=skills,
                     model_selections=model_selections,
                 )
@@ -145,7 +164,16 @@ class WorkflowService:
     ) -> WorkflowExecution:
         async with self._unit_of_work_factory() as unit_of_work:
             execution = await self._get_execution(unit_of_work, execution_id)
+            visit_count = execution.nodes[node_key].visit_count
             self._engine.complete_task(execution, node_key, outcome, output=output)
+            artifact = TaskArtifact(
+                execution_id=execution.id,
+                producer_node_key=node_key,
+                visit_count=visit_count,
+                outcome=outcome,
+                content=output or {},
+            )
+            await unit_of_work.artifacts.add(artifact)
             await unit_of_work.workflow_executions.save(execution)
             await self._append_event(
                 unit_of_work,
@@ -153,9 +181,15 @@ class WorkflowService:
                 "workflow.node_completed",
                 node_key=node_key,
                 outcome=outcome.value,
+                artifact_id=str(artifact.id),
             )
             await unit_of_work.commit()
         return execution
+
+    async def list_artifacts(self, execution_id: UUID) -> list[TaskArtifact]:
+        async with self._unit_of_work_factory() as unit_of_work:
+            await self._get_execution(unit_of_work, execution_id)
+            return await unit_of_work.artifacts.list_for_execution(execution_id)
 
     async def fail_task(self, execution_id: UUID, node_key: str, reason: str) -> WorkflowExecution:
         async with self._unit_of_work_factory() as unit_of_work:

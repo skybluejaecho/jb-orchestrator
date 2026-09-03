@@ -77,6 +77,7 @@ async def test_workflow_control_api_registration_execution_and_approval() -> Non
         execution_id = started.json()["id"]
         by_run = await client.get(f"/v1/runs/{run_id}/workflow")
         by_execution = await client.get(f"/v1/workflow-executions/{execution_id}")
+        artifacts = await client.get(f"/v1/workflow-executions/{execution_id}/artifacts")
         approved = await client.post(
             f"/v1/workflow-executions/{execution_id}/approvals/approval",
             json={"approved": True},
@@ -91,8 +92,12 @@ async def test_workflow_control_api_registration_execution_and_approval() -> Non
     assert started.status_code == 201
     assert started.json()["status"] == "awaiting_approval"
     assert started.json()["definition_version"] == 1
+    assert started.json()["request_context"]["prompt"] == "Run the workflow"
+    assert started.json()["request_context"]["project_key"] == "workflow-project"
     assert by_run.json()["id"] == execution_id
     assert by_execution.json()["nodes"][0]["status"] == "awaiting_approval"
+    assert artifacts.status_code == 200
+    assert artifacts.json() == []
     assert approved.status_code == 200
     assert approved.json()["status"] == "succeeded"
     assert approved.json()["nodes"][0]["outcome"] == "approved"

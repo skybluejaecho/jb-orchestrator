@@ -1,5 +1,8 @@
 """SQLAlchemy persistence adapters."""
 
+from jb_orchestrator.infrastructure.database.artifact_repositories import (
+    SqlAlchemyTaskArtifactRepository,
+)
 from jb_orchestrator.infrastructure.database.base import Base
 from jb_orchestrator.infrastructure.database.budget_repositories import (
     SqlAlchemyBudgetAccountRepository,
@@ -22,6 +25,7 @@ from jb_orchestrator.infrastructure.database.models import (
     ProjectRecord,
     RunRecord,
     SkillDefinitionRecord,
+    TaskArtifactRecord,
     UsageRecordRecord,
     UserRequestRecord,
     WorkflowDefinitionRecord,
@@ -60,11 +64,13 @@ __all__ = [
     "SqlAlchemyProjectRepository",
     "SqlAlchemyRunRepository",
     "SqlAlchemySkillRepository",
+    "SqlAlchemyTaskArtifactRepository",
     "SqlAlchemyUnitOfWork",
     "SqlAlchemyUsageRecordRepository",
     "SqlAlchemyUserRequestRepository",
     "SqlAlchemyWorkflowDefinitionRepository",
     "SqlAlchemyWorkflowExecutionRepository",
+    "TaskArtifactRecord",
     "UsageRecordRecord",
     "UserRequestRecord",
     "WorkflowDefinitionRecord",

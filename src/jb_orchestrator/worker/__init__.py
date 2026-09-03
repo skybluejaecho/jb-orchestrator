@@ -3,6 +3,7 @@
 from jb_orchestrator.worker.models import (
     CancellableTaskExecutor,
     TaskClaim,
+    TaskContextEnvelope,
     TaskExecutor,
     TaskResult,
     TokenUsage,
@@ -13,6 +14,7 @@ __all__ = [
     "CancellableTaskExecutor",
     "ExecutorRegistry",
     "TaskClaim",
+    "TaskContextEnvelope",
     "TaskExecutor",
     "TaskResult",
     "TokenUsage",

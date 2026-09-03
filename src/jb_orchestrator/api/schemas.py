@@ -263,6 +263,31 @@ class WorkflowApprovalResolve(BaseModel):
     approved: bool
 
 
+class WorkflowRequestContextResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    request_id: UUID
+    project_id: UUID
+    project_key: str
+    project_name: str
+    repository_url: str
+    default_branch: str
+    prompt: str
+    title: str | None
+
+
+class TaskArtifactResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    execution_id: UUID
+    producer_node_key: str
+    visit_count: int
+    outcome: NodeOutcome
+    content: dict[str, Any]
+    created_at: datetime
+
+
 class NodeExecutionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -287,6 +312,7 @@ class WorkflowExecutionResponse(BaseModel):
     snapshot_id: UUID
     definition_key: str
     definition_version: int
+    request_context: WorkflowRequestContextResponse | None
     status: WorkflowStatus
     nodes: tuple[NodeExecutionResponse, ...]
     failure_reason: str | None

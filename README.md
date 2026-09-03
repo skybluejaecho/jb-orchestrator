@@ -144,6 +144,14 @@ ORCH-017 adds a resumable external execution event stream:
 - reconnection through the standard `Last-Event-ID` header or an initial `after` cursor
 - ledger replay before live polling so temporary client disconnects do not lose events
 
+ORCH-018 adds durable task context and artifacts:
+
+- original request and repository identity pinned in each workflow snapshot
+- immutable JSON artifacts stored for every completed task node visit
+- only the latest artifacts from direct predecessor nodes delivered in each task claim
+- structured request, project, artifact, and verified-skill context rendered for OpenClaw
+- workflow artifact history exposed through the control-plane API
+
 ## Prerequisites
 
 - Python 3.12
@@ -213,6 +221,7 @@ The API exposes:
 - `POST /v1/runs/{run_id}/workflow`
 - `GET /v1/runs/{run_id}/workflow`
 - `GET /v1/workflow-executions/{execution_id}`
+- `GET /v1/workflow-executions/{execution_id}/artifacts`
 - `POST /v1/workflow-executions/{execution_id}/approvals/{node_key}`
 - `POST /v1/workflow-executions/{execution_id}/cancel`
 - `GET /v1/external-executions`

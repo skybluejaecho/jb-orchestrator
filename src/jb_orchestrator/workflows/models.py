@@ -49,6 +49,31 @@ class NodeExecutionStatus(StrEnum):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class WorkflowRequestContext:
+    """Immutable user intent and repository identity pinned for one workflow run."""
+
+    request_id: UUID
+    project_id: UUID
+    project_key: str
+    project_name: str
+    repository_url: str
+    default_branch: str
+    prompt: str
+    title: str | None = None
+
+    def __post_init__(self) -> None:
+        required = (
+            self.project_key,
+            self.project_name,
+            self.repository_url,
+            self.default_branch,
+            self.prompt,
+        )
+        if any(not value.strip() for value in required):
+            raise WorkflowDefinitionError("workflow request context fields must not be empty")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class NodeDefinition:
     key: str
     kind: NodeKind
@@ -181,6 +206,7 @@ class WorkflowSnapshot:
     entry_node: str
     nodes: tuple[NodeDefinition, ...]
     edges: tuple[EdgeDefinition, ...]
+    request_context: WorkflowRequestContext | None = None
     skills: tuple[SkillDefinition, ...] = ()
     model_selections: tuple[NodeModelSelection, ...] = ()
     id: UUID = field(default_factory=uuid4)
@@ -208,6 +234,7 @@ class WorkflowSnapshot:
         definition: WorkflowDefinition,
         *,
         run_id: UUID,
+        request_context: WorkflowRequestContext | None = None,
         skills: tuple[SkillDefinition, ...] = (),
         model_selections: tuple[NodeModelSelection, ...] = (),
     ) -> "WorkflowSnapshot":
@@ -219,6 +246,7 @@ class WorkflowSnapshot:
             entry_node=definition.entry_node,
             nodes=deepcopy(definition.nodes),
             edges=definition.edges,
+            request_context=deepcopy(request_context),
             skills=deepcopy(skills),
             model_selections=deepcopy(model_selections),
         )
@@ -235,6 +263,11 @@ class WorkflowSnapshot:
             ),
             None,
         )
+
+    def incoming_sources(self, target: str) -> tuple[str, ...]:
+        """Return deterministic direct predecessors that may provide task artifacts."""
+
+        return tuple(sorted({edge.source for edge in self.edges if edge.target == target}))
 
     def skill(self, reference: SkillReference) -> SkillDefinition:
         return next(skill for skill in self.skills if skill.reference == reference)

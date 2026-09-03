@@ -1,5 +1,6 @@
 """OpenClaw implementation of the JB executor ports."""
 
+import json
 from typing import Any
 
 from jb_openclaw_executor.bridge import OpenClawBridge
@@ -99,10 +100,37 @@ class OpenClawExecutor:
     @staticmethod
     def _prompt(claim: TaskClaim) -> str:
         instructions = claim.instructions or "Complete the assigned workflow task."
-        if not claim.skill_paths:
-            return instructions
-        skills = "\n".join(f"- {key}: {path}" for key, path in sorted(claim.skill_paths.items()))
-        return f"{instructions}\n\nVerified skill entrypoints:\n{skills}"
+        sections = [f"Task instructions:\n{instructions}"]
+        if claim.context is not None:
+            request = claim.context.request
+            sections.append(f"Original user request:\n{request.prompt}")
+            sections.append(
+                "Project context:\n"
+                f"- key: {request.project_key}\n"
+                f"- name: {request.project_name}\n"
+                f"- repository: {request.repository_url}\n"
+                f"- default branch: {request.default_branch}"
+            )
+            if claim.context.upstream_artifacts:
+                artifacts = [
+                    {
+                        "producer_node_key": artifact.producer_node_key,
+                        "visit_count": artifact.visit_count,
+                        "outcome": artifact.outcome.value,
+                        "content": artifact.content,
+                    }
+                    for artifact in claim.context.upstream_artifacts
+                ]
+                sections.append(
+                    "Direct upstream artifacts:\n"
+                    + json.dumps(artifacts, ensure_ascii=False, sort_keys=True, indent=2)
+                )
+        if claim.skill_paths:
+            skills = "\n".join(
+                f"- {key}: {path}" for key, path in sorted(claim.skill_paths.items())
+            )
+            sections.append(f"Verified skill entrypoints:\n{skills}")
+        return "\n\n".join(sections)
 
     @staticmethod
     def _optional_string(configuration: dict[str, Any], key: str) -> str | None:
