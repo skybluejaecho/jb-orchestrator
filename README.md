@@ -228,6 +228,14 @@ ORCH-027 protects remote control-plane access:
 - public health probes with authenticated `/v1` APIs
 - fail-closed startup when an unauthenticated API is bound outside loopback
 
+ORCH-028 exposes a host-neutral MCP adapter:
+
+- official MCP Python SDK with a local stdio transport
+- authenticated delegation to the existing Control Plane API instead of direct DB access
+- bounded tools for project observation, idempotent dispatch, approval, and cancellation
+- MCP safety annotations backed by API-enforced service-account permissions
+- stable `mcp` request origin shared by Codex, OpenClaw, and other MCP hosts
+
 ## Prerequisites
 
 - Python 3.12
@@ -267,9 +275,41 @@ uv run jb-api
 uv run jb doctor
 uv run jb skill digest skills/my-skill
 uv run jb-worker --list-executors
+uv run jb-mcp
 # After installing at least one executor adapter:
 uv run jb-worker --once
 ```
+
+### MCP host registration
+
+`jb-mcp`는 독립적인 오케스트레이터나 DB 서버가 아니라 인증된 Control Plane API
+클라이언트입니다. MCP host가 실행하는 프로세스 환경에 `JB_CONTROL_PLANE_URL`과
+`JB_API_TOKEN`을 전달합니다.
+
+```json
+{
+  "mcpServers": {
+    "jb-orchestrator": {
+      "command": "uv",
+      "args": ["run", "--project", "<repository-path>", "jb-mcp"],
+      "env": {
+        "JB_CONTROL_PLANE_URL": "http://127.0.0.1:8000",
+        "JB_API_TOKEN": "<service-account-token>"
+      }
+    }
+  }
+}
+```
+
+호스트별 설정 파일 형식은 다를 수 있지만 command, args, env의 의미는 같습니다.
+OpenClaw가 MCP stdio server 등록을 지원하는 배포에서는 같은 구성을 사용하고, 직접 MCP를
+지원하지 않는 배포에서는 ORCH-026 REST ingress를 호출하는 얇은 adapter를 사용합니다.
+MCP 서버는 `JB_API_TOKEN`이 없으면 시작하지 않습니다.
+
+제공 도구는 `get_project`, `list_project_requests`, `list_project_workflows`,
+`dispatch_request`, `get_request`, `get_run`, `get_workflow_execution`, `list_artifacts`,
+`approve_workflow_node`, `cancel_run`입니다. 실제 접근 가능 범위는 token을 발급할 때 부여한
+프로젝트 scope와 permission으로 제한됩니다.
 
 Executor adapter packages expose a no-argument factory in their `pyproject.toml`:
 
