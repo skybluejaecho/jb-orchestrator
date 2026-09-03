@@ -6,6 +6,7 @@ from typing import Any
 from uuid import UUID
 
 from jb_orchestrator.application.exceptions import ResourceNotFound
+from jb_orchestrator.application.output_contracts import enforce_output_contract
 from jb_orchestrator.application.unit_of_work import UnitOfWork
 from jb_orchestrator.artifacts import TaskArtifact
 from jb_orchestrator.domain import DomainEvent
@@ -181,11 +182,22 @@ class TaskDispatchService:
         changed_at = at or datetime.now(UTC)
         async with self._unit_of_work_factory() as unit_of_work:
             execution = await self._get_execution(unit_of_work, claim.execution_id)
+            definition = execution.snapshot.node(claim.node_key)
+            phase_pack = (
+                execution.snapshot.phase_pack(definition.phase_pack)
+                if definition.phase_pack is not None
+                else None
+            )
+            decision = enforce_output_contract(
+                phase_pack,
+                result.outcome,
+                result.output,
+            )
             self._engine.complete_task(
                 execution,
                 claim.node_key,
-                result.outcome,
-                output=result.output,
+                decision.outcome,
+                output=decision.output,
                 lease_token=claim.lease_token,
                 at=changed_at,
             )
@@ -193,8 +205,8 @@ class TaskDispatchService:
                 execution_id=execution.id,
                 producer_node_key=claim.node_key,
                 visit_count=claim.visit_count,
-                outcome=result.outcome,
-                content=result.output,
+                outcome=decision.outcome,
+                content=decision.output,
                 created_at=changed_at,
             )
             await unit_of_work.artifacts.add(artifact)
@@ -205,8 +217,9 @@ class TaskDispatchService:
                 "task.completed",
                 node_key=claim.node_key,
                 worker_id=claim.worker_id,
-                outcome=result.outcome.value,
+                outcome=decision.outcome.value,
                 artifact_id=str(artifact.id),
+                output_contract_rejected=decision.rejected,
             )
             await unit_of_work.commit()
         return execution

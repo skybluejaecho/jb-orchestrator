@@ -408,3 +408,138 @@ async def test_workflow_rejects_missing_required_phase_input_mapping() -> None:
 
     with pytest.raises(WorkflowDefinitionError, match="missing required phase inputs"):
         await WorkflowService(unit_of_work_factory).register_definition(definition)
+
+
+async def test_invalid_phase_output_routes_to_repair_with_structured_artifact() -> None:
+    store = MemoryStore()
+    run = store_run_context(store)
+
+    def unit_of_work_factory() -> MemoryUnitOfWork:
+        return MemoryUnitOfWork(store)
+
+    phase_pack = await PhasePackCatalogService(unit_of_work_factory).register(
+        PhasePackDefinition(
+            key="verification",
+            version=1,
+            name="Verification",
+            description="Verify an implementation.",
+            instructions="Return a verdict and findings.",
+            output_contract={
+                "type": "object",
+                "required": ["verdict", "findings"],
+                "properties": {
+                    "verdict": {"enum": ["approved", "rejected"]},
+                    "findings": {"type": "array"},
+                },
+            },
+        )
+    )
+    definition = WorkflowDefinition(
+        key="contract-repair",
+        version=1,
+        entry_node="verify",
+        nodes=(
+            NodeDefinition(
+                key="verify",
+                kind=NodeKind.TASK,
+                executor_key="fake",
+                max_visits=2,
+                phase_pack=phase_pack.reference,
+            ),
+            NodeDefinition(key="repair", kind=NodeKind.TASK, executor_key="fake"),
+            NodeDefinition(
+                key="done", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.SUCCEEDED
+            ),
+        ),
+        edges=(
+            EdgeDefinition(source="verify", outcome=NodeOutcome.SUCCESS, target="done"),
+            EdgeDefinition(source="verify", outcome=NodeOutcome.FAILURE, target="repair"),
+            EdgeDefinition(source="repair", outcome=NodeOutcome.SUCCESS, target="verify"),
+        ),
+    )
+    workflow_service = WorkflowService(unit_of_work_factory)
+    dispatch = TaskDispatchService(unit_of_work_factory)
+    await workflow_service.register_definition(definition)
+    await workflow_service.start(run.id, definition.key)
+
+    verification = await dispatch.claim_next("verifier", {"fake"})
+    assert verification is not None
+    routed = await dispatch.complete(
+        verification,
+        TaskResult(outcome=NodeOutcome.SUCCESS, output={"verdict": "unknown"}),
+    )
+
+    assert routed.status is WorkflowStatus.RUNNING
+    assert routed.nodes["verify"].outcome is NodeOutcome.FAILURE
+    assert routed.nodes["repair"].status is NodeExecutionStatus.READY
+    artifact = store.artifacts[-1]
+    assert artifact.outcome is NodeOutcome.FAILURE
+    assert artifact.content["rejected_output"] == {"verdict": "unknown"}
+    errors = artifact.content["contract_violation"]["errors"]
+    assert [(value["path"], value["keyword"]) for value in errors] == [
+        ("$", "required"),
+        ("$.verdict", "enum"),
+    ]
+    assert store.events[-1].payload["output_contract_rejected"] is True
+
+    repair = await dispatch.claim_next("repairer", {"fake"})
+    assert repair is not None
+    assert repair.node_key == "repair"
+    assert repair.context is not None
+    assert repair.context.upstream_artifacts[0] == artifact
+
+
+async def test_direct_workflow_completion_enforces_phase_output_contract() -> None:
+    store = MemoryStore()
+    run = store_run_context(store)
+
+    def unit_of_work_factory() -> MemoryUnitOfWork:
+        return MemoryUnitOfWork(store)
+
+    phase_pack = await PhasePackCatalogService(unit_of_work_factory).register(
+        PhasePackDefinition(
+            key="summary",
+            version=1,
+            name="Summary",
+            description="Produce a structured summary.",
+            instructions="Return the requested summary.",
+            output_contract={
+                "type": "object",
+                "required": ["summary"],
+                "properties": {"summary": {"type": "string"}},
+            },
+        )
+    )
+    definition = WorkflowDefinition(
+        key="direct-contract",
+        version=1,
+        entry_node="summarize",
+        nodes=(
+            NodeDefinition(
+                key="summarize",
+                kind=NodeKind.TASK,
+                phase_pack=phase_pack.reference,
+            ),
+            NodeDefinition(
+                key="done", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.SUCCEEDED
+            ),
+        ),
+        edges=(EdgeDefinition(source="summarize", outcome=NodeOutcome.SUCCESS, target="done"),),
+    )
+    service = WorkflowService(unit_of_work_factory)
+    await service.register_definition(definition)
+    execution = await service.start(run.id, definition.key)
+    await service.begin_task(execution.id, "summarize")
+
+    completed = await service.complete_task(
+        execution.id,
+        "summarize",
+        NodeOutcome.SUCCESS,
+        {"unexpected": True},
+    )
+
+    assert completed.status is WorkflowStatus.FAILED
+    assert completed.nodes["summarize"].outcome is NodeOutcome.FAILURE
+    assert store.artifacts[-1].content["contract_violation"]["reason"] == (
+        "output_contract_violation"
+    )

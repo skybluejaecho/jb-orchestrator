@@ -5,7 +5,7 @@ from collections.abc import Callable
 from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNotFound
 from jb_orchestrator.application.unit_of_work import UnitOfWork
 from jb_orchestrator.domain import DomainEvent
-from jb_orchestrator.phase_packs import PhasePackDefinition
+from jb_orchestrator.phase_packs import PhasePackDefinition, check_output_contract_schema
 
 
 class PhasePackCatalogService:
@@ -13,6 +13,7 @@ class PhasePackCatalogService:
         self._unit_of_work_factory = unit_of_work_factory
 
     async def register(self, phase_pack: PhasePackDefinition) -> PhasePackDefinition:
+        check_output_contract_schema(phase_pack.output_contract)
         async with self._unit_of_work_factory() as unit_of_work:
             if await unit_of_work.phase_packs.get(phase_pack.key, phase_pack.version) is not None:
                 raise ResourceConflict(
