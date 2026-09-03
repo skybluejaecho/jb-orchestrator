@@ -1,8 +1,12 @@
 import pytest
 
-from jb_orchestrator.application import RequestDispatchService, WorkflowService
+from jb_orchestrator.application import (
+    DispatchProjectRequest,
+    RequestDispatchService,
+    WorkflowService,
+)
 from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNotFound
-from jb_orchestrator.domain import Project
+from jb_orchestrator.domain import Project, RequestOrigin
 from jb_orchestrator.workflows import (
     EdgeDefinition,
     NodeDefinition,
@@ -29,6 +33,23 @@ def definition(version: int) -> WorkflowDefinition:
     )
 
 
+def dispatch_command(
+    project: Project,
+    prompt: str,
+    key: str,
+    title: str | None = None,
+    *,
+    ingress_key: str = "test",
+) -> DispatchProjectRequest:
+    return DispatchProjectRequest(
+        project_id=project.id,
+        prompt=prompt,
+        title=title,
+        idempotency_key=key,
+        origin=RequestOrigin(ingress_key=ingress_key, external_request_id=key),
+    )
+
+
 async def test_binding_pins_exact_version_and_dispatches_all_state() -> None:
     store = MemoryStore()
     project = Project(
@@ -49,10 +70,12 @@ async def test_binding_pins_exact_version_and_dispatches_all_state() -> None:
 
     binding = await service.configure_binding(project.id, "delivery", 1)
     dispatched = await service.dispatch(
-        project.id,
-        "Ship the requested change",
-        "Delivery",
-        idempotency_key="delivery-1",
+        dispatch_command(
+            project,
+            "Ship the requested change",
+            "delivery-1",
+            "Delivery",
+        )
     )
 
     assert binding.definition_id == first.id
@@ -62,6 +85,9 @@ async def test_binding_pins_exact_version_and_dispatches_all_state() -> None:
     assert dispatched.workflow.snapshot.definition_version == 1
     assert dispatched.workflow.snapshot.request_context is not None
     assert dispatched.workflow.snapshot.request_context.prompt == "Ship the requested change"
+    assert dispatched.request.origin == RequestOrigin(
+        ingress_key="test", external_request_id="delivery-1"
+    )
     assert [event.event_type for event in store.events[-4:]] == [
         "project.workflow_bound",
         "request.created",
@@ -69,6 +95,7 @@ async def test_binding_pins_exact_version_and_dispatches_all_state() -> None:
         "run.status_changed",
     ]
     assert store.events[-2].payload["selection_source"] == "project_binding"
+    assert store.events[-3].payload["origin"]["ingress_key"] == "test"
 
 
 async def test_binding_update_affects_only_future_dispatches() -> None:
@@ -86,9 +113,9 @@ async def test_binding_update_affects_only_future_dispatches() -> None:
     await workflows.register_definition(definition(2))
 
     await service.configure_binding(project.id, "delivery", 1)
-    first = await service.dispatch(project.id, "First", idempotency_key="first")
+    first = await service.dispatch(dispatch_command(project, "First", "first"))
     await service.configure_binding(project.id, "delivery", 2)
-    second = await service.dispatch(project.id, "Second", idempotency_key="second")
+    second = await service.dispatch(dispatch_command(project, "Second", "second"))
 
     assert first.workflow.snapshot.definition_version == 1
     assert second.workflow.snapshot.definition_version == 2
@@ -105,7 +132,7 @@ async def test_dispatch_requires_binding_and_exact_definition() -> None:
     service = RequestDispatchService(lambda: MemoryUnitOfWork(store))
 
     with pytest.raises(ResourceConflict, match="not configured"):
-        await service.dispatch(project.id, "Cannot start", idempotency_key="missing-binding")
+        await service.dispatch(dispatch_command(project, "Cannot start", "missing-binding"))
     with pytest.raises(ResourceNotFound, match="delivery@1"):
         await service.configure_binding(project.id, "delivery", 1)
 
@@ -124,11 +151,20 @@ async def test_dispatch_replays_same_key_and_rejects_different_payload() -> None
     await workflows.register_definition(definition(1))
     await service.configure_binding(project.id, "delivery", 1)
 
-    first = await service.dispatch(project.id, "Ship it", idempotency_key="client-request-1")
+    first = await service.dispatch(
+        dispatch_command(project, "Ship it", "client-request-1", ingress_key="openclaw")
+    )
     await workflows.register_definition(definition(2))
     await service.configure_binding(project.id, "delivery", 2)
     event_count = len(store.events)
-    replay = await service.dispatch(project.id, "  Ship it  ", idempotency_key="client-request-1")
+    replay = await service.dispatch(
+        dispatch_command(
+            project,
+            "  Ship it  ",
+            "client-request-1",
+            ingress_key="openclaw",
+        )
+    )
 
     assert replay.replayed is True
     assert replay.request.id == first.request.id
@@ -142,5 +178,10 @@ async def test_dispatch_replays_same_key_and_rejects_different_payload() -> None
 
     with pytest.raises(ResourceConflict, match="different request payload"):
         await service.dispatch(
-            project.id, "Ship something else", idempotency_key="client-request-1"
+            dispatch_command(
+                project,
+                "Ship something else",
+                "client-request-1",
+                ingress_key="openclaw",
+            )
         )

@@ -15,6 +15,13 @@ def test_dispatch_receipt_requires_valid_key_and_digest() -> None:
         RequestDispatchReceipt(
             project_id=uuid4(), idempotency_key="request-1", payload_digest="sha256:not-a-digest"
         )
+    with pytest.raises(DomainValidationError, match="ingress key"):
+        RequestDispatchReceipt(
+            project_id=uuid4(),
+            ingress_key="OpenClaw",
+            idempotency_key="request-1",
+            payload_digest="sha256:" + "a" * 64,
+        )
 
 
 def test_dispatch_receipt_completes_with_all_result_identifiers() -> None:

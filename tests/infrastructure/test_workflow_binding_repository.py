@@ -1,11 +1,13 @@
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from jb_orchestrator.application import (
+    DispatchProjectRequest,
     OrchestrationService,
     RegisterProject,
     RequestDispatchService,
     WorkflowService,
 )
+from jb_orchestrator.domain import RequestOrigin
 from jb_orchestrator.infrastructure.database import Base, SqlAlchemyUnitOfWork
 from jb_orchestrator.workflows import (
     EdgeDefinition,
@@ -51,11 +53,29 @@ async def test_sqlalchemy_binding_and_dispatch_round_trip() -> None:
 
     configured = await service.configure_binding(project.id, definition.key, definition.version)
     fetched = await service.get_binding(project.id)
-    dispatched = await service.dispatch(
-        project.id, "Execute the bound workflow", idempotency_key="sql-round-trip"
+    command = DispatchProjectRequest(
+        project_id=project.id,
+        prompt="Execute the bound workflow",
+        idempotency_key="sql-round-trip",
+        origin=RequestOrigin(
+            ingress_key="openclaw",
+            external_request_id="telegram-message-42",
+            actor_id="telegram:user-7",
+            conversation_id="telegram:chat-3",
+        ),
     )
-    replayed = await service.dispatch(
-        project.id, "Execute the bound workflow", idempotency_key="sql-round-trip"
+    dispatched = await service.dispatch(command)
+    replayed = await service.dispatch(command)
+    other_ingress = await service.dispatch(
+        DispatchProjectRequest(
+            project_id=project.id,
+            prompt="Execute a separate Jarvis request",
+            idempotency_key="sql-round-trip",
+            origin=RequestOrigin(
+                ingress_key="jarvis",
+                external_request_id="jarvis-request-42",
+            ),
+        )
     )
     stored = await workflow_service.get(dispatched.workflow.id)
 
@@ -71,5 +91,9 @@ async def test_sqlalchemy_binding_and_dispatch_round_trip() -> None:
     assert dispatched.run.started_at is not None
     assert replayed.replayed is True
     assert replayed.workflow.id == dispatched.workflow.id
+    assert dispatched.request.origin == command.origin
+    assert other_ingress.request.id != dispatched.request.id
+    assert other_ingress.request.origin is not None
+    assert other_ingress.request.origin.ingress_key == "jarvis"
 
     await engine.dispose()

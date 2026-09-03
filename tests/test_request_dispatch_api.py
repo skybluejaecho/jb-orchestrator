@@ -50,17 +50,43 @@ async def test_project_binding_and_one_call_dispatch_api() -> None:
         dispatched = await client.post(
             f"/v1/projects/{project_id}/dispatches",
             json={"title": "Deliver", "prompt": "Implement this"},
-            headers={"Idempotency-Key": "api-request-1"},
+            headers={
+                "Idempotency-Key": "api-request-1",
+                "X-JB-Ingress-Key": "openclaw",
+                "X-JB-External-Request-ID": "telegram-message-42",
+                "X-JB-Actor-ID": "telegram:user-7",
+                "X-JB-Conversation-ID": "telegram:chat-3",
+            },
         )
         replayed = await client.post(
             f"/v1/projects/{project_id}/dispatches",
             json={"title": "Deliver", "prompt": "Implement this"},
-            headers={"Idempotency-Key": "api-request-1"},
+            headers={
+                "Idempotency-Key": "api-request-1",
+                "X-JB-Ingress-Key": "openclaw",
+                "X-JB-External-Request-ID": "telegram-message-42",
+                "X-JB-Actor-ID": "telegram:user-7",
+                "X-JB-Conversation-ID": "telegram:chat-3",
+            },
         )
         conflicting = await client.post(
             f"/v1/projects/{project_id}/dispatches",
             json={"title": "Different", "prompt": "Implement something else"},
-            headers={"Idempotency-Key": "api-request-1"},
+            headers={
+                "Idempotency-Key": "api-request-1",
+                "X-JB-Ingress-Key": "openclaw",
+                "X-JB-External-Request-ID": "telegram-message-42",
+                "X-JB-Actor-ID": "telegram:user-7",
+                "X-JB-Conversation-ID": "telegram:chat-3",
+            },
+        )
+        other_ingress = await client.post(
+            f"/v1/projects/{project_id}/dispatches",
+            json={"title": "Jarvis", "prompt": "A separate request"},
+            headers={
+                "Idempotency-Key": "api-request-1",
+                "X-JB-Ingress-Key": "jarvis",
+            },
         )
 
     assert project.status_code == 201
@@ -69,6 +95,12 @@ async def test_project_binding_and_one_call_dispatch_api() -> None:
     assert fetched.json() == bound.json()
     assert dispatched.status_code == 201
     assert dispatched.json()["request"]["status"] == "active"
+    assert dispatched.json()["request"]["origin"] == {
+        "ingress_key": "openclaw",
+        "external_request_id": "telegram-message-42",
+        "actor_id": "telegram:user-7",
+        "conversation_id": "telegram:chat-3",
+    }
     assert dispatched.json()["run"]["status"] == "running"
     assert dispatched.json()["workflow"]["definition_version"] == 1
     assert dispatched.json()["workflow"]["request_context"]["prompt"] == "Implement this"
@@ -77,6 +109,8 @@ async def test_project_binding_and_one_call_dispatch_api() -> None:
     assert replayed.json()["replayed"] is True
     assert replayed.json()["workflow"]["id"] == dispatched.json()["workflow"]["id"]
     assert conflicting.status_code == 409
+    assert other_ingress.status_code == 201
+    assert other_ingress.json()["request"]["origin"]["ingress_key"] == "jarvis"
 
 
 async def test_dispatch_api_requires_idempotency_key() -> None:
