@@ -102,7 +102,9 @@ def _start_process(
 ) -> _ManagedProcess:
     log_path = log_directory / f"{name}.log"
     log_handle = log_path.open("wb")
-    creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+    creationflags = (
+        cast(int, getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)) if os.name == "nt" else 0
+    )
     try:
         process = subprocess.Popen(
             command,
