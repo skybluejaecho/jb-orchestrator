@@ -4,6 +4,7 @@ import {
   Activity,
   AlertTriangle,
   Boxes,
+  CircleCheck,
   GitBranch,
   Radio,
   RefreshCw,
@@ -33,6 +34,10 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
+import {
+  RequestComposer,
+  type DispatchResult,
+} from '@/components/request-composer';
 
 type ConnectionState = 'connecting' | 'live' | 'degraded';
 
@@ -168,6 +173,10 @@ export function JarvisDashboard() {
   const [connection, setConnection] = useState<ConnectionState>('connecting');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [dispatchNotice, setDispatchNotice] = useState<{
+    projectId: string;
+    title: string;
+  } | null>(null);
 
   const loadProjects = useCallback(async () => {
     try {
@@ -284,9 +293,21 @@ export function JarvisDashboard() {
     },
   ];
 
+  const selectedProject =
+    projects.find((project) => project.id === selectedProjectId) ?? null;
+
+  const handleDispatched = (result: DispatchResult) => {
+    if (!selectedProjectId) return;
+    setDispatchNotice({
+      projectId: selectedProjectId,
+      title: result.request.title || result.request.prompt,
+    });
+    void loadOverview(selectedProjectId);
+  };
+
   return (
     <main className="mx-auto min-h-screen max-w-[1600px] px-4 pb-10 pt-4 sm:px-6 lg:px-8">
-      <header className="flex min-h-16 items-center justify-between border-b border-white/8 pb-4">
+      <header className="flex min-h-16 flex-wrap items-center justify-between gap-3 border-b border-white/8 pb-4">
         <div className="flex items-center gap-3">
           <div className="grid size-10 place-items-center rounded-xl border border-cyan-300/20 bg-cyan-300/10 text-cyan-200 shadow-[0_0_30px_oklch(0.78_0.135_203/12%)]">
             <ServerCog aria-hidden="true" className="size-5" />
@@ -382,6 +403,31 @@ export function JarvisDashboard() {
         </aside>
 
         <section className="min-w-0 space-y-5" aria-label="프로젝트 작업 현황">
+          {dispatchNotice?.projectId === selectedProjectId && (
+            <Card className="border border-emerald-300/20 bg-emerald-300/6 ring-0">
+              <CardContent className="flex items-center gap-3 py-1 text-emerald-50">
+                <CircleCheck
+                  aria-hidden="true"
+                  className="size-5 shrink-0 text-emerald-200"
+                />
+                <p className="min-w-0 truncate text-sm">
+                  <span className="font-medium">요청을 등록했습니다.</span>{' '}
+                  <span className="text-emerald-50/55">
+                    {dispatchNotice.title}
+                  </span>
+                </p>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="ml-auto text-emerald-100/60 hover:text-emerald-50"
+                  onClick={() => setDispatchNotice(null)}
+                >
+                  닫기
+                </Button>
+              </CardContent>
+            </Card>
+          )}
           {error && (
             <Card className="border border-amber-300/20 bg-amber-300/6 ring-0">
               <CardContent className="flex gap-3 py-1 text-amber-50">
@@ -423,6 +469,11 @@ export function JarvisDashboard() {
               </div>
             )}
           </div>
+
+          <RequestComposer
+            project={selectedProject}
+            onDispatched={handleDispatched}
+          />
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {metricCards.map(({ label, value, icon: Icon, color }) => (

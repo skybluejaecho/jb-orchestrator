@@ -1,0 +1,184 @@
+'use client';
+
+import { ArrowUpRight, LoaderCircle } from 'lucide-react';
+import { useRef, useState, type SyntheticEvent } from 'react';
+
+import { Button } from '@/components/ui/button';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+
+type ProjectSummary = {
+  id: string;
+  key: string;
+  name: string;
+};
+
+export type DispatchResult = {
+  request: {
+    id: string;
+    title: string | null;
+    prompt: string;
+  };
+  workflow: {
+    id: string;
+  };
+  replayed: boolean;
+};
+
+type Problem = { detail?: string };
+
+async function readDispatch(response: Response): Promise<DispatchResult> {
+  if (!response.ok) {
+    const problem = (await response.json().catch(() => ({}))) as Problem;
+    throw new Error(
+      problem.detail ?? `요청을 제출하지 못했습니다. (${response.status})`,
+    );
+  }
+  return (await response.json()) as DispatchResult;
+}
+
+export function RequestComposer({
+  project,
+  onDispatched,
+}: {
+  project: ProjectSummary | null;
+  onDispatched: (result: DispatchResult) => void;
+}) {
+  const [title, setTitle] = useState('');
+  const [prompt, setPrompt] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const idempotencyKey = useRef<string | null>(null);
+
+  const invalidateKey = () => {
+    idempotencyKey.current = null;
+    setError(null);
+  };
+
+  const submit = async (event: SyntheticEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!project || !prompt.trim() || submitting) return;
+
+    const requestKey =
+      idempotencyKey.current ?? `jarvis-${crypto.randomUUID()}`;
+    idempotencyKey.current = requestKey;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const result = await readDispatch(
+        await fetch('/api/dispatch', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Idempotency-Key': requestKey,
+          },
+          body: JSON.stringify({
+            projectId: project.id,
+            title: title.trim() || null,
+            prompt: prompt.trim(),
+          }),
+        }),
+      );
+      idempotencyKey.current = null;
+      setTitle('');
+      setPrompt('');
+      onDispatched(result);
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : '요청을 제출하지 못했습니다.',
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Card className="border border-cyan-300/12 bg-cyan-300/4 ring-0">
+      <CardHeader className="border-b border-white/7 pb-4">
+        <CardTitle>새 작업 요청</CardTitle>
+        <CardDescription>
+          {project
+            ? `${project.name}의 기본 워크플로를 시작합니다.`
+            : '요청을 제출하려면 프로젝트를 선택하세요.'}
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form
+          onSubmit={submit}
+          className="grid gap-4 xl:grid-cols-[minmax(180px,0.55fr)_minmax(320px,1.45fr)_auto] xl:items-end"
+        >
+          <div className="space-y-2">
+            <Label htmlFor="request-title" className="text-white/75">
+              제목 <span className="font-normal text-white/35">선택</span>
+            </Label>
+            <Input
+              id="request-title"
+              value={title}
+              onChange={(event) => {
+                setTitle(event.target.value);
+                invalidateKey();
+              }}
+              maxLength={255}
+              placeholder="예: 로그인 오류 수정"
+              className="h-10 border-white/10 bg-black/15 text-white placeholder:text-white/25"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="request-prompt" className="text-white/75">
+              요청 내용
+            </Label>
+            <Textarea
+              id="request-prompt"
+              required
+              value={prompt}
+              onChange={(event) => {
+                setPrompt(event.target.value);
+                invalidateKey();
+              }}
+              placeholder="완료할 작업, 제약 조건과 기대 결과를 적어주세요."
+              className="min-h-20 resize-y border-white/10 bg-black/15 text-white placeholder:text-white/25"
+            />
+          </div>
+
+          <Button
+            type="submit"
+            disabled={!project || !prompt.trim() || submitting}
+            className="h-10 gap-2 bg-cyan-300 text-slate-950 hover:bg-cyan-200 xl:mb-0.5"
+          >
+            {submitting ? (
+              <LoaderCircle
+                aria-hidden="true"
+                className="size-4 animate-spin"
+              />
+            ) : (
+              <ArrowUpRight aria-hidden="true" className="size-4" />
+            )}
+            {submitting ? '제출 중' : '워크플로 시작'}
+          </Button>
+        </form>
+        {error && (
+          <p
+            role="alert"
+            className="mt-3 rounded-lg border border-red-300/20 bg-red-300/8 px-3 py-2.5 text-sm leading-6 text-red-100"
+          >
+            {error}
+          </p>
+        )}
+        <p className="mt-3 text-xs leading-5 text-white/35">
+          요청은 Jarvis가 직접 실행하지 않고 Control Plane에 등록합니다.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
