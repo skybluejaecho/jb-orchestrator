@@ -83,3 +83,31 @@ async def test_tool_call_delegates_to_control_plane_client() -> None:
     assert client.calls == [("get_project", project_id)]
     _, structured = cast(tuple[Any, dict[str, Any]], result)
     assert structured["id"] == str(project_id)
+
+
+async def test_dispatch_tool_accepts_exact_node_skill_addons() -> None:
+    server = create_server(StubControlPlaneClient())  # type: ignore[arg-type]
+    project_id = uuid4()
+
+    result = await server.call_tool(
+        "dispatch_request",
+        {
+            "project_id": str(project_id),
+            "prompt": "Review it",
+            "idempotency_key": "skill-addon-1",
+            "skill_addons": [
+                {
+                    "node_key": "verify",
+                    "skills": [{"key": "security-review", "version": 2}],
+                }
+            ],
+        },
+    )
+
+    _, structured = cast(tuple[Any, dict[str, Any]], result)
+    assert structured["skill_addons"] == [
+        {
+            "node_key": "verify",
+            "skills": [{"key": "security-review", "version": 2}],
+        }
+    ]

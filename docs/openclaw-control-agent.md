@@ -49,12 +49,14 @@ Gateway protocol은 MCP server/tool 계약을 포함하지만, Gateway client �
 1. 요청이 충분히 구체적인지 확인한다.
 2. 사용자가 특정 흐름을 원하면 list_workflow_options로 정확한 key/version을 확인한다.
    nodes, edges, phase_packs, skills를 요약해 실제 실행 구성을 먼저 설명한다.
-3. 선택 의도가 없으면 definition 필드를 생략하여 프로젝트 기본값을 사용한다.
-4. 채널의 원본 message/event ID를 기반으로 안정적인 idempotency_key를 만든다.
-5. dispatch_request를 한 번 호출한다.
-6. 네트워크 오류로 재시도할 때는 반드시 같은 key, payload와 Workflow 선택을 사용한다.
-7. 반환된 request, run, workflow ID를 사용자에게 알려준다.
-8. 이후 조회 도구로 DB에 기록된 상태를 설명한다.
+3. 사용자가 특정 Skill 조합을 원하면 available_skills에서 정확한 key/version을 선택하고
+   대상 task node에 skill_addons로 추가한다. 기존 Workflow Skill은 제거하지 않는다.
+4. 선택 의도가 없으면 definition 필드를 생략하여 프로젝트 기본값을 사용한다.
+5. 채널의 원본 message/event ID를 기반으로 안정적인 idempotency_key를 만든다.
+6. dispatch_request를 한 번 호출한다.
+7. 네트워크 오류로 재시도할 때는 반드시 같은 key, payload, Workflow와 Skill 선택을 사용한다.
+8. 반환된 request, run, workflow ID를 사용자에게 알려준다.
+9. 이후 조회 도구로 DB에 기록된 상태를 설명한다.
 
 승인과 취소는 사용자가 명시적으로 요청한 경우에만 실행한다.
 Workflow나 프로젝트 상태를 OpenClaw 자체 메모리만으로 추측하지 않는다.

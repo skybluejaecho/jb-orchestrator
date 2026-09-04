@@ -2,12 +2,12 @@
 
 import json
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from hashlib import sha256
 from uuid import UUID
 
-from jb_orchestrator.application.commands import DispatchProjectRequest
+from jb_orchestrator.application.commands import DispatchProjectRequest, NodeSkillAddon
 from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNotFound
 from jb_orchestrator.application.unit_of_work import UnitOfWork
 from jb_orchestrator.application.workflow_services import WorkflowService
@@ -45,6 +45,7 @@ class ProjectWorkflowOptions:
     default: ProjectWorkflowBinding | None
     default_workflow: "WorkflowComposition | None"
     workflows: tuple["WorkflowComposition", ...]
+    available_skills: tuple[SkillDefinition, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,6 +139,7 @@ class RequestDispatchService:
                 raise ResourceNotFound(f"project not found: {project_id}")
             binding = await unit_of_work.project_workflow_bindings.get_by_project(project_id)
             definitions = await unit_of_work.workflow_definitions.list_latest()
+            available_skills = tuple(await unit_of_work.skills.list_latest())
             default_workflow = None
             if binding is not None:
                 default_definition = await unit_of_work.workflow_definitions.get(
@@ -147,18 +149,15 @@ class RequestDispatchService:
                     raise ResourceConflict(
                         f"bound workflow definition is unavailable: {project_id}"
                     )
-                default_workflow = await self._resolve_composition(
-                    unit_of_work, default_definition
-                )
+                default_workflow = await self._resolve_composition(unit_of_work, default_definition)
             compositions_list: list[WorkflowComposition] = []
             for definition in definitions:
-                compositions_list.append(
-                    await self._resolve_composition(unit_of_work, definition)
-                )
+                compositions_list.append(await self._resolve_composition(unit_of_work, definition))
         return ProjectWorkflowOptions(
             default=binding,
             default_workflow=default_workflow,
             workflows=tuple(compositions_list),
+            available_skills=available_skills,
         )
 
     @staticmethod
@@ -180,14 +179,10 @@ class RequestDispatchService:
             phase_packs.append(phase_pack)
 
         skill_references = {
-            skill_reference
-            for node in definition.nodes
-            for skill_reference in node.skills
+            skill_reference for node in definition.nodes for skill_reference in node.skills
         }
         skill_references.update(
-            skill_reference
-            for phase_pack in phase_packs
-            for skill_reference in phase_pack.skills
+            skill_reference for phase_pack in phase_packs for skill_reference in phase_pack.skills
         )
         skills: list[SkillDefinition] = []
         for skill_reference in sorted(
@@ -216,6 +211,7 @@ class RequestDispatchService:
             raise ResourceConflict(
                 "request workflow override requires definition_key and definition_version"
             )
+        normalized_addons = self._normalize_skill_addons(command.skill_addons)
         async with self._unit_of_work_factory() as unit_of_work:
             project = await unit_of_work.projects.get(command.project_id)
             if project is None:
@@ -230,6 +226,7 @@ class RequestDispatchService:
                     command.origin,
                     definition_key,
                     command.definition_version,
+                    normalized_addons,
                 ),
             )
             if not await unit_of_work.request_dispatch_receipts.try_claim(receipt):
@@ -275,6 +272,8 @@ class RequestDispatchService:
                     )
                 selection_source = "project_binding"
 
+            definition = await self._apply_skill_addons(unit_of_work, definition, normalized_addons)
+
             request = UserRequest(
                 project_id=project.id,
                 prompt=normalized_prompt,
@@ -304,6 +303,16 @@ class RequestDispatchService:
                             "definition_key": definition.key,
                             "definition_version": definition.version,
                         },
+                        "skill_addons": [
+                            {
+                                "node_key": addon.node_key,
+                                "skills": [
+                                    {"key": skill.key, "version": skill.version}
+                                    for skill in addon.skills
+                                ],
+                            }
+                            for addon in normalized_addons
+                        ],
                     },
                 )
             )
@@ -340,6 +349,7 @@ class RequestDispatchService:
         origin: RequestOrigin,
         definition_key: str | None = None,
         definition_version: int | None = None,
+        skill_addons: tuple[NodeSkillAddon, ...] = (),
     ) -> str:
         normalized_title = title.strip() if title else None
         payload = json.dumps(
@@ -360,12 +370,75 @@ class RequestDispatchService:
                     if definition_key is not None and definition_version is not None
                     else None
                 ),
+                "skill_addons": [
+                    {
+                        "node_key": addon.node_key,
+                        "skills": [
+                            {"key": skill.key, "version": skill.version} for skill in addon.skills
+                        ],
+                    }
+                    for addon in skill_addons
+                ],
             },
             ensure_ascii=False,
             separators=(",", ":"),
             sort_keys=True,
         ).encode()
         return f"sha256:{sha256(payload).hexdigest()}"
+
+    @staticmethod
+    def _normalize_skill_addons(
+        addons: tuple[NodeSkillAddon, ...],
+    ) -> tuple[NodeSkillAddon, ...]:
+        node_keys = [addon.node_key.strip() for addon in addons]
+        if len(node_keys) != len(set(node_keys)):
+            raise ResourceConflict("request skill add-on node keys must be unique")
+        normalized: list[NodeSkillAddon] = []
+        for addon, node_key in zip(addons, node_keys, strict=True):
+            if not node_key:
+                raise ResourceConflict("request skill add-on node key must not be empty")
+            skills = tuple(sorted(set(addon.skills), key=lambda value: (value.key, value.version)))
+            if not skills:
+                raise ResourceConflict("request skill add-on requires at least one skill")
+            normalized.append(NodeSkillAddon(node_key=node_key, skills=skills))
+        return tuple(sorted(normalized, key=lambda value: value.node_key))
+
+    @staticmethod
+    async def _apply_skill_addons(
+        unit_of_work: UnitOfWork,
+        definition: WorkflowDefinition,
+        addons: tuple[NodeSkillAddon, ...],
+    ) -> WorkflowDefinition:
+        if not addons:
+            return definition
+        nodes_by_key = {node.key: node for node in definition.nodes}
+        additions_by_node = {addon.node_key: addon.skills for addon in addons}
+        for node_key, skills in additions_by_node.items():
+            node = nodes_by_key.get(node_key)
+            if node is None:
+                raise ResourceConflict(f"request skill add-on node not found: {node_key}")
+            if node.kind.value != "task":
+                raise ResourceConflict(f"request skill add-ons require a task node: {node_key}")
+            for skill in skills:
+                if await unit_of_work.skills.get(skill.key, skill.version) is None:
+                    raise ResourceNotFound(f"skill not found: {skill.key}@{skill.version}")
+        return replace(
+            definition,
+            nodes=tuple(
+                replace(
+                    node,
+                    skills=tuple(
+                        sorted(
+                            set(node.skills) | set(additions_by_node.get(node.key, ())),
+                            key=lambda value: (value.key, value.version),
+                        )
+                    ),
+                )
+                if node.key in additions_by_node
+                else node
+                for node in definition.nodes
+            ),
+        )
 
     @staticmethod
     async def _replay(

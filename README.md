@@ -346,6 +346,16 @@ ORCH-041 adds workflow composition previews:
 - Jarvis shows the selected workflow's stages, phase packs, and skill sources before dispatch
 - previews remain read-only and execution still uses the immutable workflow snapshot
 
+ORCH-042 adds request-scoped Skill composition:
+
+- workflow options expose safe summaries for the latest registered Skills
+- one request may add exact Skill versions to selected task nodes
+- add-ons never remove the Workflow or Phase Pack's required Skills
+- node and Skill references are validated before an execution is created
+- normalized Skill add-ons participate in the dispatch idempotency fingerprint and request event
+- the augmented node definitions and resolved Skills are pinned in the immutable execution snapshot
+- MCP and Jarvis share the same task-node Skill add-on contract
+
 ## Prerequisites
 
 - Python 3.12

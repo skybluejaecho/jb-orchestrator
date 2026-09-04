@@ -2,6 +2,7 @@ import pytest
 
 from jb_orchestrator.application import (
     DispatchProjectRequest,
+    NodeSkillAddon,
     RequestDispatchService,
     WorkflowService,
 )
@@ -44,6 +45,7 @@ def dispatch_command(
     ingress_key: str = "test",
     definition_key: str | None = None,
     definition_version: int | None = None,
+    skill_addons: tuple[NodeSkillAddon, ...] = (),
 ) -> DispatchProjectRequest:
     return DispatchProjectRequest(
         project_id=project.id,
@@ -53,6 +55,7 @@ def dispatch_command(
         origin=RequestOrigin(ingress_key=ingress_key, external_request_id=key),
         definition_key=definition_key,
         definition_version=definition_version,
+        skill_addons=skill_addons,
     )
 
 
@@ -317,6 +320,22 @@ async def test_dispatch_replays_same_key_and_rejects_different_payload() -> None
             )
         )
 
+    with pytest.raises(ResourceConflict, match="different request payload"):
+        await service.dispatch(
+            dispatch_command(
+                project,
+                "Ship it",
+                "client-request-1",
+                ingress_key="openclaw",
+                skill_addons=(
+                    NodeSkillAddon(
+                        node_key="work",
+                        skills=(SkillReference(key="review", version=1),),
+                    ),
+                ),
+            )
+        )
+
 
 async def test_request_override_requires_key_and_version_together() -> None:
     store = MemoryStore()
@@ -337,3 +356,85 @@ async def test_request_override_requires_key_and_version_together() -> None:
                 definition_key="delivery",
             )
         )
+
+
+async def test_request_skill_addons_are_pinned_without_mutating_definition() -> None:
+    store = MemoryStore()
+    project = Project(
+        key="skill-addon-project",
+        name="Skill Add-on Project",
+        repository_url="https://example.com/skill-addon.git",
+    )
+    skill = SkillDefinition(
+        key="security-review",
+        version=2,
+        name="Security Review",
+        description="Review security boundaries",
+        source_kind=SkillSourceKind.LOCAL,
+        source_uri="security-review",
+        content_digest=f"sha256:{'b' * 64}",
+    )
+    store.projects[project.id] = project
+    store.skills[(skill.key, skill.version)] = skill
+    factory = lambda: MemoryUnitOfWork(store)  # noqa: E731
+    workflows = WorkflowService(factory)
+    original = await workflows.register_definition(definition(1))
+    await RequestDispatchService(factory, workflows).configure_binding(
+        project.id, original.key, original.version
+    )
+    service = RequestDispatchService(factory, workflows)
+
+    dispatched = await service.dispatch(
+        dispatch_command(
+            project,
+            "Review this change",
+            "skill-addon-1",
+            skill_addons=(NodeSkillAddon(node_key="work", skills=(skill.reference,)),),
+        )
+    )
+
+    assert dispatched.workflow.snapshot.node("work").skills == (skill.reference,)
+    assert dispatched.workflow.snapshot.skills == (skill,)
+    assert original.node("work").skills == ()
+    assert store.events[-3].payload["skill_addons"] == [
+        {
+            "node_key": "work",
+            "skills": [{"key": "security-review", "version": 2}],
+        }
+    ]
+
+
+async def test_request_skill_addons_reject_non_task_and_unknown_nodes() -> None:
+    store = MemoryStore()
+    project = Project(
+        key="invalid-addon-project",
+        name="Invalid Add-on Project",
+        repository_url="https://example.com/invalid-addon.git",
+    )
+    skill = SkillDefinition(
+        key="review",
+        version=1,
+        name="Review",
+        description="Review output",
+        source_kind=SkillSourceKind.LOCAL,
+        source_uri="review",
+        content_digest=f"sha256:{'c' * 64}",
+    )
+    store.projects[project.id] = project
+    store.skills[(skill.key, skill.version)] = skill
+    factory = lambda: MemoryUnitOfWork(store)  # noqa: E731
+    workflows = WorkflowService(factory)
+    await workflows.register_definition(definition(1))
+    await RequestDispatchService(factory, workflows).configure_binding(project.id, "delivery", 1)
+    service = RequestDispatchService(factory, workflows)
+
+    for node_key, message in (("done", "require a task node"), ("missing", "not found")):
+        with pytest.raises(ResourceConflict, match=message):
+            await service.dispatch(
+                dispatch_command(
+                    project,
+                    "Invalid add-on",
+                    f"invalid-{node_key}",
+                    skill_addons=(NodeSkillAddon(node_key=node_key, skills=(skill.reference,)),),
+                )
+            )

@@ -84,6 +84,7 @@ class ControlPlaneClient:
         conversation_id: str | None = None,
         definition_key: str | None = None,
         definition_version: int | None = None,
+        skill_addons: list[dict[str, Any]] | None = None,
     ) -> JsonObject:
         if (definition_key is None) != (definition_version is None):
             raise ControlPlaneError(
@@ -114,6 +115,7 @@ class ControlPlaneClient:
                         if definition_key is not None and definition_version is not None
                         else None
                     ),
+                    "skill_addons": skill_addons or [],
                 },
                 headers=headers,
             ),

@@ -60,6 +60,7 @@ from jb_orchestrator.application import (
     DispatchProjectRequest,
     ExternalExecutionService,
     ModelCatalogService,
+    NodeSkillAddon,
     OrchestrationService,
     PhasePackCatalogService,
     ProjectObservationService,
@@ -348,6 +349,9 @@ async def list_project_workflow_options(
             else None
         ),
         workflows=tuple(_workflow_option_response(value) for value in options.workflows),
+        available_skills=tuple(
+            WorkflowSkillSummaryResponse.model_validate(skill) for skill in options.available_skills
+        ),
     )
 
 
@@ -417,6 +421,16 @@ async def dispatch_project_request(
             ),
             definition_version=(
                 payload.workflow.definition_version if payload.workflow is not None else None
+            ),
+            skill_addons=tuple(
+                NodeSkillAddon(
+                    node_key=addon.node_key,
+                    skills=tuple(
+                        SkillReference(key=skill.key, version=skill.version)
+                        for skill in addon.skills
+                    ),
+                )
+                for addon in payload.skill_addons
             ),
         )
     )

@@ -5,7 +5,7 @@ from uuid import UUID
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from jb_orchestrator.mcp_server.client import ControlPlaneClient
 
@@ -13,6 +13,20 @@ READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldH
 DISPATCH = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True)
 APPROVAL = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True)
 CANCELLATION = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True)
+
+
+class SkillReferenceInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    key: Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9._-]*$", max_length=128)]
+    version: Annotated[int, Field(ge=1)]
+
+
+class NodeSkillAddonInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    node_key: Annotated[str, Field(min_length=1, max_length=128)]
+    skills: Annotated[list[SkillReferenceInput], Field(min_length=1, max_length=64)]
 
 
 def create_server(client: ControlPlaneClient | None = None) -> FastMCP[None]:
@@ -25,6 +39,8 @@ def create_server(client: ControlPlaneClient | None = None) -> FastMCP[None]:
             "Use these tools to dispatch and observe jb-orchestrator workflows. "
             "Call list_workflow_options before choosing a request override; omit both "
             "definition fields to use the project default. "
+            "Use available_skills and task node keys to add exact request-scoped Skills; "
+            "do not add Skills unless they help the user's stated task. "
             "Reuse the same idempotency key when retrying a dispatch. Ask the user before "
             "approval or cancellation when their intent is not already explicit."
         ),
@@ -76,8 +92,9 @@ def create_server(client: ControlPlaneClient | None = None) -> FastMCP[None]:
             Field(pattern=r"^[a-z0-9][a-z0-9._-]*$", max_length=128),
         ] = None,
         definition_version: Annotated[int | None, Field(ge=1)] = None,
+        skill_addons: Annotated[list[NodeSkillAddonInput] | None, Field(max_length=64)] = None,
     ) -> dict[str, Any]:
-        """Start a selected or default workflow; reuse the key for an exact retry."""
+        """Start a workflow with optional exact task-node Skill add-ons; reuse key on retry."""
 
         return await control_plane.dispatch_request(
             project_id,
@@ -89,6 +106,11 @@ def create_server(client: ControlPlaneClient | None = None) -> FastMCP[None]:
             conversation_id=conversation_id,
             definition_key=definition_key,
             definition_version=definition_version,
+            skill_addons=(
+                [addon.model_dump(mode="json") for addon in skill_addons]
+                if skill_addons is not None
+                else None
+            ),
         )
 
     @server.tool(annotations=READ_ONLY)

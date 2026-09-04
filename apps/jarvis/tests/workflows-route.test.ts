@@ -22,6 +22,7 @@ describe('GET /api/workflows', () => {
       },
       default_workflow: null,
       workflows: [{ id: 'workflow-1', key: 'planning-only', version: 1 }],
+      available_skills: [],
     };
     const fetchMock = vi
       .fn<typeof fetch>()

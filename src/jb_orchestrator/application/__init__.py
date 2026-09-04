@@ -4,6 +4,7 @@ from jb_orchestrator.application.budget_services import BudgetService, BudgetUsa
 from jb_orchestrator.application.commands import (
     CreateUserRequest,
     DispatchProjectRequest,
+    NodeSkillAddon,
     RegisterProject,
 )
 from jb_orchestrator.application.external_execution_services import ExternalExecutionService
@@ -32,6 +33,7 @@ __all__ = [
     "ExternalExecutionService",
     "IssuedServiceAccount",
     "ModelCatalogService",
+    "NodeSkillAddon",
     "OrchestrationService",
     "PhasePackCatalogService",
     "ProjectObservationService",
