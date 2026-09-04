@@ -1,7 +1,7 @@
 'use client';
 
 import { ArrowUpRight, LoaderCircle } from 'lucide-react';
-import { useRef, useState, type SyntheticEvent } from 'react';
+import { useEffect, useRef, useState, type SyntheticEvent } from 'react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -13,6 +13,10 @@ import {
 } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from '@/components/ui/native-select';
 import { Textarea } from '@/components/ui/textarea';
 import {
   prepareDispatchAttempt,
@@ -24,6 +28,22 @@ type ProjectSummary = {
   key: string;
   name: string;
 };
+
+type WorkflowOption = {
+  id: string;
+  key: string;
+  version: number;
+};
+
+type WorkflowOptions = {
+  default: {
+    definition_key: string;
+    definition_version: number;
+  } | null;
+  workflows: WorkflowOption[];
+};
+
+const DEFAULT_WORKFLOW = '__project_default__';
 
 export type DispatchResult = {
   request: {
@@ -60,20 +80,58 @@ export function RequestComposer({
   const [prompt, setPrompt] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [workflowOptions, setWorkflowOptions] =
+    useState<WorkflowOptions | null>(null);
+  const [workflowValue, setWorkflowValue] = useState(DEFAULT_WORKFLOW);
+  const [workflowError, setWorkflowError] = useState(false);
   const dispatchAttempt = useRef<DispatchAttempt | null>(null);
+  const requiresWorkflowSelection =
+    workflowOptions !== null &&
+    workflowOptions.default === null &&
+    workflowValue === DEFAULT_WORKFLOW;
 
   const clearError = () => {
     setError(null);
   };
 
+  useEffect(() => {
+    let active = true;
+    if (!project) return () => undefined;
+    void fetch(`/api/workflows?projectId=${encodeURIComponent(project.id)}`)
+      .then(async (response) => {
+        if (!response.ok) throw new Error('workflow options unavailable');
+        const options = (await response.json()) as WorkflowOptions;
+        if (active) {
+          setWorkflowOptions(options);
+          setWorkflowValue(DEFAULT_WORKFLOW);
+          setWorkflowError(false);
+        }
+      })
+      .catch(() => {
+        if (active) setWorkflowError(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [project]);
+
   const submit = async (event: SyntheticEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!project || !prompt.trim() || submitting) return;
 
+    const selectedWorkflow = workflowOptions?.workflows.find(
+      (workflow) => `${workflow.key}@${workflow.version}` === workflowValue,
+    );
     const input = {
       projectId: project.id,
       title: title.trim() || null,
       prompt: prompt.trim(),
+      workflow: selectedWorkflow
+        ? {
+            definitionKey: selectedWorkflow.key,
+            definitionVersion: selectedWorkflow.version,
+          }
+        : null,
     };
     const attempt = prepareDispatchAttempt(dispatchAttempt.current, input);
     dispatchAttempt.current = attempt;
@@ -111,14 +169,16 @@ export function RequestComposer({
         <CardTitle>새 작업 요청</CardTitle>
         <CardDescription>
           {project
-            ? `${project.name}의 기본 워크플로를 시작합니다.`
+            ? workflowValue === DEFAULT_WORKFLOW
+              ? `${project.name}의 기본 워크플로를 시작합니다.`
+              : `${project.name}에서 선택한 워크플로를 시작합니다.`
             : '요청을 제출하려면 프로젝트를 선택하세요.'}
         </CardDescription>
       </CardHeader>
       <CardContent>
         <form
           onSubmit={submit}
-          className="grid gap-4 xl:grid-cols-[minmax(180px,0.55fr)_minmax(320px,1.45fr)_auto] xl:items-end"
+          className="grid gap-4 xl:grid-cols-[minmax(170px,0.5fr)_minmax(190px,0.55fr)_minmax(320px,1.45fr)_auto] xl:items-end"
         >
           <div className="space-y-2">
             <Label htmlFor="request-title" className="text-white/75">
@@ -135,6 +195,54 @@ export function RequestComposer({
               placeholder="예: 로그인 오류 수정"
               className="h-10 border-white/10 bg-black/15 text-white placeholder:text-white/25"
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="request-workflow" className="text-white/75">
+              워크플로
+            </Label>
+            <NativeSelect
+              id="request-workflow"
+              value={workflowValue}
+              onChange={(event) => {
+                setWorkflowValue(event.target.value);
+                clearError();
+              }}
+              disabled={!project}
+              className="w-full"
+              aria-describedby={
+                workflowError ? 'workflow-options-error' : undefined
+              }
+            >
+              <NativeSelectOption
+                value={DEFAULT_WORKFLOW}
+                disabled={
+                  workflowOptions !== null && workflowOptions.default === null
+                }
+              >
+                {workflowOptions?.default
+                  ? `프로젝트 기본 · ${workflowOptions.default.definition_key}@${workflowOptions.default.definition_version}`
+                  : workflowOptions
+                    ? '기본값 없음 · 워크플로 선택'
+                    : '프로젝트 기본'}
+              </NativeSelectOption>
+              {workflowOptions?.workflows.map((workflow) => (
+                <NativeSelectOption
+                  key={workflow.id}
+                  value={`${workflow.key}@${workflow.version}`}
+                >
+                  {workflow.key}@{workflow.version}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+            {workflowError && (
+              <p
+                id="workflow-options-error"
+                className="text-xs text-amber-100/65"
+              >
+                선택 목록을 불러오지 못해 프로젝트 기본값을 사용합니다.
+              </p>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -156,7 +264,12 @@ export function RequestComposer({
 
           <Button
             type="submit"
-            disabled={!project || !prompt.trim() || submitting}
+            disabled={
+              !project ||
+              !prompt.trim() ||
+              submitting ||
+              requiresWorkflowSelection
+            }
             className="h-10 gap-2 bg-cyan-300 text-slate-950 hover:bg-cyan-200 xl:mb-0.5"
           >
             {submitting ? (

@@ -23,6 +23,8 @@ def create_server(client: ControlPlaneClient | None = None) -> FastMCP[None]:
         "jb-orchestrator",
         instructions=(
             "Use these tools to dispatch and observe jb-orchestrator workflows. "
+            "Call list_workflow_options before choosing a request override; omit both "
+            "definition fields to use the project default. "
             "Reuse the same idempotency key when retrying a dispatch. Ask the user before "
             "approval or cancellation when their intent is not already explicit."
         ),
@@ -54,6 +56,12 @@ def create_server(client: ControlPlaneClient | None = None) -> FastMCP[None]:
 
         return await control_plane.list_project_workflows(project_id, status=status, limit=limit)
 
+    @server.tool(annotations=READ_ONLY)
+    async def list_workflow_options(project_id: UUID) -> dict[str, Any]:
+        """List exact workflows selectable for a project and its default binding."""
+
+        return await control_plane.list_workflow_options(project_id)
+
     @server.tool(annotations=DISPATCH)
     async def dispatch_request(
         project_id: UUID,
@@ -63,8 +71,13 @@ def create_server(client: ControlPlaneClient | None = None) -> FastMCP[None]:
         external_request_id: Annotated[str | None, Field(max_length=255)] = None,
         actor_id: Annotated[str | None, Field(max_length=255)] = None,
         conversation_id: Annotated[str | None, Field(max_length=512)] = None,
+        definition_key: Annotated[
+            str | None,
+            Field(pattern=r"^[a-z0-9][a-z0-9._-]*$", max_length=128),
+        ] = None,
+        definition_version: Annotated[int | None, Field(ge=1)] = None,
     ) -> dict[str, Any]:
-        """Start the project's bound workflow; reuse the key for an exact retry."""
+        """Start a selected or default workflow; reuse the key for an exact retry."""
 
         return await control_plane.dispatch_request(
             project_id,
@@ -74,6 +87,8 @@ def create_server(client: ControlPlaneClient | None = None) -> FastMCP[None]:
             external_request_id=external_request_id,
             actor_id=actor_id,
             conversation_id=conversation_id,
+            definition_key=definition_key,
+            definition_version=definition_version,
         )
 
     @server.tool(annotations=READ_ONLY)

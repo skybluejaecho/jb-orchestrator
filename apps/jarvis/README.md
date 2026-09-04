@@ -31,7 +31,9 @@ npm run dev
 ```
 
 브라우저에는 API token을 전달하지 않는다. Vinext server route가 token을 보관하고
-Control Plane으로 요청을 proxy한다. 요청 제출은 `jarvis` ingress와 멱등성 key를 사용한다.
+Control Plane으로 요청을 proxy한다. 요청 작성 화면은 프로젝트 기본 Workflow 또는 등록된
+정확한 Workflow 버전을 선택할 수 있다. 선택하지 않으면 기본 binding을 사용하며 선택해도
+프로젝트 기본값 자체는 변경되지 않는다. 요청 제출은 `jarvis` ingress와 멱등성 key를 사용한다.
 실행을 선택하면 노드 상태와 산출물을 조회할 수 있고, 승인 대기 노드는 승인 또는 반려를
 한 번 더 확인한 뒤 처리한다. 진행 중인 실행을 취소하려면 화면에 표시된 실행 식별 문구를
 정확하게 입력해야 한다. Jarvis는 로컬 실행만 지원하며 외부 네트워크 공개나 Sites 배포는

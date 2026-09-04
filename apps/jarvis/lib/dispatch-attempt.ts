@@ -2,6 +2,10 @@ export type DispatchInput = {
   projectId: string;
   title: string | null;
   prompt: string;
+  workflow: {
+    definitionKey: string;
+    definitionVersion: number;
+  } | null;
 };
 
 export type DispatchAttempt = {
@@ -18,6 +22,8 @@ export function prepareDispatchAttempt(
     input.projectId,
     input.title,
     input.prompt,
+    input.workflow?.definitionKey ?? null,
+    input.workflow?.definitionVersion ?? null,
   ]);
   if (current?.fingerprint === fingerprint) return current;
   return { fingerprint, key: `jarvis-${createId()}` };

@@ -45,6 +45,17 @@ class UserRequestCreate(BaseModel):
     prompt: str = Field(min_length=1)
 
 
+class WorkflowSelectionPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    definition_key: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$", max_length=128)
+    definition_version: int = Field(ge=1)
+
+
+class ProjectRequestDispatchCreate(UserRequestCreate):
+    workflow: WorkflowSelectionPayload | None = None
+
+
 class RequestOriginResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -328,6 +339,19 @@ class WorkflowDefinitionCreate(BaseModel):
 
 class WorkflowDefinitionResponse(WorkflowDefinitionCreate):
     id: UUID
+
+
+class WorkflowOptionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    key: str
+    version: int
+
+
+class ProjectWorkflowOptionsResponse(BaseModel):
+    default: ProjectWorkflowBindingResponse | None
+    workflows: tuple[WorkflowOptionResponse, ...]
 
 
 class WorkflowStart(BaseModel):

@@ -12,6 +12,7 @@ from jb_orchestrator.application.phase_pack_services import PhasePackCatalogServ
 from jb_orchestrator.application.project_observation_services import ProjectObservationService
 from jb_orchestrator.application.request_dispatch_services import (
     DispatchedRequest,
+    ProjectWorkflowOptions,
     RequestDispatchService,
 )
 from jb_orchestrator.application.security_services import IssuedServiceAccount, SecurityService
@@ -33,6 +34,7 @@ __all__ = [
     "OrchestrationService",
     "PhasePackCatalogService",
     "ProjectObservationService",
+    "ProjectWorkflowOptions",
     "RegisterProject",
     "RequestDispatchService",
     "SecurityService",

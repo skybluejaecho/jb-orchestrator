@@ -34,7 +34,7 @@ async def test_mcp_protocol_dispatches_through_authenticated_api() -> None:
     )
     store.projects[project.id] = project
     workflow_service = WorkflowService(unit_of_work)
-    await workflow_service.register_definition(
+    delivery = await workflow_service.register_definition(
         WorkflowDefinition(
             key="delivery",
             version=1,
@@ -46,6 +46,15 @@ async def test_mcp_protocol_dispatches_through_authenticated_api() -> None:
                 ),
             ),
             edges=(EdgeDefinition(source="work", outcome=NodeOutcome.SUCCESS, target="done"),),
+        )
+    )
+    selected = await workflow_service.register_definition(
+        WorkflowDefinition(
+            key="planning-only",
+            version=1,
+            entry_node="work",
+            nodes=delivery.nodes,
+            edges=delivery.edges,
         )
     )
     dispatch_service = RequestDispatchService(unit_of_work, workflow_service)
@@ -76,6 +85,9 @@ async def test_mcp_protocol_dispatches_through_authenticated_api() -> None:
         project_result = await session.call_tool(
             "get_project", arguments={"project_id": str(project.id)}
         )
+        options_result = await session.call_tool(
+            "list_workflow_options", arguments={"project_id": str(project.id)}
+        )
         dispatched = await session.call_tool(
             "dispatch_request",
             arguments={
@@ -86,6 +98,8 @@ async def test_mcp_protocol_dispatches_through_authenticated_api() -> None:
                 "external_request_id": "openclaw-message-1",
                 "actor_id": "openclaw:user-7",
                 "conversation_id": "openclaw:session-3",
+                "definition_key": selected.key,
+                "definition_version": selected.version,
             },
         )
         replayed = await session.call_tool(
@@ -98,18 +112,28 @@ async def test_mcp_protocol_dispatches_through_authenticated_api() -> None:
                 "external_request_id": "openclaw-message-1",
                 "actor_id": "openclaw:user-7",
                 "conversation_id": "openclaw:session-3",
+                "definition_key": selected.key,
+                "definition_version": selected.version,
             },
         )
 
     assert "dispatch_request" in tool_names
+    assert "list_workflow_options" in tool_names
     assert project_result.isError is False
     project_payload = cast(dict[str, Any], project_result.structuredContent)
     assert project_payload["key"] == "mcp-e2e"
+    options_payload = cast(dict[str, Any], options_result.structuredContent)
+    assert options_payload["default"]["definition_key"] == "delivery"
+    assert {(item["key"], item["version"]) for item in options_payload["workflows"]} == {
+        ("delivery", 1),
+        ("planning-only", 1),
+    }
     dispatch_payload = cast(dict[str, Any], dispatched.structuredContent)
     replay_payload = cast(dict[str, Any], replayed.structuredContent)
     assert dispatch_payload["replayed"] is False
     assert replay_payload["replayed"] is True
     assert dispatch_payload["workflow"]["id"] == replay_payload["workflow"]["id"]
+    assert dispatch_payload["workflow"]["definition_key"] == "planning-only"
     assert dispatch_payload["request"]["origin"] == {
         "ingress_key": "mcp",
         "external_request_id": "openclaw-message-1",

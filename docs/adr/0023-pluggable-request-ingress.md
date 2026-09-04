@@ -26,7 +26,8 @@ Jarvis나 OpenClaw를 핵심 도메인에 직접 결합하면 새로운 입력 �
 - `ingress_key`는 DB enum이 아니라 규칙을 검증한 문자열이다. 새로운 입력 어댑터 추가에
   migration이 필요하지 않게 한다.
 - Dispatch 멱등성 namespace를 `(project_id, ingress_key, idempotency_key)`로 확장한다.
-- 동일 namespace에서 prompt, title 또는 origin이 달라지면 `409 Conflict`로 거부한다.
+- 동일 namespace에서 prompt, title, origin 또는 요청별 Workflow 선택이 달라지면
+  `409 Conflict`로 거부한다.
 - 생성된 User Request와 `request.created` 이벤트에 origin을 보존한다.
 - 기존 origin 없는 User Request는 읽을 수 있도록 nullable 상태로 유지한다.
 - REST adapter는 `X-JB-Ingress-Key`, `X-JB-External-Request-ID`, `X-JB-Actor-ID`,

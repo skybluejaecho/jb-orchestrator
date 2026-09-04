@@ -69,7 +69,64 @@ describe('POST /api/dispatch', () => {
     expect(JSON.parse(init.body)).toEqual({
       title: '제목',
       prompt: '작업 내용',
+      workflow: null,
     });
+  });
+
+  it('선택한 워크플로의 정확한 key와 version을 전달한다', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json(
+        {
+          request: { id: 'request-1', title: null, prompt: '기획 요청' },
+          workflow: { id: 'workflow-1' },
+          replayed: false,
+        },
+        { status: 201 },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await POST(
+      dispatchRequest(
+        {
+          projectId: 'project-1',
+          prompt: '기획 요청',
+          workflow: {
+            definitionKey: 'planning-only',
+            definitionVersion: 2,
+          },
+        },
+        'jarvis-selected-1',
+      ),
+    );
+
+    expect(response.status).toBe(201);
+    const [, init] = fetchMock.mock.calls[0];
+    if (typeof init?.body !== 'string')
+      throw new Error('JSON body가 필요합니다.');
+    expect(JSON.parse(init.body).workflow).toEqual({
+      definition_key: 'planning-only',
+      definition_version: 2,
+    });
+  });
+
+  it('불완전한 워크플로 선택은 upstream 전에 거부한다', async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await POST(
+      dispatchRequest(
+        {
+          projectId: 'project-1',
+          prompt: '기획 요청',
+          workflow: { definitionKey: 'planning-only' },
+        },
+        'jarvis-invalid-1',
+      ),
+    );
+
+    expect(response.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('upstream 충돌 상태를 클라이언트에 전달한다', async () => {

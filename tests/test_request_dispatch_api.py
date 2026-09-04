@@ -47,6 +47,7 @@ async def test_project_binding_and_one_call_dispatch_api() -> None:
             json={"definition_key": "delivery", "definition_version": 1},
         )
         fetched = await client.get(f"/v1/projects/{project_id}/workflow-binding")
+        options = await client.get(f"/v1/projects/{project_id}/workflow-options")
         dispatched = await client.post(
             f"/v1/projects/{project_id}/dispatches",
             json={"title": "Deliver", "prompt": "Implement this"},
@@ -88,11 +89,28 @@ async def test_project_binding_and_one_call_dispatch_api() -> None:
                 "X-JB-Ingress-Key": "jarvis",
             },
         )
+        overridden = await client.post(
+            f"/v1/projects/{project_id}/dispatches",
+            json={
+                "title": "Selected",
+                "prompt": "Use the selected workflow",
+                "workflow": {
+                    "definition_key": "delivery",
+                    "definition_version": 1,
+                },
+            },
+            headers={"Idempotency-Key": "api-request-override"},
+        )
 
     assert project.status_code == 201
     assert workflow.status_code == 201
     assert bound.status_code == 200
     assert fetched.json() == bound.json()
+    assert options.status_code == 200
+    assert options.json()["default"] == bound.json()
+    assert [(item["key"], item["version"]) for item in options.json()["workflows"]] == [
+        ("delivery", 1)
+    ]
     assert dispatched.status_code == 201
     assert dispatched.json()["request"]["status"] == "active"
     assert dispatched.json()["request"]["origin"] == {
@@ -111,6 +129,9 @@ async def test_project_binding_and_one_call_dispatch_api() -> None:
     assert conflicting.status_code == 409
     assert other_ingress.status_code == 201
     assert other_ingress.json()["request"]["origin"]["ingress_key"] == "jarvis"
+    assert overridden.status_code == 201
+    assert overridden.json()["workflow"]["definition_key"] == "delivery"
+    assert store.events[-2].payload["selection_source"] == "request_override"
 
 
 async def test_dispatch_api_requires_idempotency_key() -> None:

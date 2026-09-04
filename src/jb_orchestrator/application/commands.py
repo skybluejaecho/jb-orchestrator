@@ -30,3 +30,5 @@ class DispatchProjectRequest:
     idempotency_key: str
     origin: RequestOrigin
     title: str | None = None
+    definition_key: str | None = None
+    definition_version: int | None = None
