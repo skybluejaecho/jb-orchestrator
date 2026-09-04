@@ -4,6 +4,7 @@ from uuid import uuid4
 import pytest
 
 from jb_orchestrator.workflows import (
+    ArtifactCondition,
     EdgeDefinition,
     NodeDefinition,
     NodeExecutionStatus,
@@ -227,6 +228,131 @@ def test_missing_outcome_edge_fails_deterministically() -> None:
 
     assert execution.status is WorkflowStatus.FAILED
     assert execution.failure_reason == "no edge for task:failure"
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        ({"verdict": "approve"}, WorkflowStatus.SUCCEEDED),
+        ({"verdict": "changes_requested"}, WorkflowStatus.FAILED),
+    ],
+)
+def test_task_output_selects_conditional_edge(
+    output: dict[str, object], expected: WorkflowStatus
+) -> None:
+    definition = WorkflowDefinition(
+        key="conditional",
+        version=1,
+        entry_node="verify",
+        nodes=(
+            NodeDefinition(key="verify", kind=NodeKind.TASK),
+            NodeDefinition(
+                key="approved", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.SUCCEEDED
+            ),
+            NodeDefinition(
+                key="changes", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.FAILED
+            ),
+        ),
+        edges=(
+            EdgeDefinition(
+                source="verify",
+                outcome=NodeOutcome.SUCCESS,
+                target="approved",
+                condition=ArtifactCondition(path="/verdict", equals="approve"),
+            ),
+            EdgeDefinition(
+                source="verify",
+                outcome=NodeOutcome.SUCCESS,
+                target="changes",
+                condition=ArtifactCondition(path="/verdict", equals="changes_requested"),
+            ),
+        ),
+    )
+    execution = WorkflowExecution.create(
+        WorkflowSnapshot.from_definition(definition, run_id=uuid4())
+    )
+    engine = WorkflowEngine()
+    engine.start(execution)
+    engine.begin_task(execution, "verify")
+
+    engine.complete_task(execution, "verify", NodeOutcome.SUCCESS, output=output)
+
+    assert execution.status is expected
+
+
+def test_conditional_edge_supports_nested_pointer_and_default_fallback() -> None:
+    definition = WorkflowDefinition(
+        key="conditional-default",
+        version=1,
+        entry_node="verify",
+        nodes=(
+            NodeDefinition(key="verify", kind=NodeKind.TASK),
+            NodeDefinition(
+                key="approved", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.SUCCEEDED
+            ),
+            NodeDefinition(
+                key="fallback", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.FAILED
+            ),
+        ),
+        edges=(
+            EdgeDefinition(
+                source="verify",
+                outcome=NodeOutcome.SUCCESS,
+                target="approved",
+                condition=ArtifactCondition(path="/reviews/0/verdict", equals="approve"),
+            ),
+            EdgeDefinition(source="verify", outcome=NodeOutcome.SUCCESS, target="fallback"),
+        ),
+    )
+    execution = WorkflowExecution.create(
+        WorkflowSnapshot.from_definition(definition, run_id=uuid4())
+    )
+    engine = WorkflowEngine()
+    engine.start(execution)
+    engine.begin_task(execution, "verify")
+
+    engine.complete_task(
+        execution,
+        "verify",
+        NodeOutcome.SUCCESS,
+        output={"reviews": [{"verdict": "unknown"}]},
+    )
+
+    assert execution.status is WorkflowStatus.FAILED
+    assert execution.failure_reason == "workflow reached failure terminal: fallback"
+
+
+def test_conditional_route_without_match_fails_deterministically() -> None:
+    definition = WorkflowDefinition(
+        key="conditional-no-match",
+        version=1,
+        entry_node="verify",
+        nodes=(
+            NodeDefinition(key="verify", kind=NodeKind.TASK),
+            NodeDefinition(
+                key="approved", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.SUCCEEDED
+            ),
+        ),
+        edges=(
+            EdgeDefinition(
+                source="verify",
+                outcome=NodeOutcome.SUCCESS,
+                target="approved",
+                condition=ArtifactCondition(path="/verdict", equals="approve"),
+            ),
+        ),
+    )
+    execution = WorkflowExecution.create(
+        WorkflowSnapshot.from_definition(definition, run_id=uuid4())
+    )
+    engine = WorkflowEngine()
+    engine.start(execution)
+    engine.begin_task(execution, "verify")
+
+    engine.complete_task(execution, "verify", NodeOutcome.SUCCESS, output={"verdict": "unknown"})
+
+    assert execution.status is WorkflowStatus.FAILED
+    assert execution.failure_reason == "no matching edge for verify:success"
 
 
 def test_cancel_stops_active_node_and_is_not_repeatable() -> None:

@@ -198,3 +198,39 @@ async def test_workflow_api_accepts_explicit_parallel_fork_and_join() -> None:
         "join": "pending",
         "done": "pending",
     }
+
+
+async def test_workflow_api_accepts_artifact_conditional_edges() -> None:
+    app, _ = build_app()
+    payload = {
+        "key": "conditional-flow",
+        "version": 1,
+        "entry_node": "verify",
+        "nodes": [
+            {"key": "verify", "kind": "task"},
+            {"key": "approved", "kind": "terminal", "terminal_status": "succeeded"},
+            {"key": "changes", "kind": "terminal", "terminal_status": "failed"},
+        ],
+        "edges": [
+            {
+                "source": "verify",
+                "outcome": "success",
+                "target": "approved",
+                "condition": {"path": "/verdict", "equals": "approve"},
+            },
+            {
+                "source": "verify",
+                "outcome": "success",
+                "target": "changes",
+                "condition": {"path": "/verdict", "equals": "changes_requested"},
+            },
+        ],
+    }
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        registered = await client.post("/v1/workflows", json=payload)
+        fetched = await client.get("/v1/workflows/conditional-flow")
+
+    assert registered.status_code == 201
+    assert registered.json()["edges"] == payload["edges"]
+    assert fetched.json()["edges"] == payload["edges"]
