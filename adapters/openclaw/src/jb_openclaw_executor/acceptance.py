@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import urlsplit
+from uuid import UUID
 
 import typer
 
@@ -19,8 +20,21 @@ from jb_openclaw_executor.bridge import (
 )
 from jb_openclaw_executor.executor import SUCCESS_STATUSES
 from jb_openclaw_executor.factory import OpenClawExecutorSettings
+from jb_openclaw_executor.workspace import (
+    OpenClawWorkspaceError,
+    OpenClawWorkspaceManager,
+    WorkspaceReview,
+)
+from jb_orchestrator.application.exceptions import ApplicationError
+from jb_orchestrator.application.external_execution_services import ExternalExecutionService
+from jb_orchestrator.config import get_settings
+from jb_orchestrator.domain.exceptions import DomainValidationError, InvalidStateTransition
+from jb_orchestrator.external_executions import ExternalExecution
+from jb_orchestrator.infrastructure.database import SqlAlchemyUnitOfWork, create_session_factory
 
 app = typer.Typer(no_args_is_help=True, help="Diagnose and accept a live OpenClaw Gateway.")
+workspace_app = typer.Typer(no_args_is_help=True, help="Review and release managed worktrees.")
+app.add_typer(workspace_app, name="workspace")
 
 
 class OpenClawAcceptanceError(RuntimeError):
@@ -44,6 +58,47 @@ def bridge_from_settings() -> OpenClawBridgeClient:
         settings.bridge_path,
         node_executable=settings.node_executable,
     )
+
+
+def external_execution_service() -> ExternalExecutionService:
+    session_factory = create_session_factory(get_settings())
+    return ExternalExecutionService(lambda: SqlAlchemyUnitOfWork(session_factory))
+
+
+def workspace_manager_from_settings() -> OpenClawWorkspaceManager:
+    settings = OpenClawExecutorSettings()
+    return OpenClawWorkspaceManager(
+        workspace_root=settings.workspace_root,
+        repository_roots=settings.repository_roots,
+        git_executable=settings.git_executable,
+    )
+
+
+async def load_workspace_review(
+    service: ExternalExecutionService,
+    manager: OpenClawWorkspaceManager,
+    execution_id: UUID,
+    *,
+    merged_into: str,
+) -> tuple[ExternalExecution, WorkspaceReview | None]:
+    execution = await service.get_by_id(execution_id)
+    if execution.workspace_released_at is not None:
+        return execution, None
+    return execution, await manager.review(execution, merged_into=merged_into)
+
+
+async def release_managed_workspace(
+    service: ExternalExecutionService,
+    manager: OpenClawWorkspaceManager,
+    execution_id: UUID,
+    *,
+    merged_into: str,
+) -> tuple[ExternalExecution, WorkspaceReview | None]:
+    execution = await service.get_by_id(execution_id)
+    if execution.workspace_released_at is not None:
+        return execution, None
+    review = await manager.cleanup(execution, merged_into=merged_into)
+    return await service.release_workspace(execution.id), review
 
 
 def local_diagnostics(
@@ -266,9 +321,106 @@ def acceptance(
     typer.echo(json.dumps(asdict(report), ensure_ascii=False, indent=2, sort_keys=True))
 
 
+@workspace_app.command("inspect")
+def inspect_workspace(
+    external_execution_id: Annotated[UUID, typer.Option(help="External execution UUID.")],
+    merged_into: Annotated[
+        str, typer.Option(help="Local target ref used only for merge-readiness checks.")
+    ],
+) -> None:
+    """Inspect cleanliness and whether a managed branch is merged into a local ref."""
+
+    execution, review = asyncio.run(
+        load_workspace_review(
+            external_execution_service(),
+            workspace_manager_from_settings(),
+            external_execution_id,
+            merged_into=merged_into,
+        )
+    )
+    if execution.workspace_released_at is not None:
+        typer.echo(
+            json.dumps(
+                {
+                    "external_execution_id": str(execution.id),
+                    "released_at": execution.workspace_released_at.isoformat(),
+                    "status": "released",
+                },
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return
+    if review is None:
+        raise RuntimeError("active workspace review did not return a result")
+    payload = asdict(review)
+    payload["external_execution_id"] = str(execution.id)
+    payload["status"] = "reviewed"
+    typer.echo(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+
+
+@workspace_app.command("cleanup")
+def cleanup_workspace(
+    external_execution_id: Annotated[UUID, typer.Option(help="External execution UUID.")],
+    merged_into: Annotated[
+        str, typer.Option(help="Local ref that must already contain the workspace HEAD.")
+    ],
+    confirm: Annotated[
+        str, typer.Option(help="Repeat the exact external execution UUID to authorize removal.")
+    ],
+) -> None:
+    """Remove one clean, terminal, already-merged worktree and its exact local branch."""
+
+    if confirm.strip() != str(external_execution_id):
+        raise OpenClawWorkspaceError("cleanup confirmation must equal the external execution UUID")
+    released, review = asyncio.run(
+        release_managed_workspace(
+            external_execution_service(),
+            workspace_manager_from_settings(),
+            external_execution_id,
+            merged_into=merged_into,
+        )
+    )
+    if review is None:
+        typer.echo(
+            json.dumps(
+                {
+                    "external_execution_id": str(released.id),
+                    "released_at": released.workspace_released_at.isoformat()
+                    if released.workspace_released_at is not None
+                    else None,
+                    "status": "already_released",
+                },
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return
+    payload = asdict(review)
+    payload.update(
+        {
+            "external_execution_id": str(released.id),
+            "released_at": released.workspace_released_at.isoformat()
+            if released.workspace_released_at is not None
+            else None,
+            "status": "released",
+        }
+    )
+    typer.echo(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+
+
 def main() -> None:
     try:
         app()
-    except (OpenClawAcceptanceError, OpenClawBridgeError) as exc:
+    except (
+        ApplicationError,
+        DomainValidationError,
+        InvalidStateTransition,
+        OpenClawAcceptanceError,
+        OpenClawBridgeError,
+        OpenClawWorkspaceError,
+    ) as exc:
         typer.echo(f"OpenClaw validation failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc

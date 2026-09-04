@@ -50,6 +50,7 @@ class FakeWorkspace:
         return WorkspaceAssignment(
             cwd=self.cwd,
             path=self.cwd,
+            repository_path="C:/projects/delivery",
             branch="jb/execution/review-v1",
             base_ref="develop",
         )
@@ -150,6 +151,7 @@ async def test_executor_starts_new_run_in_prepared_workspace() -> None:
     assert bridge.starts[0]["cwd"] == "C:/worktrees/review"
     mapping = store.external_executions[next(iter(store.external_executions))]
     assert mapping.workspace_path == "C:/worktrees/review"
+    assert mapping.workspace_repository_path == "C:/projects/delivery"
     assert mapping.workspace_branch == "jb/execution/review-v1"
 
 
