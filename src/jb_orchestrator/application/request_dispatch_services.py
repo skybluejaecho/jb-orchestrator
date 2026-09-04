@@ -19,6 +19,8 @@ from jb_orchestrator.domain import (
     Run,
     UserRequest,
 )
+from jb_orchestrator.phase_packs import PhasePackDefinition
+from jb_orchestrator.skills import SkillDefinition
 from jb_orchestrator.workflows import (
     ProjectWorkflowBinding,
     WorkflowDefinition,
@@ -41,7 +43,25 @@ class ProjectWorkflowOptions:
     """Selectable workflows and the optional project-level default."""
 
     default: ProjectWorkflowBinding | None
-    workflows: tuple[WorkflowDefinition, ...]
+    default_workflow: "WorkflowComposition | None"
+    workflows: tuple["WorkflowComposition", ...]
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowComposition:
+    """One workflow plus the exact reusable components it references."""
+
+    definition: WorkflowDefinition
+    phase_packs: tuple[PhasePackDefinition, ...]
+    skills: tuple[SkillDefinition, ...]
+
+    @property
+    def key(self) -> str:
+        return self.definition.key
+
+    @property
+    def version(self) -> int:
+        return self.definition.version
 
 
 class RequestDispatchService:
@@ -118,7 +138,73 @@ class RequestDispatchService:
                 raise ResourceNotFound(f"project not found: {project_id}")
             binding = await unit_of_work.project_workflow_bindings.get_by_project(project_id)
             definitions = await unit_of_work.workflow_definitions.list_latest()
-        return ProjectWorkflowOptions(default=binding, workflows=tuple(definitions))
+            default_workflow = None
+            if binding is not None:
+                default_definition = await unit_of_work.workflow_definitions.get(
+                    binding.definition_key, binding.definition_version
+                )
+                if default_definition is None or default_definition.id != binding.definition_id:
+                    raise ResourceConflict(
+                        f"bound workflow definition is unavailable: {project_id}"
+                    )
+                default_workflow = await self._resolve_composition(
+                    unit_of_work, default_definition
+                )
+            compositions_list: list[WorkflowComposition] = []
+            for definition in definitions:
+                compositions_list.append(
+                    await self._resolve_composition(unit_of_work, definition)
+                )
+        return ProjectWorkflowOptions(
+            default=binding,
+            default_workflow=default_workflow,
+            workflows=tuple(compositions_list),
+        )
+
+    @staticmethod
+    async def _resolve_composition(
+        unit_of_work: UnitOfWork, definition: WorkflowDefinition
+    ) -> WorkflowComposition:
+        phase_pack_references = sorted(
+            {node.phase_pack for node in definition.nodes if node.phase_pack is not None},
+            key=lambda value: (value.key, value.version),
+        )
+        phase_packs: list[PhasePackDefinition] = []
+        for reference in phase_pack_references:
+            phase_pack = await unit_of_work.phase_packs.get(reference.key, reference.version)
+            if phase_pack is None:
+                raise ResourceConflict(
+                    "workflow option references an unavailable phase pack: "
+                    f"{reference.key}@{reference.version}"
+                )
+            phase_packs.append(phase_pack)
+
+        skill_references = {
+            skill_reference
+            for node in definition.nodes
+            for skill_reference in node.skills
+        }
+        skill_references.update(
+            skill_reference
+            for phase_pack in phase_packs
+            for skill_reference in phase_pack.skills
+        )
+        skills: list[SkillDefinition] = []
+        for skill_reference in sorted(
+            skill_references, key=lambda value: (value.key, value.version)
+        ):
+            skill = await unit_of_work.skills.get(skill_reference.key, skill_reference.version)
+            if skill is None:
+                raise ResourceConflict(
+                    "workflow option references an unavailable skill: "
+                    f"{skill_reference.key}@{skill_reference.version}"
+                )
+            skills.append(skill)
+        return WorkflowComposition(
+            definition=definition,
+            phase_packs=tuple(phase_packs),
+            skills=tuple(skills),
+        )
 
     async def dispatch(self, command: DispatchProjectRequest) -> DispatchedRequest:
         normalized_prompt = command.prompt.strip()

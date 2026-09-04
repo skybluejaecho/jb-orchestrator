@@ -342,15 +342,39 @@ class WorkflowDefinitionResponse(WorkflowDefinitionCreate):
 
 
 class WorkflowOptionResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
     id: UUID
     key: str
     version: int
+    entry_node: str
+    nodes: tuple[WorkflowNodePayload, ...]
+    edges: tuple[WorkflowEdgePayload, ...]
+    phase_packs: tuple["WorkflowPhasePackSummaryResponse", ...] = ()
+    skills: tuple["WorkflowSkillSummaryResponse", ...] = ()
+
+
+class WorkflowPhasePackSummaryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    key: str
+    version: int
+    name: str
+    description: str
+    skills: tuple[SkillReferencePayload, ...] = ()
+
+
+class WorkflowSkillSummaryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    key: str
+    version: int
+    name: str
+    description: str
+    source_kind: SkillSourceKind
 
 
 class ProjectWorkflowOptionsResponse(BaseModel):
     default: ProjectWorkflowBindingResponse | None
+    default_workflow: WorkflowOptionResponse | None
     workflows: tuple[WorkflowOptionResponse, ...]
 
 

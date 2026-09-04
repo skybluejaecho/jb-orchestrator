@@ -7,6 +7,8 @@ from jb_orchestrator.application import (
 )
 from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNotFound
 from jb_orchestrator.domain import Project, RequestOrigin
+from jb_orchestrator.phase_packs import PhasePackDefinition, PhasePackReference
+from jb_orchestrator.skills import SkillDefinition, SkillReference, SkillSourceKind
 from jb_orchestrator.workflows import (
     EdgeDefinition,
     NodeDefinition,
@@ -177,7 +179,65 @@ async def test_workflow_options_include_default_and_latest_definitions() -> None
 
     assert options.default is not None
     assert options.default.definition_id == latest.id
+    assert options.default_workflow is not None
+    assert options.default_workflow.definition == latest
     assert [(value.key, value.version) for value in options.workflows] == [("delivery", 2)]
+
+
+async def test_workflow_options_resolve_phase_packs_and_effective_skills() -> None:
+    store = MemoryStore()
+    project = Project(
+        key="composition-project",
+        name="Composition Project",
+        repository_url="https://example.com/composition.git",
+    )
+    skill = SkillDefinition(
+        key="review",
+        version=1,
+        name="Review",
+        description="Review the proposed change",
+        source_kind=SkillSourceKind.LOCAL,
+        source_uri="review",
+        content_digest=f"sha256:{'a' * 64}",
+    )
+    phase_pack = PhasePackDefinition(
+        key="verification",
+        version=1,
+        name="Verification",
+        description="Verify implementation output",
+        instructions="Inspect the implementation.",
+        skills=(skill.reference,),
+    )
+    workflow = WorkflowDefinition(
+        key="composed-delivery",
+        version=1,
+        entry_node="verify",
+        nodes=(
+            NodeDefinition(
+                key="verify",
+                kind=NodeKind.TASK,
+                phase_pack=PhasePackReference(key="verification", version=1),
+                skills=(SkillReference(key="review", version=1),),
+            ),
+            NodeDefinition(
+                key="done", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.SUCCEEDED
+            ),
+        ),
+        edges=(EdgeDefinition(source="verify", outcome=NodeOutcome.SUCCESS, target="done"),),
+    )
+    store.projects[project.id] = project
+    store.skills[(skill.key, skill.version)] = skill
+    store.phase_packs[(phase_pack.key, phase_pack.version)] = phase_pack
+    store.workflow_definitions[(workflow.key, workflow.version)] = workflow
+    service = RequestDispatchService(lambda: MemoryUnitOfWork(store))
+
+    options = await service.list_workflow_options(project.id)
+
+    [composition] = options.workflows
+    assert options.default_workflow is None
+    assert composition.definition == workflow
+    assert composition.phase_packs == (phase_pack,)
+    assert composition.skills == (skill,)
 
 
 async def test_dispatch_requires_binding_and_exact_definition() -> None:

@@ -49,7 +49,9 @@ from jb_orchestrator.api.schemas import (
     WorkflowExecutionResponse,
     WorkflowNodePayload,
     WorkflowOptionResponse,
+    WorkflowPhasePackSummaryResponse,
     WorkflowRequestContextResponse,
+    WorkflowSkillSummaryResponse,
     WorkflowStart,
 )
 from jb_orchestrator.application import (
@@ -64,6 +66,7 @@ from jb_orchestrator.application import (
     RegisterProject,
     RequestDispatchService,
     SkillCatalogService,
+    WorkflowComposition,
     WorkflowService,
 )
 from jb_orchestrator.config import get_settings
@@ -339,8 +342,30 @@ async def list_project_workflow_options(
             if options.default is not None
             else None
         ),
-        workflows=tuple(
-            WorkflowOptionResponse.model_validate(definition) for definition in options.workflows
+        default_workflow=(
+            _workflow_option_response(options.default_workflow)
+            if options.default_workflow is not None
+            else None
+        ),
+        workflows=tuple(_workflow_option_response(value) for value in options.workflows),
+    )
+
+
+def _workflow_option_response(composition: WorkflowComposition) -> WorkflowOptionResponse:
+    definition = composition.definition
+    return WorkflowOptionResponse(
+        id=definition.id,
+        key=definition.key,
+        version=definition.version,
+        entry_node=definition.entry_node,
+        nodes=tuple(WorkflowNodePayload.model_validate(node) for node in definition.nodes),
+        edges=tuple(WorkflowEdgePayload.model_validate(edge) for edge in definition.edges),
+        phase_packs=tuple(
+            WorkflowPhasePackSummaryResponse.model_validate(phase_pack)
+            for phase_pack in composition.phase_packs
+        ),
+        skills=tuple(
+            WorkflowSkillSummaryResponse.model_validate(skill) for skill in composition.skills
         ),
     )
 

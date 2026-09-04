@@ -58,7 +58,7 @@ def create_server(client: ControlPlaneClient | None = None) -> FastMCP[None]:
 
     @server.tool(annotations=READ_ONLY)
     async def list_workflow_options(project_id: UUID) -> dict[str, Any]:
-        """List exact workflows selectable for a project and its default binding."""
+        """List selectable workflows with their nodes, phase packs, skills, and default."""
 
         return await control_plane.list_workflow_options(project_id)
 
