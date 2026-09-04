@@ -23,6 +23,9 @@ class ExternalExecutionService:
         *,
         session_key: str,
         agent_id: str | None,
+        workspace_path: str | None = None,
+        workspace_branch: str | None = None,
+        workspace_base_ref: str | None = None,
     ) -> ExternalExecution:
         async with self._unit_of_work_factory() as unit_of_work:
             existing = await unit_of_work.external_executions.get_by_idempotency_key(
@@ -38,6 +41,9 @@ class ExternalExecutionService:
                 idempotency_key=claim.idempotency_key,
                 external_session_key=session_key,
                 external_agent_id=agent_id,
+                workspace_path=workspace_path,
+                workspace_branch=workspace_branch,
+                workspace_base_ref=workspace_base_ref,
             )
             await unit_of_work.external_executions.add(execution)
             await self._append_event(unit_of_work, execution, "external_execution.prepared")
@@ -153,6 +159,9 @@ class ExternalExecutionService:
                     "status": execution.status.value,
                     "external_session_key": execution.external_session_key,
                     "external_run_id": execution.external_run_id,
+                    "workspace_path": execution.workspace_path,
+                    "workspace_branch": execution.workspace_branch,
+                    "workspace_base_ref": execution.workspace_base_ref,
                 },
             )
         )

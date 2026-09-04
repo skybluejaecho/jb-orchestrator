@@ -37,6 +37,9 @@ class ExternalExecution:
     idempotency_key: str
     external_session_key: str
     external_agent_id: str | None = None
+    workspace_path: str | None = None
+    workspace_branch: str | None = None
+    workspace_base_ref: str | None = None
     id: UUID = field(default_factory=uuid4)
     external_run_id: str | None = None
     status: ExternalExecutionStatus = ExternalExecutionStatus.STARTING
@@ -57,6 +60,17 @@ class ExternalExecution:
             raise DomainValidationError("external execution keys must not be empty")
         if self.status is ExternalExecutionStatus.ACTIVE and not self.external_run_id:
             raise DomainValidationError("active external execution requires external_run_id")
+        workspace_values = (
+            self.workspace_path,
+            self.workspace_branch,
+            self.workspace_base_ref,
+        )
+        if any(workspace_values) and not all(
+            isinstance(value, str) and value.strip() for value in workspace_values
+        ):
+            raise DomainValidationError(
+                "external execution workspace metadata must be complete or omitted"
+            )
 
     @property
     def is_terminal(self) -> bool:
