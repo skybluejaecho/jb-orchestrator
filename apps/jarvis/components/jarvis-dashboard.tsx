@@ -104,6 +104,7 @@ const eventTypes = [
   'external_execution.prepared',
   'external_execution.accepted',
   'external_execution.finished',
+  'external_execution.workspace_released',
   'budget.configured',
   'budget.limit_changed',
   'budget.reserved',
