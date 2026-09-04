@@ -4,6 +4,7 @@ from jb_orchestrator.workflows.bindings import ProjectWorkflowBinding
 from jb_orchestrator.workflows.engine import WorkflowEngine
 from jb_orchestrator.workflows.exceptions import WorkflowDefinitionError, WorkflowExecutionError
 from jb_orchestrator.workflows.models import (
+    ArtifactCondition,
     EdgeDefinition,
     NodeDefinition,
     NodeExecution,
@@ -20,6 +21,7 @@ from jb_orchestrator.workflows.models import (
 )
 
 __all__ = [
+    "ArtifactCondition",
     "EdgeDefinition",
     "NodeDefinition",
     "NodeExecution",

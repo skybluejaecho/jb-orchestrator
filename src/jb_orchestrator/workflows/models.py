@@ -5,6 +5,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
+from math import isfinite
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -18,6 +19,7 @@ from jb_orchestrator.skills import SkillDefinition, SkillReference
 from jb_orchestrator.workflows.exceptions import WorkflowDefinitionError
 
 NODE_INPUT_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+JSON_POINTER_PATTERN = re.compile(r"^(?:/(?:[^~/]|~[01])*)*$")
 
 
 class WorkflowStatus(StrEnum):
@@ -153,10 +155,29 @@ class NodeDefinition:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class ArtifactCondition:
+    """Match one scalar value in a task artifact through an RFC 6901 JSON Pointer."""
+
+    path: str
+    equals: str | int | float | bool | None
+
+    def __post_init__(self) -> None:
+        if not self.path or len(self.path) > 512 or not JSON_POINTER_PATTERN.fullmatch(self.path):
+            raise WorkflowDefinitionError(
+                "artifact condition path must be a non-empty JSON Pointer"
+            )
+        if not isinstance(self.equals, (str, int, float, bool, type(None))) or (
+            isinstance(self.equals, float) and not isfinite(self.equals)
+        ):
+            raise WorkflowDefinitionError("artifact condition value must be a finite JSON scalar")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class EdgeDefinition:
     source: str
     outcome: NodeOutcome
     target: str
+    condition: ArtifactCondition | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -181,16 +202,19 @@ class WorkflowDefinition:
             raise WorkflowDefinitionError("workflow entry node does not exist")
 
         outgoing: dict[str, set[NodeOutcome]] = {key: set() for key in nodes_by_key}
+        edges_by_route: dict[tuple[str, NodeOutcome], list[EdgeDefinition]] = {}
+        seen_edges: set[EdgeDefinition] = set()
         adjacency: dict[str, set[str]] = {key: set() for key in nodes_by_key}
         incoming: dict[str, set[str]] = {key: set() for key in nodes_by_key}
         for edge in self.edges:
             if edge.source not in nodes_by_key or edge.target not in nodes_by_key:
                 raise WorkflowDefinitionError("workflow edge references an unknown node")
             source_kind = nodes_by_key[edge.source].kind
-            if edge.outcome in outgoing[edge.source] and source_kind is not NodeKind.FORK:
-                raise WorkflowDefinitionError("node outcomes may have only one target")
-            if edge.target in adjacency[edge.source]:
+            if edge.condition is not None and source_kind is not NodeKind.TASK:
+                raise WorkflowDefinitionError("only task edges may define artifact conditions")
+            if edge in seen_edges:
                 raise WorkflowDefinitionError("duplicate workflow edges are not allowed")
+            seen_edges.add(edge)
             allowed_outcomes = {
                 NodeKind.TASK: {NodeOutcome.SUCCESS, NodeOutcome.FAILURE},
                 NodeKind.APPROVAL: {NodeOutcome.APPROVED, NodeOutcome.REJECTED},
@@ -201,8 +225,34 @@ class WorkflowDefinition:
             if edge.outcome not in allowed_outcomes:
                 raise WorkflowDefinitionError("edge outcome is invalid for its source node")
             outgoing[edge.source].add(edge.outcome)
+            edges_by_route.setdefault((edge.source, edge.outcome), []).append(edge)
             adjacency[edge.source].add(edge.target)
             incoming[edge.target].add(edge.source)
+
+        for (route_source, _), route_edges in edges_by_route.items():
+            source_kind = nodes_by_key[route_source].kind
+            if source_kind is NodeKind.FORK:
+                continue
+            defaults = [edge for edge in route_edges if edge.condition is None]
+            conditional = [edge for edge in route_edges if edge.condition is not None]
+            if len(defaults) > 1:
+                raise WorkflowDefinitionError("node outcomes may have only one default target")
+            if len(route_edges) > 1 and not conditional:
+                raise WorkflowDefinitionError("node outcomes may have only one target")
+            paths = {edge.condition.path for edge in conditional if edge.condition is not None}
+            if len(paths) > 1:
+                raise WorkflowDefinitionError(
+                    "conditional edges for one outcome must use the same artifact path"
+                )
+            values = [
+                (type(edge.condition.equals), edge.condition.equals)
+                for edge in conditional
+                if edge.condition is not None
+            ]
+            if len(values) != len(set(values)):
+                raise WorkflowDefinitionError(
+                    "conditional edges for one outcome must use distinct values"
+                )
 
         for node in self.nodes:
             if node.kind is NodeKind.TERMINAL and outgoing[node.key]:
@@ -261,7 +311,7 @@ class WorkflowDefinition:
             (
                 edge.target
                 for edge in self.edges
-                if edge.source == source and edge.outcome is outcome
+                if edge.source == source and edge.outcome is outcome and edge.condition is None
             ),
             None,
         )
@@ -273,6 +323,11 @@ class WorkflowDefinition:
                 for edge in self.edges
                 if edge.source == source and edge.outcome is outcome
             )
+        )
+
+    def route_edges(self, source: str, outcome: NodeOutcome) -> tuple[EdgeDefinition, ...]:
+        return tuple(
+            edge for edge in self.edges if edge.source == source and edge.outcome is outcome
         )
 
 
@@ -363,7 +418,7 @@ class WorkflowSnapshot:
             (
                 edge.target
                 for edge in self.edges
-                if edge.source == source and edge.outcome is outcome
+                if edge.source == source and edge.outcome is outcome and edge.condition is None
             ),
             None,
         )
@@ -375,6 +430,11 @@ class WorkflowSnapshot:
                 for edge in self.edges
                 if edge.source == source and edge.outcome is outcome
             )
+        )
+
+    def route_edges(self, source: str, outcome: NodeOutcome) -> tuple[EdgeDefinition, ...]:
+        return tuple(
+            edge for edge in self.edges if edge.source == source and edge.outcome is outcome
         )
 
     def incoming_sources(self, target: str) -> tuple[str, ...]:
