@@ -16,6 +16,7 @@ class ApiPermission(StrEnum):
     REQUEST_DISPATCH = "request.dispatch"
     WORKFLOW_APPROVE = "workflow.approve"
     RUN_CANCEL = "run.cancel"
+    WORKSPACE_MANAGE = "workspace.manage"
     PROJECT_ADMIN = "project.admin"
 
 

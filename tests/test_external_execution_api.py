@@ -3,7 +3,7 @@ from uuid import UUID, uuid4
 from httpx import ASGITransport, AsyncClient
 
 from jb_orchestrator.api.main import create_app
-from jb_orchestrator.application import ExternalExecutionService
+from jb_orchestrator.application import ExternalExecutionService, WorkspaceOperationService
 from jb_orchestrator.external_executions import ExternalExecutionStatus
 from jb_orchestrator.worker import TaskClaim
 from tests.support import MemoryStore, MemoryUnitOfWork
@@ -65,6 +65,7 @@ async def test_external_execution_detail_and_missing_problem() -> None:
         workspace_repository_path="C:/projects/delivery",
         workspace_branch="jb/execution/review-v1",
         workspace_base_ref="develop",
+        workspace_scope="git-worktree:scope-a",
     )
     await service.finish(
         claim.idempotency_key,
@@ -84,3 +85,44 @@ async def test_external_execution_detail_and_missing_problem() -> None:
     assert response.json()["workspace_repository_path"] == "C:/projects/delivery"
     assert missing.status_code == 404
     assert missing.json()["title"] == "Resource not found"
+
+
+async def test_workspace_operation_request_and_replay() -> None:
+    store = MemoryStore()
+    executions = ExternalExecutionService(lambda: MemoryUnitOfWork(store))
+    operations = WorkspaceOperationService(lambda: MemoryUnitOfWork(store))
+    claim = task_claim(key="execution:workspace:operation")
+    execution = await executions.prepare(
+        claim,
+        session_key="agent:workspace",
+        agent_id=None,
+        workspace_path="C:/worktrees/review",
+        workspace_repository_path="C:/projects/delivery",
+        workspace_branch="jb/execution/review-v1",
+        workspace_base_ref="abc123",
+        workspace_scope="git-worktree:scope-a",
+    )
+    await executions.finish(claim.idempotency_key, ExternalExecutionStatus.SUCCEEDED)
+    app = create_app(
+        external_execution_service=executions,
+        workspace_operation_service=operations,
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        first = await client.post(
+            f"/v1/external-executions/{execution.id}/workspace-operations",
+            headers={"Idempotency-Key": "inspect-1"},
+            json={"kind": "inspect", "target_ref": "develop"},
+        )
+        repeated = await client.post(
+            f"/v1/external-executions/{execution.id}/workspace-operations",
+            headers={"Idempotency-Key": "inspect-1"},
+            json={"kind": "inspect", "target_ref": "develop"},
+        )
+        listed = await client.get(f"/v1/external-executions/{execution.id}/workspace-operations")
+
+    assert first.status_code == 202
+    assert repeated.status_code == 200
+    assert first.json()["id"] == repeated.json()["id"]
+    assert first.json()["status"] == "pending"
+    assert len(listed.json()) == 1
