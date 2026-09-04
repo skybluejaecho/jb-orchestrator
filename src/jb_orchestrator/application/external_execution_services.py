@@ -24,6 +24,7 @@ class ExternalExecutionService:
         session_key: str,
         agent_id: str | None,
         workspace_path: str | None = None,
+        workspace_repository_path: str | None = None,
         workspace_branch: str | None = None,
         workspace_base_ref: str | None = None,
     ) -> ExternalExecution:
@@ -42,6 +43,7 @@ class ExternalExecutionService:
                 external_session_key=session_key,
                 external_agent_id=agent_id,
                 workspace_path=workspace_path,
+                workspace_repository_path=workspace_repository_path,
                 workspace_branch=workspace_branch,
                 workspace_base_ref=workspace_base_ref,
             )
@@ -89,6 +91,22 @@ class ExternalExecutionService:
     async def get(self, idempotency_key: str) -> ExternalExecution | None:
         async with self._unit_of_work_factory() as unit_of_work:
             return await unit_of_work.external_executions.get_by_idempotency_key(idempotency_key)
+
+    async def release_workspace(self, execution_id: UUID) -> ExternalExecution:
+        async with self._unit_of_work_factory() as unit_of_work:
+            current = await unit_of_work.external_executions.get(execution_id)
+            if current is None:
+                raise ResourceNotFound(f"external execution not found: {execution_id}")
+            execution = await self._required(unit_of_work, current.idempotency_key)
+            if execution.workspace_released_at is not None:
+                return execution
+            execution.release_workspace()
+            await unit_of_work.external_executions.save(execution)
+            await self._append_event(
+                unit_of_work, execution, "external_execution.workspace_released"
+            )
+            await unit_of_work.commit()
+            return execution
 
     async def get_by_id(self, execution_id: UUID) -> ExternalExecution:
         async with self._unit_of_work_factory() as unit_of_work:
@@ -160,8 +178,14 @@ class ExternalExecutionService:
                     "external_session_key": execution.external_session_key,
                     "external_run_id": execution.external_run_id,
                     "workspace_path": execution.workspace_path,
+                    "workspace_repository_path": execution.workspace_repository_path,
                     "workspace_branch": execution.workspace_branch,
                     "workspace_base_ref": execution.workspace_base_ref,
+                    "workspace_released_at": (
+                        execution.workspace_released_at.isoformat()
+                        if execution.workspace_released_at is not None
+                        else None
+                    ),
                 },
             )
         )

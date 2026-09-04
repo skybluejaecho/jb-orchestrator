@@ -38,8 +38,10 @@ class ExternalExecution:
     external_session_key: str
     external_agent_id: str | None = None
     workspace_path: str | None = None
+    workspace_repository_path: str | None = None
     workspace_branch: str | None = None
     workspace_base_ref: str | None = None
+    workspace_released_at: datetime | None = None
     id: UUID = field(default_factory=uuid4)
     external_run_id: str | None = None
     status: ExternalExecutionStatus = ExternalExecutionStatus.STARTING
@@ -75,6 +77,17 @@ class ExternalExecution:
     @property
     def is_terminal(self) -> bool:
         return self.status in TERMINAL_EXTERNAL_STATUSES
+
+    def release_workspace(self, *, at: datetime | None = None) -> None:
+        if not self.is_terminal:
+            raise InvalidStateTransition("cannot release workspace before external execution ends")
+        if not self.workspace_path:
+            raise DomainValidationError("external execution has no workspace to release")
+        if self.workspace_released_at is not None:
+            return
+        changed_at = at or datetime.now(UTC)
+        self.workspace_released_at = changed_at
+        self.updated_at = changed_at
 
     def accept(self, external_run_id: str, *, at: datetime | None = None) -> None:
         if self.is_terminal:

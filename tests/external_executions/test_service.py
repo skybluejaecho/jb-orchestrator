@@ -40,6 +40,7 @@ async def test_prepare_is_idempotent_and_keeps_the_original_session() -> None:
         session_key="agent:reviewer:execution",
         agent_id="reviewer",
         workspace_path="C:/worktrees/review",
+        workspace_repository_path="C:/projects/delivery",
         workspace_branch="jb/execution/review-v1",
         workspace_base_ref="develop",
     )
@@ -50,6 +51,7 @@ async def test_prepare_is_idempotent_and_keeps_the_original_session() -> None:
     assert second.id == first.id
     assert second.external_session_key == "agent:reviewer:execution"
     assert second.workspace_path == "C:/worktrees/review"
+    assert second.workspace_repository_path == "C:/projects/delivery"
     assert second.workspace_branch == "jb/execution/review-v1"
     assert second.workspace_base_ref == "develop"
     assert len(store.external_executions) == 1
@@ -158,3 +160,31 @@ def test_external_workspace_metadata_must_be_complete() -> None:
             external_session_key="agent:reviewer:execution",
             workspace_path="C:/worktrees/review",
         )
+
+
+async def test_workspace_release_requires_terminal_execution_and_is_idempotent() -> None:
+    store = MemoryStore()
+    service = ExternalExecutionService(lambda: MemoryUnitOfWork(store))
+    claim = task_claim()
+    execution = await service.prepare(
+        claim,
+        session_key="agent:reviewer:execution",
+        agent_id="reviewer",
+        workspace_path="C:/worktrees/review",
+        workspace_repository_path="C:/projects/delivery",
+        workspace_branch="jb/execution/review-v1",
+        workspace_base_ref="a" * 40,
+    )
+
+    with pytest.raises(InvalidStateTransition, match="before external execution ends"):
+        await service.release_workspace(execution.id)
+
+    await service.finish(claim.idempotency_key, ExternalExecutionStatus.SUCCEEDED)
+    first = await service.release_workspace(execution.id)
+    repeated = await service.release_workspace(execution.id)
+
+    assert first.workspace_released_at is not None
+    assert repeated.workspace_released_at == first.workspace_released_at
+    assert [event.event_type for event in store.events].count(
+        "external_execution.workspace_released"
+    ) == 1

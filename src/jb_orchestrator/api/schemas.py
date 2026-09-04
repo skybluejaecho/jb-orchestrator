@@ -228,8 +228,10 @@ class ExternalExecutionResponse(BaseModel):
     external_session_key: str
     external_agent_id: str | None
     workspace_path: str | None
+    workspace_repository_path: str | None
     workspace_branch: str | None
     workspace_base_ref: str | None
+    workspace_released_at: datetime | None
     external_run_id: str | None
     status: ExternalExecutionStatus
     terminal_result: dict[str, Any] | None

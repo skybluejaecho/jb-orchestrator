@@ -62,6 +62,7 @@ async def test_external_execution_detail_and_missing_problem() -> None:
         session_key="agent:detail",
         agent_id=None,
         workspace_path="C:/worktrees/review",
+        workspace_repository_path="C:/projects/delivery",
         workspace_branch="jb/execution/review-v1",
         workspace_base_ref="develop",
     )
@@ -80,5 +81,6 @@ async def test_external_execution_detail_and_missing_problem() -> None:
     assert response.json()["status"] == "failed"
     assert response.json()["failure_reason"] == "gateway disconnected"
     assert response.json()["workspace_branch"] == "jb/execution/review-v1"
+    assert response.json()["workspace_repository_path"] == "C:/projects/delivery"
     assert missing.status_code == 404
     assert missing.json()["title"] == "Resource not found"

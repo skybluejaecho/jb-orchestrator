@@ -20,8 +20,10 @@ def external_execution_from_record(record: ExternalExecutionRecord) -> ExternalE
         external_session_key=record.external_session_key,
         external_agent_id=record.external_agent_id,
         workspace_path=record.workspace_path,
+        workspace_repository_path=record.workspace_repository_path,
         workspace_branch=record.workspace_branch,
         workspace_base_ref=record.workspace_base_ref,
+        workspace_released_at=record.workspace_released_at,
         external_run_id=record.external_run_id,
         status=record.status,
         terminal_result=record.terminal_result,
@@ -48,8 +50,10 @@ class SqlAlchemyExternalExecutionRepository:
                 external_session_key=execution.external_session_key,
                 external_agent_id=execution.external_agent_id,
                 workspace_path=execution.workspace_path,
+                workspace_repository_path=execution.workspace_repository_path,
                 workspace_branch=execution.workspace_branch,
                 workspace_base_ref=execution.workspace_base_ref,
+                workspace_released_at=execution.workspace_released_at,
                 external_run_id=execution.external_run_id,
                 status=execution.status,
                 terminal_result=execution.terminal_result,
@@ -107,5 +111,6 @@ class SqlAlchemyExternalExecutionRepository:
         record.status = execution.status
         record.terminal_result = execution.terminal_result
         record.failure_reason = execution.failure_reason
+        record.workspace_released_at = execution.workspace_released_at
         record.updated_at = execution.updated_at
         record.completed_at = execution.completed_at

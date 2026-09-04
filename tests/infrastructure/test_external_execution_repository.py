@@ -3,6 +3,7 @@ from uuid import uuid4
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from jb_orchestrator.application import ExternalExecutionService
+from jb_orchestrator.external_executions import ExternalExecutionStatus
 from jb_orchestrator.infrastructure.database import Base, SqlAlchemyUnitOfWork
 from jb_orchestrator.worker import TaskClaim
 
@@ -36,6 +37,7 @@ async def test_external_workspace_metadata_round_trips_through_sqlalchemy() -> N
         session_key="agent:implementation:execution",
         agent_id="implementation",
         workspace_path="C:/worktrees/implement",
+        workspace_repository_path="C:/projects/delivery",
         workspace_branch="jb/execution/implement-v1",
         workspace_base_ref="a" * 40,
     )
@@ -44,6 +46,10 @@ async def test_external_workspace_metadata_round_trips_through_sqlalchemy() -> N
     assert loaded is not None
     assert loaded.id == created.id
     assert loaded.workspace_path == "C:/worktrees/implement"
+    assert loaded.workspace_repository_path == "C:/projects/delivery"
     assert loaded.workspace_branch == "jb/execution/implement-v1"
     assert loaded.workspace_base_ref == "a" * 40
+    await service.finish(claim.idempotency_key, status=ExternalExecutionStatus.SUCCEEDED)
+    released = await service.release_workspace(created.id)
+    assert released.workspace_released_at is not None
     await engine.dispose()
