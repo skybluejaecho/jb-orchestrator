@@ -30,6 +30,12 @@ async def test_dispatch_uses_mcp_origin_authentication_and_idempotency() -> None
         conversation_id="session-9",
         definition_key="planning-only",
         definition_version=2,
+        skill_addons=[
+            {
+                "node_key": "plan",
+                "skills": [{"key": "research", "version": 1}],
+            }
+        ],
     )
 
     request: httpx.Request = captured["request"]
@@ -41,7 +47,8 @@ async def test_dispatch_uses_mcp_origin_authentication_and_idempotency() -> None
     assert request.headers["x-jb-conversation-id"] == "session-9"
     assert request.read().decode() == (
         '{"prompt":"Build it","title":"Implementation","workflow":'
-        '{"definition_key":"planning-only","definition_version":2}}'
+        '{"definition_key":"planning-only","definition_version":2},"skill_addons":'
+        '[{"node_key":"plan","skills":[{"key":"research","version":1}]}]}'
     )
     assert result == {"replayed": False}
 
