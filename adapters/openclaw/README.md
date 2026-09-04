@@ -39,6 +39,12 @@ The selected JB model profile supplies the OpenClaw provider and model override.
 entrypoint paths are appended to the task message so the agent receives the exact materialized
 versions selected by the workflow snapshot.
 
+When a phase defines an output contract, the adapter asks the agent for one JSON object without a
+Markdown fence. An object returned in `agent.wait.output`, or a string containing a JSON object, is
+stored as the task artifact and validated against that contract. The complete provider terminal
+result remains in the external execution ledger. Non-JSON output retains a diagnostic provider
+envelope and will follow the workflow failure edge when it violates a phase contract.
+
 ## Recovery behavior
 
 - `starting` without a run ID repeats `agent` with the same idempotency key.

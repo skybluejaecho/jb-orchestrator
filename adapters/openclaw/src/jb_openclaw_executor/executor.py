@@ -179,6 +179,10 @@ class OpenClawExecutor:
                     indent=2,
                 )
             )
+            sections.append(
+                "Return the final phase result as one JSON object matching this contract. "
+                "Do not wrap it in Markdown fences."
+            )
         if claim.skill_paths:
             skills = "\n".join(
                 f"- {key}: {path}" for key, path in sorted(claim.skill_paths.items())
@@ -224,11 +228,26 @@ class OpenClawExecutor:
                 usage = TokenUsage(input_tokens=input_tokens, output_tokens=output_tokens)
         return TaskResult(
             outcome=NodeOutcome.SUCCESS if succeeded else NodeOutcome.FAILURE,
-            output={
-                "provider": "openclaw",
-                "session_key": execution.external_session_key,
-                "run_id": execution.external_run_id,
-                "terminal": terminal,
-            },
+            output=OpenClawExecutor._artifact_output(execution, terminal),
             usage=usage,
         )
+
+    @staticmethod
+    def _artifact_output(execution: ExternalExecution, terminal: dict[str, Any]) -> dict[str, Any]:
+        output = terminal.get("output")
+        if isinstance(output, dict):
+            return output
+        if isinstance(output, str):
+            try:
+                parsed = json.loads(output)
+            except json.JSONDecodeError:
+                pass
+            else:
+                if isinstance(parsed, dict):
+                    return parsed
+        return {
+            "provider": "openclaw",
+            "session_key": execution.external_session_key,
+            "run_id": execution.external_run_id,
+            "terminal": terminal,
+        }
