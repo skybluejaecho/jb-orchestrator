@@ -28,6 +28,8 @@ async def test_dispatch_uses_mcp_origin_authentication_and_idempotency() -> None
         idempotency_key="openclaw-message-42",
         actor_id="user-1",
         conversation_id="session-9",
+        definition_key="planning-only",
+        definition_version=2,
     )
 
     request: httpx.Request = captured["request"]
@@ -37,7 +39,23 @@ async def test_dispatch_uses_mcp_origin_authentication_and_idempotency() -> None
     assert request.headers["x-jb-ingress-key"] == "mcp"
     assert request.headers["x-jb-actor-id"] == "user-1"
     assert request.headers["x-jb-conversation-id"] == "session-9"
+    assert request.read().decode() == (
+        '{"prompt":"Build it","title":"Implementation","workflow":'
+        '{"definition_key":"planning-only","definition_version":2}}'
+    )
     assert result == {"replayed": False}
+
+
+async def test_dispatch_rejects_partial_workflow_override_before_network() -> None:
+    client = ControlPlaneClient(base_url="http://control.test", token="secret")
+
+    with pytest.raises(ControlPlaneError, match="requires definition_key and definition_version"):
+        await client.dispatch_request(
+            uuid4(),
+            prompt="Build it",
+            idempotency_key="partial",
+            definition_key="planning-only",
+        )
 
 
 async def test_missing_token_fails_before_network_request() -> None:

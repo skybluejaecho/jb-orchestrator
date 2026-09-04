@@ -40,6 +40,8 @@ def dispatch_command(
     title: str | None = None,
     *,
     ingress_key: str = "test",
+    definition_key: str | None = None,
+    definition_version: int | None = None,
 ) -> DispatchProjectRequest:
     return DispatchProjectRequest(
         project_id=project.id,
@@ -47,6 +49,8 @@ def dispatch_command(
         title=title,
         idempotency_key=key,
         origin=RequestOrigin(ingress_key=ingress_key, external_request_id=key),
+        definition_key=definition_key,
+        definition_version=definition_version,
     )
 
 
@@ -121,6 +125,61 @@ async def test_binding_update_affects_only_future_dispatches() -> None:
     assert second.workflow.snapshot.definition_version == 2
 
 
+async def test_request_override_selects_exact_workflow_without_project_binding() -> None:
+    store = MemoryStore()
+    project = Project(
+        key="override-project",
+        name="Override Project",
+        repository_url="https://example.com/override.git",
+    )
+    store.projects[project.id] = project
+    factory = lambda: MemoryUnitOfWork(store)  # noqa: E731
+    workflows = WorkflowService(factory)
+    service = RequestDispatchService(factory, workflows)
+    selected = await workflows.register_definition(definition(2))
+
+    dispatched = await service.dispatch(
+        dispatch_command(
+            project,
+            "Plan only",
+            "override-1",
+            definition_key=selected.key,
+            definition_version=selected.version,
+        )
+    )
+
+    assert dispatched.workflow.snapshot.definition_id == selected.id
+    assert dispatched.workflow.snapshot.definition_version == 2
+    assert store.events[-2].payload["selection_source"] == "request_override"
+    assert store.events[-3].payload["workflow_selection"] == {
+        "source": "request_override",
+        "definition_key": "delivery",
+        "definition_version": 2,
+    }
+
+
+async def test_workflow_options_include_default_and_latest_definitions() -> None:
+    store = MemoryStore()
+    project = Project(
+        key="options-project",
+        name="Options Project",
+        repository_url="https://example.com/options.git",
+    )
+    store.projects[project.id] = project
+    factory = lambda: MemoryUnitOfWork(store)  # noqa: E731
+    workflows = WorkflowService(factory)
+    service = RequestDispatchService(factory, workflows)
+    await workflows.register_definition(definition(1))
+    latest = await workflows.register_definition(definition(2))
+    await service.configure_binding(project.id, latest.key, latest.version)
+
+    options = await service.list_workflow_options(project.id)
+
+    assert options.default is not None
+    assert options.default.definition_id == latest.id
+    assert [(value.key, value.version) for value in options.workflows] == [("delivery", 2)]
+
+
 async def test_dispatch_requires_binding_and_exact_definition() -> None:
     store = MemoryStore()
     project = Project(
@@ -183,5 +242,38 @@ async def test_dispatch_replays_same_key_and_rejects_different_payload() -> None
                 "Ship something else",
                 "client-request-1",
                 ingress_key="openclaw",
+            )
+        )
+
+    with pytest.raises(ResourceConflict, match="different request payload"):
+        await service.dispatch(
+            dispatch_command(
+                project,
+                "Ship it",
+                "client-request-1",
+                ingress_key="openclaw",
+                definition_key="delivery",
+                definition_version=2,
+            )
+        )
+
+
+async def test_request_override_requires_key_and_version_together() -> None:
+    store = MemoryStore()
+    project = Project(
+        key="invalid-override",
+        name="Invalid Override",
+        repository_url="https://example.com/invalid.git",
+    )
+    store.projects[project.id] = project
+    service = RequestDispatchService(lambda: MemoryUnitOfWork(store))
+
+    with pytest.raises(ResourceConflict, match="requires definition_key and definition_version"):
+        await service.dispatch(
+            dispatch_command(
+                project,
+                "Invalid",
+                "invalid-1",
+                definition_key="delivery",
             )
         )
