@@ -120,3 +120,43 @@ def test_control_plane_call_includes_configured_token(monkeypatch: MonkeyPatch) 
 
     assert result.exit_code == 0
     assert captured["headers"] == {"Authorization": "Bearer secret-token"}
+
+
+def test_mcp_config_uses_placeholder_instead_of_configured_secret(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'test'\n", encoding="utf-8")
+    monkeypatch.setenv("JB_API_TOKEN", "must-not-be-rendered")
+    get_settings.cache_clear()
+    try:
+        result = runner.invoke(app, ["mcp", "config", "--project-path", str(tmp_path)])
+    finally:
+        get_settings.cache_clear()
+
+    assert result.exit_code == 0
+    assert "must-not-be-rendered" not in result.stdout
+    payload = json.loads(result.stdout)
+    config = payload["mcpServers"]["jb-orchestrator"]
+    assert config["args"] == ["run", "--project", str(tmp_path.resolve()), "jb-mcp"]
+    assert config["env"]["JB_API_TOKEN"] == "<service-account-token>"
+
+
+def test_mcp_check_reports_authorized_project(monkeypatch: MonkeyPatch) -> None:
+    project_id = "00000000-0000-0000-0000-000000000001"
+
+    class FakeControlPlaneClient:
+        async def get_project(self, requested_id: object) -> dict[str, str]:
+            assert str(requested_id) == project_id
+            return {"id": project_id, "key": "alpha"}
+
+    monkeypatch.setattr(
+        "jb_orchestrator.cli.main.ControlPlaneClient.from_settings",
+        lambda: FakeControlPlaneClient(),
+    )
+
+    result = runner.invoke(app, ["mcp", "check", "--project-id", project_id])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["authenticated"] is True
+    assert payload["project"]["key"] == "alpha"
