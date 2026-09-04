@@ -7,6 +7,10 @@
 - `standard-delivery`: 기획, 구현, 검증, 명시적 승인과 bounded repair loop
 - `parallel-verification`: 하나의 구현 결과를 두 검증 노드가 병렬로 검토한 뒤 종합
 
+`standard-delivery`는 검증 Artifact의 `/verdict`가 `approve`이면 명시적 승인으로 이동하고,
+`changes_requested`이면 보정 단계로 이동한다. 분기는 Workflow에 선언되어 있으며 Agent가 다음
+노드를 직접 선택하지 않는다.
+
 로컬 Skill 경로는 이 디렉터리의 `skills`를 기준으로 한다.
 
 ```powershell
