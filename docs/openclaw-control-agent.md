@@ -29,12 +29,15 @@ $env:JB_API_TOKEN="<issued-token>"
 
 uv run jb mcp check --project-id <project-uuid>
 uv run jb mcp config --project-path <repository-path>
+uv run jb mcp smoke --project-id <project-uuid>
 ```
 
-마지막 명령의 JSON을 MCP host 또는 OpenClaw node-hosted plugin이 요구하는 설정 형식에
-맞춰 등록한다. 현재 저장소에 고정된 OpenClaw Gateway protocol은 MCP server/tool 계약을
-포함하지만, Gateway client 패키지만으로 plugin 설치까지 수행하지는 않는다. 실제 OpenClaw
-배포의 plugin loader 설정은 해당 배포에서 확인해야 한다.
+`check`는 API 인증과 scope를, `smoke`는 실제 별도 stdio process와 MCP handshake까지
+검사한다. 두 검사가 모두 성공한 뒤 `config`가 출력한 JSON을 MCP host 또는 OpenClaw
+node-hosted plugin이 요구하는 설정 형식에 맞춰 등록한다. 현재 저장소에 고정된 OpenClaw
+Gateway protocol은 MCP server/tool 계약을 포함하지만, Gateway client 패키지만으로 plugin
+설치까지 수행하지는 않는다. 실제 OpenClaw 배포의 plugin loader 설정은 해당 배포에서
+확인해야 한다.
 
 ## Control Agent 지시문 예시
 
