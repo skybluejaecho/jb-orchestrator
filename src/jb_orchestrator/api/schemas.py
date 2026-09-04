@@ -302,12 +302,20 @@ class WorkflowNodePayload(BaseModel):
     input_mappings: tuple[NodeInputMappingPayload, ...] = ()
 
 
+class ArtifactConditionPayload(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    path: str = Field(pattern=r"^(?:/(?:[^~/]|~[01])*)+$", max_length=512)
+    equals: str | int | float | bool | None
+
+
 class WorkflowEdgePayload(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     source: str = Field(min_length=1, max_length=128)
     outcome: NodeOutcome
     target: str = Field(min_length=1, max_length=128)
+    condition: ArtifactConditionPayload | None = None
 
 
 class WorkflowDefinitionCreate(BaseModel):
