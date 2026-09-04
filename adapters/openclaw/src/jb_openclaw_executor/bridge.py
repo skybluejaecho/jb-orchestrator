@@ -11,6 +11,8 @@ class OpenClawBridgeError(RuntimeError):
 
 
 class OpenClawBridge(Protocol):
+    async def inspect(self) -> dict[str, Any]: ...
+
     async def start(self, request: dict[str, Any]) -> dict[str, Any]: ...
 
     async def wait(self, run_id: str, timeout_ms: int) -> dict[str, Any]: ...
@@ -22,6 +24,9 @@ class OpenClawBridgeClient:
     def __init__(self, bridge_path: Path, *, node_executable: str = "node") -> None:
         self._bridge_path = bridge_path.resolve()
         self._node_executable = node_executable
+
+    async def inspect(self) -> dict[str, Any]:
+        return await self._invoke({"action": "inspect"}, timeout_seconds=35)
 
     async def start(self, request: dict[str, Any]) -> dict[str, Any]:
         return await self._invoke({"action": "start", "input": request}, timeout_seconds=35)

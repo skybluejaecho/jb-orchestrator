@@ -9,6 +9,9 @@ description = "OpenClaw Gateway executor adapter for jb-orchestrator."
 requires-python = ">=3.12"
 dependencies = ["jb-orchestrator>=0.1.0.dev0"]
 
+[project.scripts]
+jb-openclaw = "jb_openclaw_executor.acceptance:main"
+
 [project.entry-points."jb_orchestrator.executors"]
 openclaw = "jb_openclaw_executor:create_executor"
 
