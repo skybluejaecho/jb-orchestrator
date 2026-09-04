@@ -124,7 +124,7 @@ phase_packs:
         description: Optional failed implementation artifact.
         required: false
       - key: verification_failure
-        description: Optional failed verification artifact.
+        description: Optional verification result requesting changes or failing its contract.
         required: false
     skills:
       - key: safe-implementation
@@ -241,7 +241,14 @@ workflows:
       - {source: plan, outcome: failure, target: failed}
       - {source: implement, outcome: success, target: verify}
       - {source: implement, outcome: failure, target: repair}
-      - {source: verify, outcome: success, target: review}
+      - source: verify
+        outcome: success
+        target: review
+        condition: {path: /verdict, equals: approve}
+      - source: verify
+        outcome: success
+        target: repair
+        condition: {path: /verdict, equals: changes_requested}
       - {source: verify, outcome: failure, target: repair}
       - {source: repair, outcome: success, target: implement}
       - {source: repair, outcome: failure, target: failed}
