@@ -22,6 +22,8 @@ repository/worktree roots, and invokes Git with argument arrays rather than a sh
 branch and worktree path from the Workflow execution ID, node key, and visit count. A retry validates
 and reuses the existing assignment. The configured base ref is resolved to an exact commit before
 creation. Different parallel nodes or loop visits receive distinct paths.
+Execution and node identifiers are bounded in generated paths to remain practical on Windows hosts;
+the complete execution identity remains in PostgreSQL.
 
 Workspace path, branch, and base ref are written to the external execution ledger before the provider
 run starts and exposed through the existing observation API and Jarvis. Completed worktrees are kept.

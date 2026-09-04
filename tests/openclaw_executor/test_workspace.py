@@ -59,6 +59,7 @@ async def test_git_worktree_assignment_is_isolated_and_retry_stable(tmp_path: Pa
     assert first.path is not None
     assert Path(first.path).is_dir()
     assert Path(first.path) != repository
+    assert claim.execution_id.hex[:12] in first.path
     assert first.branch == _git(Path(first.path), "branch", "--show-current")
     expected_commit = _git(repository, "rev-parse", "develop")
     assert first.base_ref == expected_commit

@@ -84,12 +84,11 @@ class OpenClawWorkspaceManager:
         )
 
         slug = _slug(claim.node_key)
-        destination = (
-            workspace_root / str(claim.execution_id) / f"{slug}-v{claim.visit_count}"
-        ).resolve()
+        execution_key = claim.execution_id.hex[:12]
+        destination = (workspace_root / execution_key / f"{slug}-v{claim.visit_count}").resolve()
         if not destination.is_relative_to(workspace_root):
             raise OpenClawWorkspaceError("resolved worktree path escaped its configured root")
-        branch = f"jb/{claim.execution_id.hex[:12]}/{slug}-v{claim.visit_count}"
+        branch = f"jb/{execution_key}/{slug}-v{claim.visit_count}"
 
         if destination.exists():
             actual_root = Path(self._git(destination, "rev-parse", "--show-toplevel")).resolve()
@@ -170,4 +169,4 @@ def _slug(value: str) -> str:
     normalized = re.sub(r"[^a-zA-Z0-9._-]+", "-", value).strip("-.").lower()
     if not normalized:
         raise OpenClawWorkspaceError("node key cannot produce a safe workspace name")
-    return normalized[:80]
+    return normalized[:48]
