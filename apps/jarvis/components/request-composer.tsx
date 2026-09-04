@@ -33,6 +33,34 @@ type WorkflowOption = {
   id: string;
   key: string;
   version: number;
+  entry_node: string;
+  nodes: {
+    key: string;
+    kind: string;
+    executor_key: string | null;
+    phase_pack: { key: string; version: number } | null;
+    skills: { key: string; version: number }[];
+  }[];
+  edges: {
+    source: string;
+    outcome: string;
+    target: string;
+    condition: { path: string; equals: unknown } | null;
+  }[];
+  phase_packs: {
+    key: string;
+    version: number;
+    name: string;
+    description: string;
+    skills: { key: string; version: number }[];
+  }[];
+  skills: {
+    key: string;
+    version: number;
+    name: string;
+    description: string;
+    source_kind: string;
+  }[];
 };
 
 type WorkflowOptions = {
@@ -40,6 +68,7 @@ type WorkflowOptions = {
     definition_key: string;
     definition_version: number;
   } | null;
+  default_workflow: WorkflowOption | null;
   workflows: WorkflowOption[];
 };
 
@@ -82,13 +111,33 @@ export function RequestComposer({
   const [error, setError] = useState<string | null>(null);
   const [workflowOptions, setWorkflowOptions] =
     useState<WorkflowOptions | null>(null);
+  const [workflowProjectId, setWorkflowProjectId] = useState<string | null>(
+    null,
+  );
   const [workflowValue, setWorkflowValue] = useState(DEFAULT_WORKFLOW);
-  const [workflowError, setWorkflowError] = useState(false);
+  const [workflowErrorProjectId, setWorkflowErrorProjectId] = useState<
+    string | null
+  >(null);
   const dispatchAttempt = useRef<DispatchAttempt | null>(null);
+  const currentWorkflowOptions =
+    workflowProjectId === project?.id ? workflowOptions : null;
+  const workflowError = workflowErrorProjectId === project?.id;
   const requiresWorkflowSelection =
-    workflowOptions !== null &&
-    workflowOptions.default === null &&
+    currentWorkflowOptions !== null &&
+    currentWorkflowOptions.default === null &&
     workflowValue === DEFAULT_WORKFLOW;
+  const selectedWorkflow = currentWorkflowOptions?.workflows.find(
+    (workflow) => {
+      if (workflowValue !== DEFAULT_WORKFLOW) {
+        return `${workflow.key}@${workflow.version}` === workflowValue;
+      }
+      return false;
+    },
+  );
+  const displayedWorkflow =
+    workflowValue === DEFAULT_WORKFLOW
+      ? currentWorkflowOptions?.default_workflow
+      : selectedWorkflow;
 
   const clearError = () => {
     setError(null);
@@ -103,12 +152,13 @@ export function RequestComposer({
         const options = (await response.json()) as WorkflowOptions;
         if (active) {
           setWorkflowOptions(options);
+          setWorkflowProjectId(project.id);
           setWorkflowValue(DEFAULT_WORKFLOW);
-          setWorkflowError(false);
+          setWorkflowErrorProjectId(null);
         }
       })
       .catch(() => {
-        if (active) setWorkflowError(true);
+        if (active) setWorkflowErrorProjectId(project.id);
       });
     return () => {
       active = false;
@@ -119,9 +169,6 @@ export function RequestComposer({
     event.preventDefault();
     if (!project || !prompt.trim() || submitting) return;
 
-    const selectedWorkflow = workflowOptions?.workflows.find(
-      (workflow) => `${workflow.key}@${workflow.version}` === workflowValue,
-    );
     const input = {
       projectId: project.id,
       title: title.trim() || null,
@@ -217,16 +264,17 @@ export function RequestComposer({
               <NativeSelectOption
                 value={DEFAULT_WORKFLOW}
                 disabled={
-                  workflowOptions !== null && workflowOptions.default === null
+                  currentWorkflowOptions !== null &&
+                  currentWorkflowOptions.default === null
                 }
               >
-                {workflowOptions?.default
-                  ? `프로젝트 기본 · ${workflowOptions.default.definition_key}@${workflowOptions.default.definition_version}`
-                  : workflowOptions
+                {currentWorkflowOptions?.default
+                  ? `프로젝트 기본 · ${currentWorkflowOptions.default.definition_key}@${currentWorkflowOptions.default.definition_version}`
+                  : currentWorkflowOptions
                     ? '기본값 없음 · 워크플로 선택'
                     : '프로젝트 기본'}
               </NativeSelectOption>
-              {workflowOptions?.workflows.map((workflow) => (
+              {currentWorkflowOptions?.workflows.map((workflow) => (
                 <NativeSelectOption
                   key={workflow.id}
                   value={`${workflow.key}@${workflow.version}`}
@@ -290,6 +338,71 @@ export function RequestComposer({
           >
             {error}
           </p>
+        )}
+        {displayedWorkflow && (
+          <section
+            aria-label="선택한 워크플로 구성"
+            className="mt-4 rounded-xl border border-white/8 bg-black/15 p-4"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-white/90">
+                  {displayedWorkflow.key}@{displayedWorkflow.version}
+                </p>
+                <p className="mt-1 text-xs text-white/40">
+                  시작 노드 {displayedWorkflow.entry_node} · 단계{' '}
+                  {displayedWorkflow.nodes.length}개 · 연결{' '}
+                  {displayedWorkflow.edges.length}개
+                </p>
+              </div>
+              <div className="flex flex-wrap justify-end gap-1.5 text-xs">
+                {displayedWorkflow.phase_packs.map((phasePack) => (
+                  <span
+                    key={`${phasePack.key}@${phasePack.version}`}
+                    title={phasePack.description}
+                    className="rounded-full border border-violet-300/15 bg-violet-300/8 px-2 py-1 text-violet-100/70"
+                  >
+                    {phasePack.name} · Phase
+                  </span>
+                ))}
+                {displayedWorkflow.skills.map((skill) => (
+                  <span
+                    key={`${skill.key}@${skill.version}`}
+                    title={skill.description}
+                    className="rounded-full border border-cyan-300/15 bg-cyan-300/8 px-2 py-1 text-cyan-100/70"
+                  >
+                    {skill.name} · {skill.source_kind}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+              {displayedWorkflow.nodes.map((node) => (
+                <div
+                  key={node.key}
+                  className="rounded-lg border border-white/7 bg-white/3 px-3 py-2.5"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm text-white/80">{node.key}</span>
+                    <span className="text-xs uppercase tracking-wide text-white/35">
+                      {node.kind}
+                    </span>
+                  </div>
+                  {(node.phase_pack || node.skills.length > 0) && (
+                    <p className="mt-1.5 text-xs leading-5 text-white/40">
+                      {node.phase_pack &&
+                        `Phase ${node.phase_pack.key}@${node.phase_pack.version}`}
+                      {node.phase_pack && node.skills.length > 0 ? ' · ' : ''}
+                      {node.skills.length > 0 &&
+                        `직접 Skill ${node.skills
+                          .map((skill) => `${skill.key}@${skill.version}`)
+                          .join(', ')}`}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
         )}
         <p className="mt-3 text-xs leading-5 text-white/35">
           요청은 Jarvis가 직접 실행하지 않고 Control Plane에 등록합니다.

@@ -20,6 +20,7 @@ describe('GET /api/workflows', () => {
         definition_key: 'standard-delivery',
         definition_version: 1,
       },
+      default_workflow: null,
       workflows: [{ id: 'workflow-1', key: 'planning-only', version: 1 }],
     };
     const fetchMock = vi
