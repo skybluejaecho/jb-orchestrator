@@ -2,6 +2,7 @@
 
 import {
   AlertTriangle,
+  Bot,
   Check,
   ChevronRight,
   FileJson,
@@ -61,14 +62,34 @@ type Artifact = {
   created_at: string;
 };
 
-type Detail = { execution: Execution; artifacts: Artifact[] };
+type ExternalExecution = {
+  id: string;
+  node_key: string;
+  executor_key: string;
+  external_session_key: string;
+  external_agent_id: string | null;
+  external_run_id: string | null;
+  status: string;
+  failure_reason: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+};
+
+type Detail = {
+  execution: Execution;
+  artifacts: Artifact[];
+  external_executions: ExternalExecution[];
+};
 type Problem = { detail?: string };
 
 const statusLabel: Record<string, string> = {
   awaiting_approval: '승인 대기',
+  active: '실행 중',
   cancelled: '취소됨',
   failed: '실패',
   pending: '준비 중',
+  prepared: '호출 준비',
   ready: '실행 준비',
   running: '실행 중',
   succeeded: '성공',
@@ -180,7 +201,8 @@ export function ExecutionInspector({
           실행 상세
         </CardTitle>
         <CardDescription>
-          노드 진행 상태, 실행 결과와 승인 대기 항목을 확인합니다.
+          노드 진행 상태, 외부 에이전트 세션, 실행 결과와 승인 대기 항목을
+          확인합니다.
         </CardDescription>
         <CardAction className="flex gap-1">
           <Button
@@ -242,6 +264,63 @@ export function ExecutionInspector({
                 {detail.execution.failure_reason}
               </p>
             )}
+
+            <section aria-labelledby="runtime-heading">
+              <h3
+                id="runtime-heading"
+                className="mb-2 flex items-center gap-2 text-sm font-medium text-white/70"
+              >
+                <Bot aria-hidden="true" className="size-4" /> 외부 런타임{' '}
+                {detail.external_executions.length}
+              </h3>
+              {detail.external_executions.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-white/8 px-3 py-5 text-center text-sm text-white/35">
+                  아직 외부 에이전트에 할당된 실행이 없습니다.
+                </p>
+              ) : (
+                <div className="grid gap-2 lg:grid-cols-2">
+                  {detail.external_executions.map((external) => (
+                    <article
+                      key={external.id}
+                      className="min-w-0 rounded-lg border border-cyan-300/10 bg-cyan-300/3 p-3"
+                    >
+                      <div className="mb-3 flex flex-wrap items-center gap-2">
+                        <span className="font-medium">{external.node_key}</span>
+                        <span className="font-mono text-xs text-white/40">
+                          {external.executor_key}
+                        </span>
+                        <StatusBadge status={external.status} />
+                      </div>
+                      <dl className="grid gap-2 text-xs sm:grid-cols-[5.5rem_minmax(0,1fr)]">
+                        <dt className="text-white/35">에이전트</dt>
+                        <dd className="truncate font-mono text-white/65">
+                          {external.external_agent_id ?? '기본 에이전트'}
+                        </dd>
+                        <dt className="text-white/35">세션</dt>
+                        <dd
+                          className="truncate font-mono text-white/50"
+                          title={external.external_session_key}
+                        >
+                          {external.external_session_key}
+                        </dd>
+                        <dt className="text-white/35">외부 run</dt>
+                        <dd
+                          className="truncate font-mono text-white/50"
+                          title={external.external_run_id ?? undefined}
+                        >
+                          {external.external_run_id ?? '할당 대기'}
+                        </dd>
+                      </dl>
+                      {external.failure_reason && (
+                        <p className="mt-3 rounded-md border border-red-300/15 bg-red-300/5 p-2 text-xs text-red-100">
+                          {external.failure_reason}
+                        </p>
+                      )}
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
 
             <section aria-labelledby="node-heading">
               <h3
