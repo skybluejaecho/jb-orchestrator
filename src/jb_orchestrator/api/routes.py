@@ -30,9 +30,11 @@ from jb_orchestrator.api.schemas import (
     PhasePackCreate,
     PhasePackResponse,
     ProjectCreate,
+    ProjectRequestDispatchCreate,
     ProjectResponse,
     ProjectWorkflowBindingConfigure,
     ProjectWorkflowBindingResponse,
+    ProjectWorkflowOptionsResponse,
     RunResponse,
     SkillCreate,
     SkillResponse,
@@ -46,6 +48,7 @@ from jb_orchestrator.api.schemas import (
     WorkflowEdgePayload,
     WorkflowExecutionResponse,
     WorkflowNodePayload,
+    WorkflowOptionResponse,
     WorkflowRequestContextResponse,
     WorkflowStart,
 )
@@ -321,6 +324,27 @@ async def get_project_workflow_binding(
     return ProjectWorkflowBindingResponse.model_validate(await service.get_binding(project_id))
 
 
+@router.get(
+    "/projects/{project_id}/workflow-options",
+    response_model=ProjectWorkflowOptionsResponse,
+)
+async def list_project_workflow_options(
+    project_id: UUID,
+    service: RequestDispatchServiceDependency,
+) -> ProjectWorkflowOptionsResponse:
+    options = await service.list_workflow_options(project_id)
+    return ProjectWorkflowOptionsResponse(
+        default=(
+            ProjectWorkflowBindingResponse.model_validate(options.default)
+            if options.default is not None
+            else None
+        ),
+        workflows=tuple(
+            WorkflowOptionResponse.model_validate(definition) for definition in options.workflows
+        ),
+    )
+
+
 @router.post(
     "/projects/{project_id}/dispatches",
     response_model=DispatchedRequestResponse,
@@ -328,7 +352,7 @@ async def get_project_workflow_binding(
 )
 async def dispatch_project_request(
     project_id: UUID,
-    payload: UserRequestCreate,
+    payload: ProjectRequestDispatchCreate,
     service: RequestDispatchServiceDependency,
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=128)],
     ingress_key: Annotated[
@@ -362,6 +386,12 @@ async def dispatch_project_request(
                 external_request_id=external_request_id or idempotency_key,
                 actor_id=actor_id,
                 conversation_id=conversation_id,
+            ),
+            definition_key=(
+                payload.workflow.definition_key if payload.workflow is not None else None
+            ),
+            definition_version=(
+                payload.workflow.definition_version if payload.workflow is not None else None
             ),
         )
     )

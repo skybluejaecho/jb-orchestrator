@@ -19,7 +19,11 @@ from jb_orchestrator.domain import (
     Run,
     UserRequest,
 )
-from jb_orchestrator.workflows import ProjectWorkflowBinding, WorkflowExecution
+from jb_orchestrator.workflows import (
+    ProjectWorkflowBinding,
+    WorkflowDefinition,
+    WorkflowExecution,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,8 +36,16 @@ class DispatchedRequest:
     replayed: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class ProjectWorkflowOptions:
+    """Selectable workflows and the optional project-level default."""
+
+    default: ProjectWorkflowBinding | None
+    workflows: tuple[WorkflowDefinition, ...]
+
+
 class RequestDispatchService:
-    """Select a project's pinned workflow and create all execution state atomically."""
+    """Select an exact requested or project-default workflow and dispatch atomically."""
 
     def __init__(
         self,
@@ -100,10 +112,24 @@ class RequestDispatchService:
             raise ResourceNotFound(f"project workflow binding not found: {project_id}")
         return binding
 
+    async def list_workflow_options(self, project_id: UUID) -> ProjectWorkflowOptions:
+        async with self._unit_of_work_factory() as unit_of_work:
+            if await unit_of_work.projects.get(project_id) is None:
+                raise ResourceNotFound(f"project not found: {project_id}")
+            binding = await unit_of_work.project_workflow_bindings.get_by_project(project_id)
+            definitions = await unit_of_work.workflow_definitions.list_latest()
+        return ProjectWorkflowOptions(default=binding, workflows=tuple(definitions))
+
     async def dispatch(self, command: DispatchProjectRequest) -> DispatchedRequest:
         normalized_prompt = command.prompt.strip()
         normalized_title = command.title.strip() if command.title else None
         normalized_title = normalized_title or None
+        definition_key = command.definition_key.strip() if command.definition_key else None
+        definition_key = definition_key or None
+        if (definition_key is None) != (command.definition_version is None):
+            raise ResourceConflict(
+                "request workflow override requires definition_key and definition_version"
+            )
         async with self._unit_of_work_factory() as unit_of_work:
             project = await unit_of_work.projects.get(command.project_id)
             if project is None:
@@ -113,7 +139,11 @@ class RequestDispatchService:
                 ingress_key=command.origin.ingress_key,
                 idempotency_key=command.idempotency_key,
                 payload_digest=self._payload_digest(
-                    normalized_prompt, normalized_title, command.origin
+                    normalized_prompt,
+                    normalized_title,
+                    command.origin,
+                    definition_key,
+                    command.definition_version,
                 ),
             )
             if not await unit_of_work.request_dispatch_receipts.try_claim(receipt):
@@ -132,20 +162,32 @@ class RequestDispatchService:
                 return await self._replay(unit_of_work, existing)
             if project.status is not ProjectStatus.ACTIVE:
                 raise ResourceConflict(f"project is not active: {command.project_id}")
-            binding = await unit_of_work.project_workflow_bindings.get_by_project(
-                command.project_id, for_update=True
-            )
-            if binding is None:
-                raise ResourceConflict(
-                    f"project workflow binding is not configured: {command.project_id}"
+            if definition_key is not None and command.definition_version is not None:
+                definition = await unit_of_work.workflow_definitions.get(
+                    definition_key, command.definition_version
                 )
-            definition = await unit_of_work.workflow_definitions.get(
-                binding.definition_key, binding.definition_version
-            )
-            if definition is None or definition.id != binding.definition_id:
-                raise ResourceConflict(
-                    f"bound workflow definition is unavailable: {command.project_id}"
+                if definition is None:
+                    raise ResourceNotFound(
+                        "workflow definition not found: "
+                        f"{definition_key}@{command.definition_version}"
+                    )
+                selection_source = "request_override"
+            else:
+                binding = await unit_of_work.project_workflow_bindings.get_by_project(
+                    command.project_id, for_update=True
                 )
+                if binding is None:
+                    raise ResourceConflict(
+                        f"project workflow binding is not configured: {command.project_id}"
+                    )
+                definition = await unit_of_work.workflow_definitions.get(
+                    binding.definition_key, binding.definition_version
+                )
+                if definition is None or definition.id != binding.definition_id:
+                    raise ResourceConflict(
+                        f"bound workflow definition is unavailable: {command.project_id}"
+                    )
+                selection_source = "project_binding"
 
             request = UserRequest(
                 project_id=project.id,
@@ -171,6 +213,11 @@ class RequestDispatchService:
                             "actor_id": command.origin.actor_id,
                             "conversation_id": command.origin.conversation_id,
                         },
+                        "workflow_selection": {
+                            "source": selection_source,
+                            "definition_key": definition.key,
+                            "definition_version": definition.version,
+                        },
                     },
                 )
             )
@@ -180,7 +227,7 @@ class RequestDispatchService:
                 request=request,
                 project=project,
                 definition=definition,
-                selection_source="project_binding",
+                selection_source=selection_source,
             )
             synchronized_run = await unit_of_work.runs.get(run.id)
             synchronized_request = await unit_of_work.requests.get(request.id)
@@ -201,7 +248,13 @@ class RequestDispatchService:
         )
 
     @staticmethod
-    def _payload_digest(prompt: str, title: str | None, origin: RequestOrigin) -> str:
+    def _payload_digest(
+        prompt: str,
+        title: str | None,
+        origin: RequestOrigin,
+        definition_key: str | None = None,
+        definition_version: int | None = None,
+    ) -> str:
         normalized_title = title.strip() if title else None
         payload = json.dumps(
             {
@@ -213,6 +266,14 @@ class RequestDispatchService:
                     "actor_id": origin.actor_id,
                     "conversation_id": origin.conversation_id,
                 },
+                "workflow": (
+                    {
+                        "definition_key": definition_key,
+                        "definition_version": definition_version,
+                    }
+                    if definition_key is not None and definition_version is not None
+                    else None
+                ),
             },
             ensure_ascii=False,
             separators=(",", ":"),
