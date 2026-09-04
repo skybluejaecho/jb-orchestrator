@@ -328,6 +328,15 @@ ORCH-039 adds deterministic artifact-conditional routing:
 - conditions remain pinned in workflow snapshots and round-trip through REST and bundles
 - the starter delivery workflow routes `approve` to human review and `changes_requested` to repair
 
+ORCH-040 adds request-scoped workflow selection:
+
+- a project-scoped option endpoint returns the current default and selectable exact versions
+- dispatch may pin one exact workflow for that request without changing the project binding
+- omitted selection continues to use the project default with backward-compatible behavior
+- workflow selection participates in the idempotency fingerprint and durable request event
+- MCP exposes option discovery and exact selection to OpenClaw or other control agents
+- Jarvis offers the same default-or-exact selection in its request composer
+
 ## Prerequisites
 
 - Python 3.12
@@ -423,9 +432,11 @@ OpenClaw 역할 분리와 Control Agent 지시문은 `docs/openclaw-control-agen
 있습니다.
 
 제공 도구는 `get_project`, `list_project_requests`, `list_project_workflows`,
-`dispatch_request`, `get_request`, `get_run`, `get_workflow_execution`, `list_artifacts`,
-`approve_workflow_node`, `cancel_run`입니다. 실제 접근 가능 범위는 token을 발급할 때 부여한
-프로젝트 scope와 permission으로 제한됩니다.
+`list_workflow_options`, `dispatch_request`, `get_request`, `get_run`,
+`get_workflow_execution`, `list_artifacts`, `approve_workflow_node`, `cancel_run`입니다.
+`list_workflow_options`에서 정확한 key/version을 확인한 뒤 `dispatch_request`에 함께 전달하면
+해당 요청만 선택한 Workflow를 사용한다. 둘 다 생략하면 프로젝트 기본 binding을 사용한다.
+실제 접근 가능 범위는 token을 발급할 때 부여한 프로젝트 scope와 permission으로 제한됩니다.
 
 Executor adapter packages expose a no-argument factory in their `pyproject.toml`:
 
@@ -459,6 +470,7 @@ The API exposes:
 - `PUT /v1/projects/{project_id}/workflow-binding`
 - `GET /v1/projects/{project_id}/workflow-binding`
 - `POST /v1/projects/{project_id}/dispatches`
+- `GET /v1/projects/{project_id}/workflow-options`
 - `GET /v1/requests/{request_id}`
 - `GET /v1/requests/{request_id}/runs`
 - `GET /v1/runs/{run_id}`
@@ -494,12 +506,15 @@ The API exposes:
 
 프로젝트에는 정확한 Workflow 정의 버전을 기본값으로 연결할 수 있습니다. 사용자는
 `POST /v1/projects/{project_id}/dispatches`에 요청을 한 번 보내면 User Request, Run,
-Workflow Execution이 하나의 트랜잭션에서 생성됩니다. 선택된 정의와 요청 문맥은 실행
-스냅샷에 고정되므로 이후 프로젝트 바인딩을 변경해도 이미 시작된 실행에는 영향을 주지
-않습니다. 기존의 요청 생성 및 수동 Workflow 시작 API도 명시적 실행이 필요한 도구를 위해
-계속 제공됩니다. Dispatch 호출에는 프로젝트 범위에서 고유한 `Idempotency-Key` 헤더가
-필수입니다. 같은 key와 payload를 재전송하면 응답의 `replayed`가 `true`이고 최초 실행을
-그대로 반환합니다. 같은 key를 다른 payload에 사용하면 `409 Conflict`가 반환됩니다.
+Workflow Execution이 하나의 트랜잭션에서 생성됩니다. 요청 본문의 선택적인 `workflow`에
+`definition_key`와 `definition_version`을 함께 지정하면 프로젝트 binding을 변경하지 않고
+그 요청만 다른 정확한 버전으로 실행한다. 생략하면 기존처럼 기본 binding을 사용한다.
+선택된 정의와 요청 문맥은 실행 스냅샷에 고정되므로 이후 프로젝트 바인딩을 변경해도 이미
+시작된 실행에는 영향을 주지 않습니다. 기존의 요청 생성 및 수동 Workflow 시작 API도 명시적
+실행이 필요한 도구를 위해 계속 제공됩니다. Dispatch 호출에는 프로젝트 범위에서 고유한
+`Idempotency-Key` 헤더가 필수입니다. 같은 key와 payload 및 Workflow 선택을 재전송하면
+응답의 `replayed`가 `true`이고 최초 실행을 그대로 반환합니다. 같은 key를 다른 요청 내용이나
+Workflow 선택에 사용하면 `409 Conflict`가 반환됩니다.
 입력 어댑터는 선택적으로 `X-JB-Ingress-Key`, `X-JB-External-Request-ID`,
 `X-JB-Actor-ID`, `X-JB-Conversation-ID`를 전달할 수 있습니다. 멱등성 key는 프로젝트와
 ingress 안에서 고유하므로 OpenClaw와 Jarvis가 우연히 같은 key를 사용해도 서로 충돌하지
