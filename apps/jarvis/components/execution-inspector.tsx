@@ -68,6 +68,9 @@ type ExternalExecution = {
   executor_key: string;
   external_session_key: string;
   external_agent_id: string | null;
+  workspace_path: string | null;
+  workspace_branch: string | null;
+  workspace_base_ref: string | null;
   external_run_id: string | null;
   status: string;
   failure_reason: string | null;
@@ -310,6 +313,28 @@ export function ExecutionInspector({
                         >
                           {external.external_run_id ?? '할당 대기'}
                         </dd>
+                        {external.workspace_branch && (
+                          <>
+                            <dt className="text-white/35">브랜치</dt>
+                            <dd
+                              className="truncate font-mono text-white/50"
+                              title={external.workspace_branch}
+                            >
+                              {external.workspace_branch}
+                            </dd>
+                            <dt className="text-white/35">기준 commit</dt>
+                            <dd className="truncate font-mono text-white/50">
+                              {external.workspace_base_ref}
+                            </dd>
+                            <dt className="text-white/35">worktree</dt>
+                            <dd
+                              className="truncate font-mono text-white/50"
+                              title={external.workspace_path ?? undefined}
+                            >
+                              {external.workspace_path}
+                            </dd>
+                          </>
+                        )}
                       </dl>
                       {external.failure_reason && (
                         <p className="mt-3 rounded-md border border-red-300/15 bg-red-300/5 p-2 text-xs text-red-100">

@@ -2,6 +2,7 @@ from typing import Any
 from uuid import uuid4
 
 from jb_openclaw_executor import OpenClawExecutor
+from jb_openclaw_executor.workspace import WorkspaceAssignment
 
 from jb_orchestrator.application import ExternalExecutionService
 from jb_orchestrator.artifacts import TaskArtifact
@@ -37,6 +38,21 @@ class FakeBridge:
     async def cancel(self, run_id: str) -> dict[str, Any]:
         self.cancels.append(run_id)
         return {"ok": True}
+
+
+class FakeWorkspace:
+    def __init__(self, cwd: str) -> None:
+        self.cwd = cwd
+        self.claims: list[TaskClaim] = []
+
+    async def prepare(self, claim: TaskClaim) -> WorkspaceAssignment:
+        self.claims.append(claim)
+        return WorkspaceAssignment(
+            cwd=self.cwd,
+            path=self.cwd,
+            branch="jb/execution/review-v1",
+            base_ref="develop",
+        )
 
 
 def task_claim() -> TaskClaim:
@@ -116,6 +132,44 @@ async def test_executor_persists_run_and_normalizes_terminal_result() -> None:
     assert '"verdict"' in bridge.starts[0]["message"]
     assert bridge.waits == [("openclaw-run-1", 300_000)]
     assert result.output["provider"] == "openclaw"
+
+
+async def test_executor_starts_new_run_in_prepared_workspace() -> None:
+    store = MemoryStore()
+    bridge = FakeBridge()
+    workspace = FakeWorkspace("C:/worktrees/review")
+    executor = OpenClawExecutor(
+        ExternalExecutionService(lambda: MemoryUnitOfWork(store)),
+        bridge,
+        workspace=workspace,
+    )
+
+    await executor.execute(task_claim())
+
+    assert len(workspace.claims) == 1
+    assert bridge.starts[0]["cwd"] == "C:/worktrees/review"
+    mapping = store.external_executions[next(iter(store.external_executions))]
+    assert mapping.workspace_path == "C:/worktrees/review"
+    assert mapping.workspace_branch == "jb/execution/review-v1"
+
+
+async def test_executor_reprepares_workspace_for_starting_mapping_after_restart() -> None:
+    store = MemoryStore()
+    service = ExternalExecutionService(lambda: MemoryUnitOfWork(store))
+    bridge = FakeBridge()
+    workspace = FakeWorkspace("C:/worktrees/review")
+    claim = task_claim()
+    await service.prepare(claim, session_key="agent:reviewer:existing", agent_id="reviewer")
+    executor = OpenClawExecutor(
+        service,
+        bridge,
+        workspace=workspace,
+    )
+
+    await executor.execute(claim)
+
+    assert len(workspace.claims) == 1
+    assert bridge.starts[0]["cwd"] == "C:/worktrees/review"
 
 
 async def test_executor_promotes_structured_terminal_output_to_phase_artifact() -> None:

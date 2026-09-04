@@ -448,6 +448,9 @@ class ExternalExecutionRecord(Base):
     idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     external_session_key: Mapped[str] = mapped_column(String(512), nullable=False)
     external_agent_id: Mapped[str | None] = mapped_column(String(255))
+    workspace_path: Mapped[str | None] = mapped_column(String(2048))
+    workspace_branch: Mapped[str | None] = mapped_column(String(255))
+    workspace_base_ref: Mapped[str | None] = mapped_column(String(255))
     external_run_id: Mapped[str | None] = mapped_column(String(255))
     status: Mapped[ExternalExecutionStatus] = mapped_column(
         string_enum(ExternalExecutionStatus, "external_execution_status"), nullable=False

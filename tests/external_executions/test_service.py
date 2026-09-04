@@ -4,7 +4,8 @@ import pytest
 
 from jb_orchestrator.application.external_execution_services import ExternalExecutionService
 from jb_orchestrator.domain import InvalidStateTransition
-from jb_orchestrator.external_executions import ExternalExecutionStatus
+from jb_orchestrator.domain.exceptions import DomainValidationError
+from jb_orchestrator.external_executions import ExternalExecution, ExternalExecutionStatus
 from jb_orchestrator.worker import TaskClaim
 from tests.support import MemoryStore, MemoryUnitOfWork
 
@@ -35,7 +36,12 @@ async def test_prepare_is_idempotent_and_keeps_the_original_session() -> None:
     claim = task_claim()
 
     first = await service.prepare(
-        claim, session_key="agent:reviewer:execution", agent_id="reviewer"
+        claim,
+        session_key="agent:reviewer:execution",
+        agent_id="reviewer",
+        workspace_path="C:/worktrees/review",
+        workspace_branch="jb/execution/review-v1",
+        workspace_base_ref="develop",
     )
     second = await service.prepare(
         claim, session_key="agent:different:session", agent_id="different"
@@ -43,6 +49,9 @@ async def test_prepare_is_idempotent_and_keeps_the_original_session() -> None:
 
     assert second.id == first.id
     assert second.external_session_key == "agent:reviewer:execution"
+    assert second.workspace_path == "C:/worktrees/review"
+    assert second.workspace_branch == "jb/execution/review-v1"
+    assert second.workspace_base_ref == "develop"
     assert len(store.external_executions) == 1
     assert [event.event_type for event in store.events] == ["external_execution.prepared"]
 
@@ -134,3 +143,18 @@ async def test_external_executions_can_be_filtered_and_loaded_by_id() -> None:
     assert [execution.id for execution in active] == [first.id]
     assert [execution.run_id for execution in by_workflow] == [second_claim.run_id]
     assert (await service.get_by_id(first.id)).id == first.id
+
+
+def test_external_workspace_metadata_must_be_complete() -> None:
+    claim = task_claim()
+
+    with pytest.raises(DomainValidationError, match="complete or omitted"):
+        ExternalExecution(
+            execution_id=claim.execution_id,
+            run_id=claim.run_id,
+            node_key=claim.node_key,
+            executor_key=claim.executor_key,
+            idempotency_key=claim.idempotency_key,
+            external_session_key="agent:reviewer:execution",
+            workspace_path="C:/worktrees/review",
+        )

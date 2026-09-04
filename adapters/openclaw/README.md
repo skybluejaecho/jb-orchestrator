@@ -34,6 +34,37 @@ An OpenClaw workflow task may set these values in its node `configuration`:
 - `session_key`: explicit durable session key; otherwise a deterministic execution/node key is used
 - `cwd`: agent working directory
 - `thinking`: OpenClaw thinking level
+- `workspace_mode`: `shared` (default) or explicit `git_worktree` isolation
+- `workspace_base_ref`: required Git ref when `workspace_mode` is `git_worktree`
+
+### Isolated Git worktrees
+
+Use `git_worktree` for parallel nodes that may modify the same repository. Configure a dedicated
+worktree root outside every source repository and an allowlist of source-repository parent paths:
+
+```powershell
+$env:JB_OPENCLAW_WORKSPACE_ROOT = "C:\worktrees\jb-orchestrator"
+$env:JB_OPENCLAW_REPOSITORY_ROOTS = '["C:\\projects"]'
+```
+
+Then configure the task node with the exact local repository root and an explicit base ref:
+
+```yaml
+configuration:
+  cwd: C:/projects/example-project
+  workspace_mode: git_worktree
+  workspace_base_ref: develop
+```
+
+The adapter resolves the configured base ref to one commit, then creates a deterministic branch and
+path for each Workflow execution, node, and visit.
+Retries validate and reuse that assignment; independent parallel nodes receive different worktrees.
+The source repository must be below an allowed root, `cwd` must be its exact Git top-level path, and
+the worktree root must not contain or be contained by the repository. Git is invoked without a shell.
+
+Completed worktrees and branches are intentionally retained for review, commit, push, or merge. This
+increment does not automatically merge or delete them. Remove reviewed worktrees with an explicit
+operator Git command and never point the worktree root at a repository or broad user directory.
 
 The selected JB model profile supplies the OpenClaw provider and model override. Verified skill
 entrypoint paths are appended to the task message so the agent receives the exact materialized

@@ -49,6 +49,7 @@ async def test_external_execution_list_supports_polling_filters() -> None:
     assert response.status_code == 200
     assert [item["id"] for item in response.json()] == [str(active.id)]
     assert response.json()[0]["external_run_id"] == "openclaw-run-1"
+    assert response.json()[0]["workspace_path"] is None
     assert invalid_limit.status_code == 422
 
 
@@ -56,7 +57,14 @@ async def test_external_execution_detail_and_missing_problem() -> None:
     store = MemoryStore()
     service = ExternalExecutionService(lambda: MemoryUnitOfWork(store))
     claim = task_claim(key="execution:review:detail")
-    execution = await service.prepare(claim, session_key="agent:detail", agent_id=None)
+    execution = await service.prepare(
+        claim,
+        session_key="agent:detail",
+        agent_id=None,
+        workspace_path="C:/worktrees/review",
+        workspace_branch="jb/execution/review-v1",
+        workspace_base_ref="develop",
+    )
     await service.finish(
         claim.idempotency_key,
         ExternalExecutionStatus.FAILED,
@@ -71,5 +79,6 @@ async def test_external_execution_detail_and_missing_problem() -> None:
     assert response.status_code == 200
     assert response.json()["status"] == "failed"
     assert response.json()["failure_reason"] == "gateway disconnected"
+    assert response.json()["workspace_branch"] == "jb/execution/review-v1"
     assert missing.status_code == 404
     assert missing.json()["title"] == "Resource not found"
