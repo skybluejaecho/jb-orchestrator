@@ -4,6 +4,15 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from jb_orchestrator.domain import RequestOrigin
+from jb_orchestrator.skills import SkillReference
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class NodeSkillAddon:
+    """Exact Skills added to one task node for a single request."""
+
+    node_key: str
+    skills: tuple[SkillReference, ...]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -32,3 +41,4 @@ class DispatchProjectRequest:
     title: str | None = None
     definition_key: str | None = None
     definition_version: int | None = None
+    skill_addons: tuple[NodeSkillAddon, ...] = ()

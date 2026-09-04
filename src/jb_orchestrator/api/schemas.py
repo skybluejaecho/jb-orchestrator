@@ -54,6 +54,7 @@ class WorkflowSelectionPayload(BaseModel):
 
 class ProjectRequestDispatchCreate(UserRequestCreate):
     workflow: WorkflowSelectionPayload | None = None
+    skill_addons: tuple["NodeSkillAddonPayload", ...] = Field(default=(), max_length=64)
 
 
 class RequestOriginResponse(BaseModel):
@@ -242,6 +243,13 @@ class SkillReferencePayload(BaseModel):
     version: int = Field(ge=1)
 
 
+class NodeSkillAddonPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    node_key: str = Field(min_length=1, max_length=128)
+    skills: tuple[SkillReferencePayload, ...] = Field(min_length=1, max_length=64)
+
+
 class PhaseInputPayload(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -376,6 +384,7 @@ class ProjectWorkflowOptionsResponse(BaseModel):
     default: ProjectWorkflowBindingResponse | None
     default_workflow: WorkflowOptionResponse | None
     workflows: tuple[WorkflowOptionResponse, ...]
+    available_skills: tuple[WorkflowSkillSummaryResponse, ...]
 
 
 class WorkflowStart(BaseModel):

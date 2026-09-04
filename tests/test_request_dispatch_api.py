@@ -1,9 +1,12 @@
+from uuid import UUID
+
 from httpx import ASGITransport, AsyncClient
 
 from jb_orchestrator.api.main import create_app
 from jb_orchestrator.application import (
     OrchestrationService,
     RequestDispatchService,
+    SkillCatalogService,
     WorkflowService,
 )
 from tests.support import MemoryStore, MemoryUnitOfWork
@@ -17,6 +20,7 @@ async def test_project_binding_and_one_call_dispatch_api() -> None:
         service=OrchestrationService(factory),
         workflow_service=workflow_service,
         request_dispatch_service=RequestDispatchService(factory, workflow_service),
+        skill_service=SkillCatalogService(factory),
     )
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -26,6 +30,18 @@ async def test_project_binding_and_one_call_dispatch_api() -> None:
                 "key": "one-call-project",
                 "name": "One Call",
                 "repository_url": "https://example.com/one-call.git",
+            },
+        )
+        skill = await client.post(
+            "/v1/skills",
+            json={
+                "key": "security-review",
+                "version": 1,
+                "name": "Security Review",
+                "description": "Review security boundaries",
+                "source_kind": "local",
+                "source_uri": "security-review",
+                "content_digest": f"sha256:{'d' * 64}",
             },
         )
         workflow = await client.post(
@@ -98,11 +114,18 @@ async def test_project_binding_and_one_call_dispatch_api() -> None:
                     "definition_key": "delivery",
                     "definition_version": 1,
                 },
+                "skill_addons": [
+                    {
+                        "node_key": "work",
+                        "skills": [{"key": "security-review", "version": 1}],
+                    }
+                ],
             },
             headers={"Idempotency-Key": "api-request-override"},
         )
 
     assert project.status_code == 201
+    assert skill.status_code == 201
     assert workflow.status_code == 201
     assert bound.status_code == 200
     assert fetched.json() == bound.json()
@@ -120,6 +143,15 @@ async def test_project_binding_and_one_call_dispatch_api() -> None:
     ]
     assert workflow_option["phase_packs"] == []
     assert workflow_option["skills"] == []
+    assert options.json()["available_skills"] == [
+        {
+            "key": "security-review",
+            "version": 1,
+            "name": "Security Review",
+            "description": "Review security boundaries",
+            "source_kind": "local",
+        }
+    ]
     assert dispatched.status_code == 201
     assert dispatched.json()["request"]["status"] == "active"
     assert dispatched.json()["request"]["origin"] == {
@@ -140,6 +172,12 @@ async def test_project_binding_and_one_call_dispatch_api() -> None:
     assert other_ingress.json()["request"]["origin"]["ingress_key"] == "jarvis"
     assert overridden.status_code == 201
     assert overridden.json()["workflow"]["definition_key"] == "delivery"
+    overridden_execution = store.workflow_executions[
+        UUID(overridden.json()["workflow"]["id"])
+    ]
+    assert [skill.key for skill in overridden_execution.snapshot.skills] == [
+        "security-review"
+    ]
     assert store.events[-2].payload["selection_source"] == "request_override"
 
 
