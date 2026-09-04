@@ -4,6 +4,7 @@ import { ArrowUpRight, LoaderCircle } from 'lucide-react';
 import { useEffect, useRef, useState, type SyntheticEvent } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Card,
   CardContent,
@@ -70,6 +71,7 @@ type WorkflowOptions = {
   } | null;
   default_workflow: WorkflowOption | null;
   workflows: WorkflowOption[];
+  available_skills: WorkflowOption['skills'];
 };
 
 const DEFAULT_WORKFLOW = '__project_default__';
@@ -118,6 +120,10 @@ export function RequestComposer({
   const [workflowErrorProjectId, setWorkflowErrorProjectId] = useState<
     string | null
   >(null);
+  const [skillAddonSelection, setSkillAddonSelection] = useState<{
+    contextKey: string;
+    byNode: Record<string, string[]>;
+  } | null>(null);
   const dispatchAttempt = useRef<DispatchAttempt | null>(null);
   const currentWorkflowOptions =
     workflowProjectId === project?.id ? workflowOptions : null;
@@ -138,9 +144,34 @@ export function RequestComposer({
     workflowValue === DEFAULT_WORKFLOW
       ? currentWorkflowOptions?.default_workflow
       : selectedWorkflow;
+  const workflowContextKey =
+    project && displayedWorkflow
+      ? `${project.id}:${displayedWorkflow.key}@${displayedWorkflow.version}`
+      : null;
+  const selectedSkillAddons =
+    skillAddonSelection?.contextKey === workflowContextKey
+      ? skillAddonSelection.byNode
+      : {};
+  const availableSkills = currentWorkflowOptions?.available_skills ?? [];
 
   const clearError = () => {
     setError(null);
+  };
+
+  const toggleSkillAddon = (nodeKey: string, skillId: string) => {
+    if (!workflowContextKey) return;
+    setSkillAddonSelection((current) => {
+      const byNode =
+        current?.contextKey === workflowContextKey ? current.byNode : {};
+      const selected = new Set(byNode[nodeKey] ?? []);
+      if (selected.has(skillId)) selected.delete(skillId);
+      else selected.add(skillId);
+      return {
+        contextKey: workflowContextKey,
+        byNode: { ...byNode, [nodeKey]: [...selected].sort() },
+      };
+    });
+    clearError();
   };
 
   useEffect(() => {
@@ -179,6 +210,18 @@ export function RequestComposer({
             definitionVersion: selectedWorkflow.version,
           }
         : null,
+      skillAddons: Object.entries(selectedSkillAddons)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .flatMap(([nodeKey, skillIds]) => {
+          const skills = skillIds.flatMap((skillId) => {
+            const skill = availableSkills.find(
+              (candidate) =>
+                `${candidate.key}@${candidate.version}` === skillId,
+            );
+            return skill ? [{ key: skill.key, version: skill.version }] : [];
+          });
+          return skills.length > 0 ? [{ nodeKey, skills }] : [];
+        }),
     };
     const attempt = prepareDispatchAttempt(dispatchAttempt.current, input);
     dispatchAttempt.current = attempt;
@@ -198,6 +241,7 @@ export function RequestComposer({
       dispatchAttempt.current = null;
       setTitle('');
       setPrompt('');
+      setSkillAddonSelection(null);
       onDispatched(result);
     } catch (reason) {
       setError(
@@ -399,6 +443,68 @@ export function RequestComposer({
                           .join(', ')}`}
                     </p>
                   )}
+                  {node.kind === 'task' &&
+                    availableSkills.some((skill) => {
+                      const phaseSkills = displayedWorkflow.phase_packs.find(
+                        (phasePack) =>
+                          phasePack.key === node.phase_pack?.key &&
+                          phasePack.version === node.phase_pack.version,
+                      )?.skills;
+                      const existing = [...node.skills, ...(phaseSkills ?? [])];
+                      return !existing.some(
+                        (reference) =>
+                          reference.key === skill.key &&
+                          reference.version === skill.version,
+                      );
+                    }) && (
+                      <div className="mt-2 border-t border-white/6 pt-2">
+                        <p className="mb-1.5 text-xs text-white/35">
+                          이 요청에 Skill 추가
+                        </p>
+                        <div className="flex flex-wrap gap-x-3 gap-y-2">
+                          {availableSkills.map((skill) => {
+                            const phaseSkills =
+                              displayedWorkflow.phase_packs.find(
+                                (phasePack) =>
+                                  phasePack.key === node.phase_pack?.key &&
+                                  phasePack.version === node.phase_pack.version,
+                              )?.skills ?? [];
+                            const existing = [
+                              ...node.skills,
+                              ...phaseSkills,
+                            ].some(
+                              (reference) =>
+                                reference.key === skill.key &&
+                                reference.version === skill.version,
+                            );
+                            if (existing) return null;
+                            const skillId = `${skill.key}@${skill.version}`;
+                            const inputId = `skill-addon-${node.key}-${skillId}`;
+                            return (
+                              <label
+                                key={skillId}
+                                htmlFor={inputId}
+                                title={skill.description}
+                                className="flex cursor-pointer items-center gap-1.5 text-xs text-white/55"
+                              >
+                                <Checkbox
+                                  id={inputId}
+                                  checked={
+                                    selectedSkillAddons[node.key]?.includes(
+                                      skillId,
+                                    ) ?? false
+                                  }
+                                  onCheckedChange={() =>
+                                    toggleSkillAddon(node.key, skillId)
+                                  }
+                                />
+                                {skill.name}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                 </div>
               ))}
             </div>

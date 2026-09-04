@@ -5,6 +5,7 @@ type DispatchPayload = {
   title?: unknown;
   prompt?: unknown;
   workflow?: unknown;
+  skillAddons?: unknown;
 };
 
 type WorkflowSelection = {
@@ -13,6 +14,51 @@ type WorkflowSelection = {
 };
 
 const workflowKeyPattern = /^[a-z0-9][a-z0-9._-]*$/;
+
+type SkillAddon = {
+  nodeKey: string;
+  skills: { key: string; version: number }[];
+};
+
+function skillAddons(value: unknown): SkillAddon[] | undefined {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > 64) return undefined;
+  const result: SkillAddon[] = [];
+  const nodeKeys = new Set<string>();
+  for (const item of value) {
+    if (!item || typeof item !== 'object') return undefined;
+    const candidate = item as Record<string, unknown>;
+    const nodeKey =
+      typeof candidate.nodeKey === 'string' ? candidate.nodeKey.trim() : '';
+    if (
+      !nodeKey ||
+      nodeKey.length > 128 ||
+      nodeKeys.has(nodeKey) ||
+      !Array.isArray(candidate.skills) ||
+      candidate.skills.length === 0 ||
+      candidate.skills.length > 64
+    ) {
+      return undefined;
+    }
+    const skills = candidate.skills.flatMap((item) => {
+      if (!item || typeof item !== 'object') return [];
+      const skill = item as Record<string, unknown>;
+      const key = typeof skill.key === 'string' ? skill.key.trim() : '';
+      const version = skill.version;
+      return key &&
+        key.length <= 128 &&
+        workflowKeyPattern.test(key) &&
+        Number.isInteger(version) &&
+        Number(version) >= 1
+        ? [{ key, version: Number(version) }]
+        : [];
+    });
+    if (skills.length !== candidate.skills.length) return undefined;
+    nodeKeys.add(nodeKey);
+    result.push({ nodeKey, skills });
+  }
+  return result;
+}
 
 function workflowSelection(
   value: unknown,
@@ -55,6 +101,7 @@ export async function POST(request: Request) {
     typeof payload.prompt === 'string' ? payload.prompt.trim() : '';
   const idempotencyKey = request.headers.get('idempotency-key')?.trim() ?? '';
   const workflow = workflowSelection(payload.workflow);
+  const addons = skillAddons(payload.skillAddons);
 
   if (!projectId || !prompt || !idempotencyKey) {
     return Response.json(
@@ -74,6 +121,12 @@ export async function POST(request: Request) {
   if (workflow === undefined) {
     return Response.json(
       { detail: '올바른 workflow key와 version이 필요합니다.', status: 400 },
+      { status: 400 },
+    );
+  }
+  if (addons === undefined) {
+    return Response.json(
+      { detail: '올바른 노드별 Skill 추가 구성이 필요합니다.', status: 400 },
       { status: 400 },
     );
   }
@@ -97,6 +150,10 @@ export async function POST(request: Request) {
                 definition_version: workflow.definitionVersion,
               }
             : null,
+          skill_addons: addons.map((addon) => ({
+            node_key: addon.nodeKey,
+            skills: addon.skills,
+          })),
         }),
       },
     );

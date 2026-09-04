@@ -6,6 +6,10 @@ export type DispatchInput = {
     definitionKey: string;
     definitionVersion: number;
   } | null;
+  skillAddons: {
+    nodeKey: string;
+    skills: { key: string; version: number }[];
+  }[];
 };
 
 export type DispatchAttempt = {
@@ -24,6 +28,7 @@ export function prepareDispatchAttempt(
     input.prompt,
     input.workflow?.definitionKey ?? null,
     input.workflow?.definitionVersion ?? null,
+    input.skillAddons,
   ]);
   if (current?.fingerprint === fingerprint) return current;
   return { fingerprint, key: `jarvis-${createId()}` };

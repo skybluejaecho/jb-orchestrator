@@ -70,6 +70,7 @@ describe('POST /api/dispatch', () => {
       title: '제목',
       prompt: '작업 내용',
       workflow: null,
+      skill_addons: [],
     });
   });
 
@@ -122,6 +123,59 @@ describe('POST /api/dispatch', () => {
           workflow: { definitionKey: 'planning-only' },
         },
         'jarvis-invalid-1',
+      ),
+    );
+
+    expect(response.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('노드별 Skill 추가 구성을 Control Plane 계약으로 변환한다', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(Response.json({ replayed: false }, { status: 201 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await POST(
+      dispatchRequest(
+        {
+          projectId: 'project-1',
+          prompt: '보안 검토 요청',
+          skillAddons: [
+            {
+              nodeKey: 'verify',
+              skills: [{ key: 'security-review', version: 2 }],
+            },
+          ],
+        },
+        'jarvis-skill-addon-1',
+      ),
+    );
+
+    expect(response.status).toBe(201);
+    const [, init] = fetchMock.mock.calls[0];
+    if (typeof init?.body !== 'string')
+      throw new Error('JSON body가 필요합니다.');
+    expect(JSON.parse(init.body).skill_addons).toEqual([
+      {
+        node_key: 'verify',
+        skills: [{ key: 'security-review', version: 2 }],
+      },
+    ]);
+  });
+
+  it('잘못된 Skill 추가 구성은 upstream 전에 거부한다', async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await POST(
+      dispatchRequest(
+        {
+          projectId: 'project-1',
+          prompt: '검토 요청',
+          skillAddons: [{ nodeKey: 'verify', skills: [{ key: 'Invalid' }] }],
+        },
+        'jarvis-invalid-addon-1',
       ),
     );
 

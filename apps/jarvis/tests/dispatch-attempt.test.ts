@@ -10,6 +10,7 @@ const input: DispatchInput = {
   title: '작업 제목',
   prompt: '구현 요청',
   workflow: null,
+  skillAddons: [],
 };
 
 const changedInputs: Array<[DispatchInput, string]> = [
@@ -22,6 +23,18 @@ const changedInputs: Array<[DispatchInput, string]> = [
       workflow: { definitionKey: 'planning-only', definitionVersion: 1 },
     },
     'workflow',
+  ],
+  [
+    {
+      ...input,
+      skillAddons: [
+        {
+          nodeKey: 'verify',
+          skills: [{ key: 'security-review', version: 1 }],
+        },
+      ],
+    },
+    'skill addons',
   ],
 ];
 
