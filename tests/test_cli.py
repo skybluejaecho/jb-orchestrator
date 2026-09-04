@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 
 from jb_orchestrator.cli.main import app
 from jb_orchestrator.config import get_settings
+from jb_orchestrator.mcp_server import McpRuntimeProbeResult
 
 runner = CliRunner()
 
@@ -160,3 +161,25 @@ def test_mcp_check_reports_authorized_project(monkeypatch: MonkeyPatch) -> None:
     payload = json.loads(result.stdout)
     assert payload["authenticated"] is True
     assert payload["project"]["key"] == "alpha"
+
+
+def test_mcp_smoke_reports_stdio_runtime_inventory(monkeypatch: MonkeyPatch) -> None:
+    project_id = "00000000-0000-0000-0000-000000000001"
+
+    async def fake_probe(_: object) -> McpRuntimeProbeResult:
+        return McpRuntimeProbeResult(
+            server_name="jb-orchestrator",
+            server_version="1.0",
+            tools=("dispatch_request", "get_project"),
+            project={"id": project_id, "key": "alpha"},
+        )
+
+    monkeypatch.setattr("jb_orchestrator.cli.main.probe_runtime", fake_probe)
+
+    result = runner.invoke(app, ["mcp", "smoke", "--project-id", project_id])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ready"
+    assert payload["server"]["name"] == "jb-orchestrator"
+    assert payload["tools"] == ["dispatch_request", "get_project"]
