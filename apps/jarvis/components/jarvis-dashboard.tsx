@@ -38,6 +38,7 @@ import {
   RequestComposer,
   type DispatchResult,
 } from '@/components/request-composer';
+import { ExecutionInspector } from '@/components/execution-inspector';
 
 type ConnectionState = 'connecting' | 'live' | 'degraded';
 
@@ -177,6 +178,10 @@ export function JarvisDashboard() {
     projectId: string;
     title: string;
   } | null>(null);
+  const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(
+    null,
+  );
+  const [eventRevision, setEventRevision] = useState(0);
 
   const loadProjects = useCallback(async () => {
     try {
@@ -226,10 +231,10 @@ export function JarvisDashboard() {
     let refreshTimer: ReturnType<typeof setTimeout> | undefined;
     const refresh = () => {
       clearTimeout(refreshTimer);
-      refreshTimer = setTimeout(
-        () => void loadOverview(selectedProjectId),
-        180,
-      );
+      refreshTimer = setTimeout(() => {
+        setEventRevision((current) => current + 1);
+        void loadOverview(selectedProjectId);
+      }, 180);
     };
     source.onopen = () => setConnection('live');
     source.onerror = () => setConnection('degraded');
@@ -372,7 +377,10 @@ export function JarvisDashboard() {
                 key={project.id}
                 type="button"
                 aria-label={`${project.name} 프로젝트 선택`}
-                onClick={() => setSelectedProjectId(project.id)}
+                onClick={() => {
+                  setSelectedProjectId(project.id);
+                  setSelectedExecutionId(null);
+                }}
                 className={cn(
                   'flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors',
                   selectedProjectId === project.id
@@ -546,13 +554,23 @@ export function JarvisDashboard() {
                           className="border-white/7 hover:bg-white/3"
                         >
                           <TableCell>
-                            <p className="font-medium">
-                              {workflow.definition_key}
-                            </p>
-                            <p className="font-mono text-xs text-white/30">
-                              v{workflow.definition_version} ·{' '}
-                              {workflow.id.slice(0, 8)}
-                            </p>
+                            <button
+                              type="button"
+                              aria-label={`${workflow.definition_key} 실행 상세 보기`}
+                              aria-pressed={selectedExecutionId === workflow.id}
+                              onClick={() =>
+                                setSelectedExecutionId(workflow.id)
+                              }
+                              className="rounded-md text-left outline-none hover:text-cyan-100 focus-visible:ring-2 focus-visible:ring-cyan-300/50"
+                            >
+                              <span className="block font-medium">
+                                {workflow.definition_key}
+                              </span>
+                              <span className="block font-mono text-xs text-white/30">
+                                v{workflow.definition_version} ·{' '}
+                                {workflow.id.slice(0, 8)}
+                              </span>
+                            </button>
                           </TableCell>
                           <TableCell>
                             <StatusBadge status={workflow.status} />
@@ -605,6 +623,18 @@ export function JarvisDashboard() {
               </CardContent>
             </Card>
           </div>
+
+          {selectedExecutionId && (
+            <ExecutionInspector
+              key={selectedExecutionId}
+              executionId={selectedExecutionId}
+              revision={eventRevision}
+              onChanged={() =>
+                selectedProjectId && void loadOverview(selectedProjectId)
+              }
+              onClose={() => setSelectedExecutionId(null)}
+            />
+          )}
         </section>
       </div>
     </main>
