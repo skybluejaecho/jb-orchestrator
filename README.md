@@ -236,6 +236,15 @@ ORCH-028 exposes a host-neutral MCP adapter:
 - MCP safety annotations backed by API-enforced service-account permissions
 - stable `mcp` request origin shared by Codex, OpenClaw, and other MCP hosts
 
+ORCH-029 verifies and operationalizes the MCP connection:
+
+- real MCP `ClientSession` initialization, discovery, and structured tool calls
+- end-to-end dispatch through API authentication into a durable Workflow snapshot
+- protocol-level idempotent replay verification
+- secret-safe stdio host configuration generation
+- one-command API token and project-scope diagnostics
+- concrete OpenClaw Control Agent role and instruction template
+
 ## Prerequisites
 
 - Python 3.12
@@ -305,6 +314,15 @@ uv run jb-worker --once
 OpenClaw가 MCP stdio server 등록을 지원하는 배포에서는 같은 구성을 사용하고, 직접 MCP를
 지원하지 않는 배포에서는 ORCH-026 REST ingress를 호출하는 얇은 adapter를 사용합니다.
 MCP 서버는 `JB_API_TOKEN`이 없으면 시작하지 않습니다.
+
+```powershell
+uv run jb mcp check --project-id <project-uuid>
+uv run jb mcp config --project-path <repository-path>
+```
+
+첫 명령은 현재 token의 API 연결 및 프로젝트 권한을 확인합니다. 두 번째 명령은 실제 token을
+노출하지 않고 범용 stdio MCP host 설정을 출력합니다. OpenClaw 역할 분리와 Control Agent
+지시문은 `docs/openclaw-control-agent.md`에 정리되어 있습니다.
 
 제공 도구는 `get_project`, `list_project_requests`, `list_project_workflows`,
 `dispatch_request`, `get_request`, `get_run`, `get_workflow_execution`, `list_artifacts`,
