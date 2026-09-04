@@ -44,7 +44,7 @@ packages = ["src/jb_orchestrator"]
 [tool.pytest.ini_options]
 addopts = "-ra --strict-config --strict-markers"
 testpaths = ["tests"]
-pythonpath = [".", "adapters/openclaw/src"]
+pythonpath = [".", "adapters/openclaw/src", "tools/system-smoke-executor/src"]
 asyncio_mode = "auto"
 
 [tool.ruff]
