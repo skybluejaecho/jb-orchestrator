@@ -1,0 +1,324 @@
+schema_version: 1
+
+project:
+  key: example-project
+  name: Example Project
+  repository_url: https://github.com/example/example-project.git
+  default_branch: main
+
+skills:
+  - key: scoped-planning
+    version: 1
+    name: Scoped Planning
+    description: Produce a bounded plan with risks and acceptance checks.
+    source_kind: local
+    source_uri: scoped-planning
+    content_digest: sha256:132289f9c62ea82b41b04c83f7526f802e485c3399e385e7368ca1e49b780792
+  - key: safe-implementation
+    version: 1
+    name: Safe Implementation
+    description: Implement a bounded change and record reproducible evidence.
+    source_kind: local
+    source_uri: safe-implementation
+    content_digest: sha256:476ffb518a3c7bc02cfeabfcce9a4733750de0e15e18d488bdb24b75c2de0ed2
+  - key: evidence-verification
+    version: 1
+    name: Evidence Verification
+    description: Independently verify an implementation and report findings.
+    source_kind: local
+    source_uri: evidence-verification
+    content_digest: sha256:43a3b2c35689bc94b14b987fea2c30c490e91952f12fc21959c4d4eaf820bbdd
+
+models: []
+
+phase_packs:
+  - key: planning
+    version: 1
+    name: Planning
+    description: Convert a request into a bounded, reviewable plan.
+    instructions: Return the intended outcome, ordered steps, risks, and acceptance checks.
+    skills:
+      - key: scoped-planning
+        version: 1
+    output_contract:
+      type: object
+      required: [objective, steps, risks, acceptance_checks]
+      properties:
+        objective: {type: string}
+        steps:
+          type: array
+          items: {type: string}
+        risks:
+          type: array
+          items: {type: string}
+        acceptance_checks:
+          type: array
+          items: {type: string}
+      additionalProperties: false
+
+  - key: implementation
+    version: 1
+    name: Implementation
+    description: Implement one bounded change from an approved plan.
+    instructions: Apply the plan, incorporate repair guidance when present, and verify the result.
+    inputs:
+      - key: plan
+        description: The durable planning artifact.
+        required: true
+      - key: repair_guidance
+        description: Optional guidance produced after a failed attempt.
+        required: false
+    skills:
+      - key: safe-implementation
+        version: 1
+    output_contract:
+      type: object
+      required: [summary, changed_files, checks, remaining_risks]
+      properties:
+        summary: {type: string}
+        changed_files:
+          type: array
+          items: {type: string}
+        checks:
+          type: array
+          items: {type: string}
+        remaining_risks:
+          type: array
+          items: {type: string}
+      additionalProperties: false
+
+  - key: verification
+    version: 1
+    name: Verification
+    description: Independently evaluate an implementation artifact.
+    instructions: Check correctness and return a verdict backed by reproducible findings.
+    inputs:
+      - key: implementation
+        description: The implementation artifact being reviewed.
+        required: true
+    skills:
+      - key: evidence-verification
+        version: 1
+    output_contract:
+      type: object
+      required: [verdict, findings, checks]
+      properties:
+        verdict:
+          type: string
+          enum: [approve, changes_requested]
+        findings:
+          type: array
+          items: {type: string}
+        checks:
+          type: array
+          items: {type: string}
+      additionalProperties: false
+
+  - key: repair
+    version: 1
+    name: Repair Guidance
+    description: Turn a failed or contract-invalid attempt into bounded correction guidance.
+    instructions: Diagnose available failure artifacts and provide precise correction steps.
+    inputs:
+      - key: implementation_failure
+        description: Optional failed implementation artifact.
+        required: false
+      - key: verification_failure
+        description: Optional failed verification artifact.
+        required: false
+    skills:
+      - key: safe-implementation
+        version: 1
+      - key: evidence-verification
+        version: 1
+    output_contract:
+      type: object
+      required: [diagnosis, required_changes]
+      properties:
+        diagnosis: {type: string}
+        required_changes:
+          type: array
+          items: {type: string}
+      additionalProperties: false
+
+  - key: review-synthesis
+    version: 1
+    name: Review Synthesis
+    description: Combine independent verification artifacts without hiding disagreement.
+    instructions: Reconcile both reviews and preserve unresolved findings in the recommendation.
+    inputs:
+      - key: functional_review
+        description: Functional verification evidence.
+        required: true
+      - key: risk_review
+        description: Risk-focused verification evidence.
+        required: true
+    skills:
+      - key: scoped-planning
+        version: 1
+      - key: evidence-verification
+        version: 1
+    output_contract:
+      type: object
+      required: [verdict, findings, recommendation]
+      properties:
+        verdict:
+          type: string
+          enum: [approve, changes_requested]
+        findings:
+          type: array
+          items: {type: string}
+        recommendation: {type: string}
+      additionalProperties: false
+
+workflows:
+  - key: planning-only
+    version: 1
+    entry_node: plan
+    nodes:
+      - key: plan
+        kind: task
+        executor_key: openclaw
+        phase_pack: {key: planning, version: 1}
+        configuration: {agent_id: planner, thinking: low}
+      - key: done
+        kind: terminal
+        terminal_status: succeeded
+      - key: failed
+        kind: terminal
+        terminal_status: failed
+    edges:
+      - {source: plan, outcome: success, target: done}
+      - {source: plan, outcome: failure, target: failed}
+
+  - key: standard-delivery
+    version: 1
+    entry_node: plan
+    nodes:
+      - key: plan
+        kind: task
+        executor_key: openclaw
+        phase_pack: {key: planning, version: 1}
+        configuration: {agent_id: planner, thinking: low}
+      - key: implement
+        kind: task
+        executor_key: openclaw
+        max_visits: 2
+        phase_pack: {key: implementation, version: 1}
+        input_mappings:
+          - {input_key: plan, source_node: plan}
+          - {input_key: repair_guidance, source_node: repair}
+        configuration: {agent_id: implementer, thinking: medium}
+      - key: verify
+        kind: task
+        executor_key: openclaw
+        max_visits: 2
+        phase_pack: {key: verification, version: 1}
+        input_mappings:
+          - {input_key: implementation, source_node: implement}
+        configuration: {agent_id: verifier, thinking: low}
+      - key: repair
+        kind: task
+        executor_key: openclaw
+        phase_pack: {key: repair, version: 1}
+        input_mappings:
+          - {input_key: implementation_failure, source_node: implement}
+          - {input_key: verification_failure, source_node: verify}
+        configuration: {agent_id: repairer, thinking: medium}
+      - key: review
+        kind: approval
+      - key: done
+        kind: terminal
+        terminal_status: succeeded
+      - key: rejected
+        kind: terminal
+        terminal_status: failed
+      - key: failed
+        kind: terminal
+        terminal_status: failed
+    edges:
+      - {source: plan, outcome: success, target: implement}
+      - {source: plan, outcome: failure, target: failed}
+      - {source: implement, outcome: success, target: verify}
+      - {source: implement, outcome: failure, target: repair}
+      - {source: verify, outcome: success, target: review}
+      - {source: verify, outcome: failure, target: repair}
+      - {source: repair, outcome: success, target: implement}
+      - {source: repair, outcome: failure, target: failed}
+      - {source: review, outcome: approved, target: done}
+      - {source: review, outcome: rejected, target: rejected}
+
+  - key: parallel-verification
+    version: 1
+    entry_node: plan
+    nodes:
+      - key: plan
+        kind: task
+        executor_key: openclaw
+        phase_pack: {key: planning, version: 1}
+        configuration: {agent_id: planner, thinking: low}
+      - key: implement
+        kind: task
+        executor_key: openclaw
+        phase_pack: {key: implementation, version: 1}
+        input_mappings:
+          - {input_key: plan, source_node: plan}
+        configuration: {agent_id: implementer, thinking: medium}
+      - key: split-reviews
+        kind: fork
+      - key: functional-review
+        kind: task
+        executor_key: openclaw
+        phase_pack: {key: verification, version: 1}
+        input_mappings:
+          - {input_key: implementation, source_node: implement}
+        configuration: {agent_id: functional-verifier, thinking: low}
+      - key: risk-review
+        kind: task
+        executor_key: openclaw
+        phase_pack: {key: verification, version: 1}
+        input_mappings:
+          - {input_key: implementation, source_node: implement}
+        configuration: {agent_id: risk-verifier, thinking: medium}
+      - key: join-reviews
+        kind: join
+      - key: synthesize
+        kind: task
+        executor_key: openclaw
+        phase_pack: {key: review-synthesis, version: 1}
+        input_mappings:
+          - {input_key: functional_review, source_node: functional-review}
+          - {input_key: risk_review, source_node: risk-review}
+        configuration: {agent_id: review-lead, thinking: medium}
+      - key: review
+        kind: approval
+      - key: done
+        kind: terminal
+        terminal_status: succeeded
+      - key: rejected
+        kind: terminal
+        terminal_status: failed
+      - key: failed
+        kind: terminal
+        terminal_status: failed
+    edges:
+      - {source: plan, outcome: success, target: implement}
+      - {source: plan, outcome: failure, target: failed}
+      - {source: implement, outcome: success, target: split-reviews}
+      - {source: implement, outcome: failure, target: failed}
+      - {source: split-reviews, outcome: success, target: functional-review}
+      - {source: split-reviews, outcome: success, target: risk-review}
+      - {source: functional-review, outcome: success, target: join-reviews}
+      - {source: functional-review, outcome: failure, target: failed}
+      - {source: risk-review, outcome: success, target: join-reviews}
+      - {source: risk-review, outcome: failure, target: failed}
+      - {source: join-reviews, outcome: success, target: synthesize}
+      - {source: synthesize, outcome: success, target: review}
+      - {source: synthesize, outcome: failure, target: failed}
+      - {source: review, outcome: approved, target: done}
+      - {source: review, outcome: rejected, target: rejected}
+
+binding:
+  project_key: example-project
+  definition_key: standard-delivery
+  definition_version: 1

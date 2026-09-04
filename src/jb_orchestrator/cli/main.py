@@ -20,6 +20,7 @@ from jb_orchestrator.cli.bundles import (
     plan_bundle,
     validate_bundle,
 )
+from jb_orchestrator.cli.starter import StarterKitError, initialize_starter_kit
 from jb_orchestrator.config import get_settings
 from jb_orchestrator.infrastructure.database import SqlAlchemyUnitOfWork, create_session_factory
 from jb_orchestrator.security import ApiPermission
@@ -84,6 +85,28 @@ def _load_bundle_or_exit(path: Path) -> OrchestrationBundle:
     except BundleError as exc:
         typer.echo(f"bundle failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
+
+
+@bundle_app.command("init")
+def initialize_bundle_starter(
+    destination: Annotated[
+        Path, typer.Argument(help="New directory that will receive the starter kit.")
+    ] = Path("jb-orchestration"),
+) -> None:
+    """Create a non-overwriting starter kit with composable phase packs and workflows."""
+
+    try:
+        created = initialize_starter_kit(destination)
+    except (OSError, StarterKitError) as exc:
+        typer.echo(f"bundle init failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    echo_json(
+        {
+            "bundle": str(created / "orchestrator.yaml"),
+            "destination": str(created),
+            "status": "created",
+        }
+    )
 
 
 @bundle_app.command("validate")
