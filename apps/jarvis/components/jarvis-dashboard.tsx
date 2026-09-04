@@ -479,6 +479,7 @@ export function JarvisDashboard() {
           </div>
 
           <RequestComposer
+            key={selectedProject?.id ?? 'no-project'}
             project={selectedProject}
             onDispatched={handleDispatched}
           />
