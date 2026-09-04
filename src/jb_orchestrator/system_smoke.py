@@ -84,11 +84,11 @@ def _terminate_process_tree(process: subprocess.Popen[bytes]) -> None:
         return
     process_group = f"-{process.pid}"
     try:
-        subprocess.run(["kill", "-TERM", process_group], check=False, capture_output=True)
+        subprocess.run(["kill", "-TERM", "--", process_group], check=False, capture_output=True)
         process.wait(timeout=5)
     except (ProcessLookupError, subprocess.TimeoutExpired):
         if process.poll() is None:
-            subprocess.run(["kill", "-KILL", process_group], check=False, capture_output=True)
+            subprocess.run(["kill", "-KILL", "--", process_group], check=False, capture_output=True)
             process.wait(timeout=5)
 
 
