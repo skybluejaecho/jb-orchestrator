@@ -277,6 +277,14 @@ ORCH-033 makes Jarvis changes independently verifiable:
 - retry tests proving stable idempotency keys for unchanged inputs
 - local and CI commands backed by the same committed npm lockfile
 
+ORCH-034 adds explicit workflow review to Jarvis:
+
+- on-demand execution detail and immutable task-artifact inspection
+- approval and rejection controls shown only for nodes awaiting a decision
+- a deliberate two-step confirmation before the workflow graph is advanced
+- server-side `workflow.approve` authorization without exposing bearer tokens
+- SSE-triggered detail refresh while the Control Plane remains the source of truth
+
 ## Prerequisites
 
 - Python 3.12
@@ -321,8 +329,9 @@ uv run jb-mcp
 uv run jb-worker --once
 ```
 
-Jarvis 로컬 대시보드는 별도 터미널에서 실행합니다. 사용자 인증 계층을 추가하기 전까지
-외부 네트워크에 공개하거나 배포하지 않습니다.
+Jarvis 로컬 대시보드는 별도 터미널에서 실행합니다. 전용 서비스 계정에는 상태 조회와 요청
+제출 외에 승인 기능을 사용할 경우 `workflow.approve` 권한도 부여합니다. 사용자 인증 계층을
+추가하기 전까지 외부 네트워크에 공개하거나 배포하지 않습니다.
 
 ```powershell
 Copy-Item apps/jarvis/.env.example apps/jarvis/.env.local
