@@ -301,6 +301,15 @@ ORCH-036 adds a process-level local system smoke test:
 - bounded readiness and transition timeouts with child-process cleanup
 - a dedicated CI job that exercises the complete local deployment boundary
 
+ORCH-037 adds declarative orchestration bundles:
+
+- one versioned YAML document for Project, Skill, Model, Phase Pack, Workflow, and Binding inputs
+- offline schema, output-contract, graph, and bundled phase-input validation
+- read-only planning with explicit create, update, unchanged, and immutable-conflict actions
+- external exact-version dependency checks against the Control Plane
+- conflict-free ordered application through existing authenticated APIs
+- retry-safe convergence without storing credentials in the bundle
+
 ## Prerequisites
 
 - Python 3.12
@@ -486,6 +495,26 @@ Jarvis는 `GET /v1/projects/{project_id}/events/stream` 하나로 프로젝트�
 받고, 연결이 끊기면 마지막 event UUID를 `Last-Event-ID`로 보내 이어받을 수 있습니다.
 현재 상태의 복구는 목록 API가, 이후 변화의 전달은 SSE가 담당하므로 GUI 자체 캐시는
 진실의 원천이 아닙니다.
+
+## Declarative bundles
+
+`orchestrator.yaml`은 실행 코드나 secret이 아니라 Control Plane에 등록할 버전 고정 구성을
+기술한다. 기본 예시는 `examples/bundles/basic-openclaw.yaml`에 있다.
+
+```powershell
+uv run jb bundle validate examples/bundles/basic-openclaw.yaml
+uv run jb bundle plan examples/bundles/basic-openclaw.yaml
+uv run jb bundle apply examples/bundles/basic-openclaw.yaml
+```
+
+`validate`는 API 연결 없이 실행된다. `plan`과 `apply`는 `JB_CONTROL_PLANE_URL`과
+`JB_API_TOKEN`을 사용한다. 새 Project와 전역 catalog를 등록하려면 `project.admin` 및
+`all_projects` 범위의 관리용 서비스 계정이 필요하다. Bundle 외부의 exact-version 참조는
+`external_dependencies`에 표시되며, 서버에 존재하지 않으면 plan이 conflict를 반환한다.
+
+동일한 identity와 동일한 내용은 `unchanged`로 재적용할 수 있다. 동일한 Project key 또는
+`key@version`에 다른 내용이 있으면 기존 값을 덮어쓰지 않고 실패하므로 version을 올려야 한다.
+`apply` 도중 네트워크가 끊기면 같은 파일로 다시 `plan`한 뒤 `apply`하여 수렴시킨다.
 
 ## Quality checks
 

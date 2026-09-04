@@ -11,6 +11,15 @@ import typer
 
 from jb_orchestrator import __version__
 from jb_orchestrator.application import SecurityService
+from jb_orchestrator.cli.bundles import (
+    BundleError,
+    ControlPlaneBundleClient,
+    OrchestrationBundle,
+    apply_bundle,
+    load_bundle,
+    plan_bundle,
+    validate_bundle,
+)
 from jb_orchestrator.config import get_settings
 from jb_orchestrator.infrastructure.database import SqlAlchemyUnitOfWork, create_session_factory
 from jb_orchestrator.security import ApiPermission
@@ -28,6 +37,7 @@ skill_app = typer.Typer(no_args_is_help=True, help="Inspect and prepare skills."
 auth_app = typer.Typer(no_args_is_help=True, help="Manage API service accounts.")
 mcp_app = typer.Typer(no_args_is_help=True, help="Configure and verify the MCP adapter.")
 system_app = typer.Typer(no_args_is_help=True, help="Verify complete local system boundaries.")
+bundle_app = typer.Typer(no_args_is_help=True, help="Validate and apply orchestration bundles.")
 app.add_typer(project_app, name="project")
 app.add_typer(request_app, name="request")
 app.add_typer(run_app, name="run")
@@ -35,6 +45,7 @@ app.add_typer(skill_app, name="skill")
 app.add_typer(auth_app, name="auth")
 app.add_typer(mcp_app, name="mcp")
 app.add_typer(system_app, name="system")
+app.add_typer(bundle_app, name="bundle")
 
 
 class McpCommandError(RuntimeError):
@@ -65,6 +76,54 @@ def call_api(method: str, path: str, *, payload: dict[str, Any] | None = None) -
 
 def echo_json(payload: dict[str, Any]) -> None:
     typer.echo(json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False))
+
+
+def _load_bundle_or_exit(path: Path) -> OrchestrationBundle:
+    try:
+        return load_bundle(path.resolve())
+    except BundleError as exc:
+        typer.echo(f"bundle failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+
+@bundle_app.command("validate")
+def validate_bundle_file(path: Path) -> None:
+    """Validate bundle schema and local orchestration contracts without API access."""
+
+    try:
+        result = validate_bundle(_load_bundle_or_exit(path))
+    except BundleError as exc:
+        typer.echo(f"bundle failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    echo_json(result.as_dict())
+
+
+@bundle_app.command("plan")
+def plan_bundle_file(path: Path) -> None:
+    """Compare a valid bundle with the configured Control Plane without writing."""
+
+    try:
+        plan = plan_bundle(_load_bundle_or_exit(path), ControlPlaneBundleClient())
+    except BundleError as exc:
+        typer.echo(f"bundle failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    echo_json(plan.as_dict())
+    if plan.has_conflicts:
+        raise typer.Exit(code=2)
+
+
+@bundle_app.command("apply")
+def apply_bundle_file(path: Path) -> None:
+    """Apply a conflict-free bundle through the configured Control Plane API."""
+
+    try:
+        plan = apply_bundle(_load_bundle_or_exit(path), ControlPlaneBundleClient())
+    except BundleError as exc:
+        typer.echo(f"bundle failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    payload = plan.as_dict()
+    payload["status"] = "applied"
+    echo_json(payload)
 
 
 @app.command()
