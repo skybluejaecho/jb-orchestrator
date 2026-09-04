@@ -42,6 +42,38 @@ jobs:
       - name: Run mypy
         run: uv run mypy
 
+  jarvis:
+    name: Jarvis
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/jarvis
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.13.0
+          cache: npm
+          cache-dependency-path: apps/jarvis/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Check formatting
+        run: npm run format:check
+
+      - name: Run lint
+        run: npm run lint
+
+      - name: Run contract tests
+        run: npm test
+
+      - name: Build Jarvis
+        run: npm run build
+
   test:
     name: Test
     runs-on: ubuntu-latest
