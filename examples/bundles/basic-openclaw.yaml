@@ -1,0 +1,64 @@
+schema_version: 1
+
+project:
+  key: example-project
+  name: Example Project
+  repository_url: https://github.com/example/example-project.git
+  default_branch: main
+
+skills: []
+models: []
+
+phase_packs:
+  - key: implementation
+    version: 1
+    name: Implementation
+    description: Implement one bounded change and return structured evidence.
+    instructions: >-
+      Implement the requested change in the assigned repository. Return the changed files,
+      verification commands, and any remaining risks.
+    output_contract:
+      type: object
+      required: [summary, changed_files, checks]
+      properties:
+        summary:
+          type: string
+        changed_files:
+          type: array
+          items:
+            type: string
+        checks:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+
+workflows:
+  - key: basic-delivery
+    version: 1
+    entry_node: implement
+    nodes:
+      - key: implement
+        kind: task
+        executor_key: openclaw
+        phase_pack:
+          key: implementation
+          version: 1
+      - key: done
+        kind: terminal
+        terminal_status: succeeded
+      - key: failed
+        kind: terminal
+        terminal_status: failed
+    edges:
+      - source: implement
+        outcome: success
+        target: done
+      - source: implement
+        outcome: failure
+        target: failed
+
+binding:
+  project_key: example-project
+  definition_key: basic-delivery
+  definition_version: 1
