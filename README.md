@@ -310,6 +310,15 @@ ORCH-037 adds declarative orchestration bundles:
 - conflict-free ordered application through existing authenticated APIs
 - retry-safe convergence without storing credentials in the bundle
 
+ORCH-038 adds a composable starter kit:
+
+- one non-overwriting `jb bundle init` command backed by packaged template assets
+- independently versioned planning, implementation, verification, repair, and synthesis phases
+- verified local `SKILL.md` packages including examples that combine multiple skills
+- planning-only, bounded repair-loop, and parallel fork/join workflow compositions
+- structured OpenClaw terminal output promoted to contract-validated phase artifacts
+- original provider terminal results retained in the external execution ledger
+
 ## Prerequisites
 
 - Python 3.12
@@ -515,6 +524,20 @@ uv run jb bundle apply examples/bundles/basic-openclaw.yaml
 동일한 identity와 동일한 내용은 `unchanged`로 재적용할 수 있다. 동일한 Project key 또는
 `key@version`에 다른 내용이 있으면 기존 값을 덮어쓰지 않고 실패하므로 version을 올려야 한다.
 `apply` 도중 네트워크가 끊기면 같은 파일로 다시 `plan`한 뒤 `apply`하여 수렴시킨다.
+
+새 구성을 처음 작성할 때는 Starter Kit을 기존 경로를 덮어쓰지 않는 새 디렉터리에 생성한다.
+
+```powershell
+uv run jb bundle init jb-orchestration
+Set-Location jb-orchestration
+$env:JB_SKILL_LOCAL_ROOT = (Resolve-Path skills)
+uv run jb bundle validate orchestrator.yaml
+```
+
+Starter Kit에는 기획만 실행하는 구성, bounded repair loop를 포함한 표준 전달 구성, 두 검증을
+동시에 수행하는 fork/join 구성이 함께 들어 있다. 이들은 선택 가능한 예제이며 실행 순서를
+강제하는 내장 lifecycle이 아니다. `apply` 전에 Project URL, 기본 Workflow binding과 OpenClaw
+agent 설정을 실제 환경에 맞게 수정한다.
 
 ## Quality checks
 
