@@ -35,6 +35,12 @@ Sites 배포는 별도 사용자 인증 계층을 추가하기 전에는 허용�
 ## Checks
 
 ```powershell
+npm run format:check
 npm run lint
+npm test
 npm run build
 ```
+
+계약 테스트는 Control Plane을 실제로 실행하지 않고 server proxy의 인증 header, 오류 전달,
+dispatch payload와 멱등 재시도 규칙을 검증한다. 동일한 검사는 GitHub Actions의 `Jarvis`
+job에서 모든 `develop` 및 `main` PR과 push에 실행된다.
