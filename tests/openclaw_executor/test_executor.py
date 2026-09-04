@@ -115,6 +115,30 @@ async def test_executor_persists_run_and_normalizes_terminal_result() -> None:
     assert "Phase input contract" in bridge.starts[0]["message"]
     assert '"verdict"' in bridge.starts[0]["message"]
     assert bridge.waits == [("openclaw-run-1", 300_000)]
+    assert result.output["provider"] == "openclaw"
+
+
+async def test_executor_promotes_structured_terminal_output_to_phase_artifact() -> None:
+    store = MemoryStore()
+    bridge = FakeBridge()
+    bridge.terminal["output"] = '{"verdict":"approved","findings":[]}'
+    executor = OpenClawExecutor(ExternalExecutionService(lambda: MemoryUnitOfWork(store)), bridge)
+
+    result = await executor.execute(task_claim())
+
+    assert result.output == {"verdict": "approved", "findings": []}
+    assert "Return the final phase result as one JSON object" in bridge.starts[0]["message"]
+
+
+async def test_executor_accepts_object_terminal_output() -> None:
+    store = MemoryStore()
+    bridge = FakeBridge()
+    bridge.terminal["output"] = {"verdict": "approved", "findings": []}
+    executor = OpenClawExecutor(ExternalExecutionService(lambda: MemoryUnitOfWork(store)), bridge)
+
+    result = await executor.execute(task_claim())
+
+    assert result.output == {"verdict": "approved", "findings": []}
 
 
 async def test_executor_returns_persisted_terminal_result_without_duplicate_start() -> None:
