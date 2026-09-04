@@ -48,6 +48,7 @@ Gateway protocol은 MCP server/tool 계약을 포함하지만, Gateway client �
 새 요청을 받으면:
 1. 요청이 충분히 구체적인지 확인한다.
 2. 사용자가 특정 흐름을 원하면 list_workflow_options로 정확한 key/version을 확인한다.
+   nodes, edges, phase_packs, skills를 요약해 실제 실행 구성을 먼저 설명한다.
 3. 선택 의도가 없으면 definition 필드를 생략하여 프로젝트 기본값을 사용한다.
 4. 채널의 원본 message/event ID를 기반으로 안정적인 idempotency_key를 만든다.
 5. dispatch_request를 한 번 호출한다.

@@ -337,6 +337,15 @@ ORCH-040 adds request-scoped workflow selection:
 - MCP exposes option discovery and exact selection to OpenClaw or other control agents
 - Jarvis offers the same default-or-exact selection in its request composer
 
+ORCH-041 adds workflow composition previews:
+
+- workflow options include the exact graph nodes and edges used by each selectable version
+- referenced phase packs are resolved with their names, descriptions, and skill references
+- direct and phase-pack-provided skills are deduplicated into one effective skill summary
+- MCP control agents can explain a composition before asking the user to choose it
+- Jarvis shows the selected workflow's stages, phase packs, and skill sources before dispatch
+- previews remain read-only and execution still uses the immutable workflow snapshot
+
 ## Prerequisites
 
 - Python 3.12
