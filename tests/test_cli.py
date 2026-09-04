@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -8,7 +9,7 @@ from typer.testing import CliRunner
 
 from jb_orchestrator.cli.main import app
 from jb_orchestrator.config import get_settings
-from jb_orchestrator.mcp_server import McpRuntimeProbeResult
+from jb_orchestrator.system_smoke import SystemSmokeResult
 
 runner = CliRunner()
 
@@ -145,15 +146,11 @@ def test_mcp_config_uses_placeholder_instead_of_configured_secret(
 def test_mcp_check_reports_authorized_project(monkeypatch: MonkeyPatch) -> None:
     project_id = "00000000-0000-0000-0000-000000000001"
 
-    class FakeControlPlaneClient:
-        async def get_project(self, requested_id: object) -> dict[str, str]:
-            assert str(requested_id) == project_id
-            return {"id": project_id, "key": "alpha"}
+    async def fake_get_project(requested_id: object) -> dict[str, str]:
+        assert str(requested_id) == project_id
+        return {"id": project_id, "key": "alpha"}
 
-    monkeypatch.setattr(
-        "jb_orchestrator.cli.main.ControlPlaneClient.from_settings",
-        lambda: FakeControlPlaneClient(),
-    )
+    monkeypatch.setattr("jb_orchestrator.cli.main.get_mcp_project", fake_get_project)
 
     result = runner.invoke(app, ["mcp", "check", "--project-id", project_id])
 
@@ -166,15 +163,15 @@ def test_mcp_check_reports_authorized_project(monkeypatch: MonkeyPatch) -> None:
 def test_mcp_smoke_reports_stdio_runtime_inventory(monkeypatch: MonkeyPatch) -> None:
     project_id = "00000000-0000-0000-0000-000000000001"
 
-    async def fake_probe(_: object) -> McpRuntimeProbeResult:
-        return McpRuntimeProbeResult(
+    async def fake_probe(_: object) -> SimpleNamespace:
+        return SimpleNamespace(
             server_name="jb-orchestrator",
             server_version="1.0",
             tools=("dispatch_request", "get_project"),
             project={"id": project_id, "key": "alpha"},
         )
 
-    monkeypatch.setattr("jb_orchestrator.cli.main.probe_runtime", fake_probe)
+    monkeypatch.setattr("jb_orchestrator.cli.main.probe_mcp_runtime", fake_probe)
 
     result = runner.invoke(app, ["mcp", "smoke", "--project-id", project_id])
 
@@ -183,3 +180,25 @@ def test_mcp_smoke_reports_stdio_runtime_inventory(monkeypatch: MonkeyPatch) -> 
     assert payload["status"] == "ready"
     assert payload["server"]["name"] == "jb-orchestrator"
     assert payload["tools"] == ["dispatch_request", "get_project"]
+
+
+def test_system_smoke_reports_process_boundary_result(monkeypatch: MonkeyPatch) -> None:
+    project_id = "00000000-0000-0000-0000-000000000001"
+
+    def fake_smoke(*_: object, **__: object) -> SystemSmokeResult:
+        return SystemSmokeResult(
+            project_id=project_id,
+            completed_execution_id="00000000-0000-0000-0000-000000000002",
+            cancelled_execution_id="00000000-0000-0000-0000-000000000003",
+        )
+
+    monkeypatch.setattr("jb_orchestrator.cli.main.run_system_smoke", fake_smoke)
+
+    result = runner.invoke(app, ["system", "smoke"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ready"
+    assert payload["components"] == ["postgresql", "control-plane", "worker", "jarvis"]
+    assert payload["executions"]["approved"]["status"] == "succeeded"
+    assert payload["executions"]["cancelled"]["status"] == "cancelled"
