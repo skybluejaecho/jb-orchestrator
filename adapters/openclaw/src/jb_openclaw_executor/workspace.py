@@ -1,6 +1,8 @@
 """Fail-closed Git worktree allocation for OpenClaw task nodes."""
 
 import asyncio
+import hashlib
+import os
 import re
 import subprocess
 from dataclasses import dataclass
@@ -24,6 +26,7 @@ class WorkspaceAssignment:
     repository_path: str | None = None
     branch: str | None = None
     base_ref: str | None = None
+    scope: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,7 +146,18 @@ class OpenClawWorkspaceManager:
             repository_path=str(repository),
             branch=branch,
             base_ref=base_commit,
+            scope=self.scope,
         )
+
+    @property
+    def scope(self) -> str | None:
+        if self._workspace_root is None:
+            return None
+        capability_paths = (self._workspace_root, *sorted(self._repository_roots))
+        encoded = "\n".join(os.path.normcase(str(path)) for path in capability_paths).encode(
+            "utf-8"
+        )
+        return f"git-worktree:{hashlib.sha256(encoded).hexdigest()}"
 
     def _review_sync(self, execution: ExternalExecution, merged_into: str) -> WorkspaceReview:
         repository, workspace, branch, base_commit = self._workspace_record(execution)
