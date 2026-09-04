@@ -40,6 +40,19 @@ def test_bundle_validate_command_does_not_require_control_plane(tmp_path: Path) 
     assert json.loads(result.stdout) == {"external_dependencies": [], "status": "valid"}
 
 
+def test_bundle_init_command_creates_starter_without_overwriting(tmp_path: Path) -> None:
+    destination = tmp_path / "starter"
+
+    created = runner.invoke(app, ["bundle", "init", str(destination)])
+    repeated = runner.invoke(app, ["bundle", "init", str(destination)])
+
+    assert created.exit_code == 0
+    assert json.loads(created.stdout)["status"] == "created"
+    assert (destination / "orchestrator.yaml").is_file()
+    assert repeated.exit_code == 1
+    assert "already exists" in repeated.stderr
+
+
 def test_skill_digest_command(tmp_path: Path) -> None:
     skill = tmp_path / "review"
     skill.mkdir()
