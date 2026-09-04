@@ -42,6 +42,9 @@ from jb_orchestrator.infrastructure.database.workflow_repositories import (
     SqlAlchemyWorkflowDefinitionRepository,
     SqlAlchemyWorkflowExecutionRepository,
 )
+from jb_orchestrator.infrastructure.database.workspace_operation_repositories import (
+    SqlAlchemyWorkspaceOperationRepository,
+)
 
 
 class SqlAlchemyUnitOfWork:
@@ -60,6 +63,7 @@ class SqlAlchemyUnitOfWork:
     budget_reservations: SqlAlchemyBudgetReservationRepository
     usage_records: SqlAlchemyUsageRecordRepository
     external_executions: SqlAlchemyExternalExecutionRepository
+    workspace_operations: SqlAlchemyWorkspaceOperationRepository
     workflow_definitions: SqlAlchemyWorkflowDefinitionRepository
     workflow_executions: SqlAlchemyWorkflowExecutionRepository
     project_workflow_bindings: SqlAlchemyProjectWorkflowBindingRepository
@@ -84,6 +88,7 @@ class SqlAlchemyUnitOfWork:
         self.budget_reservations = SqlAlchemyBudgetReservationRepository(self._session)
         self.usage_records = SqlAlchemyUsageRecordRepository(self._session)
         self.external_executions = SqlAlchemyExternalExecutionRepository(self._session)
+        self.workspace_operations = SqlAlchemyWorkspaceOperationRepository(self._session)
         self.workflow_definitions = SqlAlchemyWorkflowDefinitionRepository(self._session)
         self.workflow_executions = SqlAlchemyWorkflowExecutionRepository(self._session)
         self.project_workflow_bindings = SqlAlchemyProjectWorkflowBindingRepository(self._session)

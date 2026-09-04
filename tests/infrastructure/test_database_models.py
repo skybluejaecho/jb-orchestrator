@@ -35,6 +35,7 @@ def test_metadata_creates_initial_domain_schema() -> None:
         "usage_records",
         "workflow_definitions",
         "workflow_executions",
+        "workspace_operations",
     }
     assert {index["name"] for index in inspector.get_indexes("runs")} >= {
         "ix_runs_request_id",

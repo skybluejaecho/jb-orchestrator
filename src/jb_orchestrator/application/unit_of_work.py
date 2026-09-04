@@ -26,6 +26,7 @@ from jb_orchestrator.workflows.repositories import (
     WorkflowDefinitionRepository,
     WorkflowExecutionRepository,
 )
+from jb_orchestrator.workspace_operations import WorkspaceOperationRepository
 
 
 class UnitOfWork(Protocol):
@@ -69,6 +70,9 @@ class UnitOfWork(Protocol):
 
     @property
     def external_executions(self) -> ExternalExecutionRepository: ...
+
+    @property
+    def workspace_operations(self) -> WorkspaceOperationRepository: ...
 
     @property
     def workflow_definitions(self) -> WorkflowDefinitionRepository: ...

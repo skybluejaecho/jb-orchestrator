@@ -41,6 +41,7 @@ class ExternalExecution:
     workspace_repository_path: str | None = None
     workspace_branch: str | None = None
     workspace_base_ref: str | None = None
+    workspace_scope: str | None = None
     workspace_released_at: datetime | None = None
     id: UUID = field(default_factory=uuid4)
     external_run_id: str | None = None

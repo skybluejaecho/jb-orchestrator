@@ -37,6 +37,7 @@ from jb_orchestrator.infrastructure.database.models import (
     UserRequestRecord,
     WorkflowDefinitionRecord,
     WorkflowExecutionRecord,
+    WorkspaceOperationRecord,
 )
 from jb_orchestrator.infrastructure.database.phase_pack_repositories import (
     SqlAlchemyPhasePackRepository,
@@ -59,6 +60,9 @@ from jb_orchestrator.infrastructure.database.workflow_binding_repositories impor
 from jb_orchestrator.infrastructure.database.workflow_repositories import (
     SqlAlchemyWorkflowDefinitionRepository,
     SqlAlchemyWorkflowExecutionRepository,
+)
+from jb_orchestrator.infrastructure.database.workspace_operation_repositories import (
+    SqlAlchemyWorkspaceOperationRepository,
 )
 
 __all__ = [
@@ -94,10 +98,12 @@ __all__ = [
     "SqlAlchemyUserRequestRepository",
     "SqlAlchemyWorkflowDefinitionRepository",
     "SqlAlchemyWorkflowExecutionRepository",
+    "SqlAlchemyWorkspaceOperationRepository",
     "TaskArtifactRecord",
     "UsageRecordRecord",
     "UserRequestRecord",
     "WorkflowDefinitionRecord",
     "WorkflowExecutionRecord",
+    "WorkspaceOperationRecord",
     "create_session_factory",
 ]

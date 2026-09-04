@@ -33,6 +33,7 @@ from jb_orchestrator.infrastructure.database.base import Base
 from jb_orchestrator.model_routing import ModelTier
 from jb_orchestrator.skills import SkillSourceKind
 from jb_orchestrator.workflows.models import NodeExecutionStatus, NodeOutcome, WorkflowStatus
+from jb_orchestrator.workspace_operations import WorkspaceOperationKind, WorkspaceOperationStatus
 
 
 def string_enum(enum_type: type[Any], name: str) -> Enum:
@@ -452,12 +453,50 @@ class ExternalExecutionRecord(Base):
     workspace_repository_path: Mapped[str | None] = mapped_column(String(2048))
     workspace_branch: Mapped[str | None] = mapped_column(String(255))
     workspace_base_ref: Mapped[str | None] = mapped_column(String(255))
+    workspace_scope: Mapped[str | None] = mapped_column(String(128), index=True)
     workspace_released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     external_run_id: Mapped[str | None] = mapped_column(String(255))
     status: Mapped[ExternalExecutionStatus] = mapped_column(
         string_enum(ExternalExecutionStatus, "external_execution_status"), nullable=False
     )
     terminal_result: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    failure_reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class WorkspaceOperationRecord(Base):
+    """Leaseable command for maintenance of an executor-owned workspace."""
+
+    __tablename__ = "workspace_operations"
+    __table_args__ = (
+        UniqueConstraint(
+            "external_execution_id",
+            "idempotency_key",
+            name="uq_workspace_operations_execution_key",
+        ),
+        Index("ix_workspace_operations_claim", "workspace_scope", "status", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    external_execution_id: Mapped[UUID] = mapped_column(
+        ForeignKey("external_executions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    kind: Mapped[WorkspaceOperationKind] = mapped_column(
+        string_enum(WorkspaceOperationKind, "workspace_operation_kind"), nullable=False
+    )
+    target_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    workspace_scope: Mapped[str] = mapped_column(String(128), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    requested_by: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[WorkspaceOperationStatus] = mapped_column(
+        string_enum(WorkspaceOperationStatus, "workspace_operation_status"), nullable=False
+    )
+    worker_id: Mapped[str | None] = mapped_column(String(255))
+    lease_token: Mapped[UUID | None] = mapped_column(Uuid)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     failure_reason: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
