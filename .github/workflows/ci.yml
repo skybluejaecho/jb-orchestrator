@@ -111,3 +111,53 @@ jobs:
 
       - name: Run tests
         run: uv run pytest --cov=jb_orchestrator --cov-report=term-missing
+
+  system-smoke:
+    name: System smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: jb_orchestrator
+          POSTGRES_USER: jb_orchestrator
+          POSTGRES_PASSWORD: jb_orchestrator
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U jb_orchestrator -d jb_orchestrator"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JB_ENVIRONMENT: test
+      JB_DATABASE_URL: postgresql+asyncpg://jb_orchestrator:jb_orchestrator@localhost:5432/jb_orchestrator
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        run: uv sync --extra dev --frozen
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.13.0
+          cache: npm
+          cache-dependency-path: apps/jarvis/package-lock.json
+
+      - name: Install Jarvis dependencies
+        working-directory: apps/jarvis
+        run: npm ci --no-audit --no-fund
+
+      - name: Apply database migrations
+        run: uv run alembic upgrade head
+
+      - name: Run complete local system smoke
+        run: uv run --with-editable tools/system-smoke-executor jb system smoke
