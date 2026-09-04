@@ -120,9 +120,14 @@ async def test_workspace_operation_request_and_replay() -> None:
             json={"kind": "inspect", "target_ref": "develop"},
         )
         listed = await client.get(f"/v1/external-executions/{execution.id}/workspace-operations")
+        invalid_limit = await client.get(
+            f"/v1/external-executions/{execution.id}/workspace-operations",
+            params={"limit": 0},
+        )
 
     assert first.status_code == 202
     assert repeated.status_code == 200
     assert first.json()["id"] == repeated.json()["id"]
     assert first.json()["status"] == "pending"
     assert len(listed.json()) == 1
+    assert invalid_limit.status_code == 422

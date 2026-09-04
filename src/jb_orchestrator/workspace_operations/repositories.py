@@ -17,7 +17,9 @@ class WorkspaceOperationRepository(Protocol):
         self, external_execution_id: UUID, idempotency_key: str
     ) -> WorkspaceOperation | None: ...
 
-    async def list_for_execution(self, external_execution_id: UUID) -> list[WorkspaceOperation]: ...
+    async def list_for_execution(
+        self, external_execution_id: UUID, *, limit: int = 100
+    ) -> list[WorkspaceOperation]: ...
 
     async def claim_next(
         self, *, worker_id: str, workspace_scope: str, lease_seconds: int

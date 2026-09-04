@@ -788,8 +788,9 @@ async def request_workspace_operation(
 async def list_workspace_operations(
     execution_id: UUID,
     service: WorkspaceOperationServiceDependency,
+    limit: int = Query(default=100, ge=1, le=500),
 ) -> list[WorkspaceOperationResponse]:
     return [
         WorkspaceOperationResponse.model_validate(operation)
-        for operation in await service.list_for_execution(execution_id)
+        for operation in await service.list_for_execution(execution_id, limit=limit)
     ]

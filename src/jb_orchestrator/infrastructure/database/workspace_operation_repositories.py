@@ -83,13 +83,16 @@ class SqlAlchemyWorkspaceOperationRepository:
         )
         return workspace_operation_from_record(record) if record is not None else None
 
-    async def list_for_execution(self, external_execution_id: UUID) -> list[WorkspaceOperation]:
+    async def list_for_execution(
+        self, external_execution_id: UUID, *, limit: int = 100
+    ) -> list[WorkspaceOperation]:
         records = await self._session.scalars(
             select(WorkspaceOperationRecord)
             .where(WorkspaceOperationRecord.external_execution_id == external_execution_id)
             .order_by(
                 WorkspaceOperationRecord.created_at.desc(), WorkspaceOperationRecord.id.desc()
             )
+            .limit(limit)
         )
         return [workspace_operation_from_record(record) for record in records]
 

@@ -275,13 +275,15 @@ class MemoryWorkspaceOperationRepository:
             None,
         )
 
-    async def list_for_execution(self, external_execution_id: UUID) -> list[WorkspaceOperation]:
+    async def list_for_execution(
+        self, external_execution_id: UUID, *, limit: int = 100
+    ) -> list[WorkspaceOperation]:
         matches = [
             operation
             for operation in self._store.workspace_operations.values()
             if operation.external_execution_id == external_execution_id
         ]
-        return sorted(matches, key=lambda value: (value.created_at, value.id), reverse=True)
+        return sorted(matches, key=lambda value: (value.created_at, value.id), reverse=True)[:limit]
 
     async def claim_next(
         self, *, worker_id: str, workspace_scope: str, lease_seconds: int

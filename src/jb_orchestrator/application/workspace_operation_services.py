@@ -66,10 +66,14 @@ class WorkspaceOperationService:
             await unit_of_work.commit()
             return operation, False
 
-    async def list_for_execution(self, external_execution_id: UUID) -> list[WorkspaceOperation]:
+    async def list_for_execution(
+        self, external_execution_id: UUID, *, limit: int = 100
+    ) -> list[WorkspaceOperation]:
         async with self._unit_of_work_factory() as unit_of_work:
             await self._execution(unit_of_work, external_execution_id)
-            return await unit_of_work.workspace_operations.list_for_execution(external_execution_id)
+            return await unit_of_work.workspace_operations.list_for_execution(
+                external_execution_id, limit=limit
+            )
 
     async def claim_next(
         self, *, worker_id: str, workspace_scope: str, lease_seconds: int = 300
