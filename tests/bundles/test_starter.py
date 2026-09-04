@@ -34,6 +34,18 @@ def test_starter_kit_contains_valid_bundle_and_verified_skills(tmp_path: Path) -
         and edge.target == "implement"
         for edge in standard.edges
     )
+    assert {
+        (
+            edge.target,
+            edge.condition.path if edge.condition is not None else None,
+            edge.condition.equals if edge.condition is not None else None,
+        )
+        for edge in standard.edges
+        if edge.source == "verify" and edge.outcome is NodeOutcome.SUCCESS
+    } == {
+        ("review", "/verdict", "approve"),
+        ("repair", "/verdict", "changes_requested"),
+    }
     parallel = next(value for value in bundle.workflows if value.key == "parallel-verification")
     assert {node.kind for node in parallel.nodes} >= {NodeKind.FORK, NodeKind.JOIN}
     split_targets = {edge.target for edge in parallel.edges if edge.source == "split-reviews"}

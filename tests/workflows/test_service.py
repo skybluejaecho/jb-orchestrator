@@ -25,6 +25,7 @@ from jb_orchestrator.phase_packs import (
 from jb_orchestrator.skills import SkillDefinition, SkillReference, SkillSourceKind
 from jb_orchestrator.worker import TaskResult
 from jb_orchestrator.workflows import (
+    ArtifactCondition,
     EdgeDefinition,
     NodeDefinition,
     NodeExecutionStatus,
@@ -491,6 +492,84 @@ async def test_invalid_phase_output_routes_to_repair_with_structured_artifact() 
     assert repair.node_key == "repair"
     assert repair.context is not None
     assert repair.context.upstream_artifacts[0] == artifact
+
+
+async def test_valid_phase_artifact_routes_by_declared_condition() -> None:
+    store = MemoryStore()
+    run = store_run_context(store)
+
+    def unit_of_work_factory() -> MemoryUnitOfWork:
+        return MemoryUnitOfWork(store)
+
+    phase_pack = await PhasePackCatalogService(unit_of_work_factory).register(
+        PhasePackDefinition(
+            key="semantic-verification",
+            version=1,
+            name="Semantic Verification",
+            description="Return a machine-routable verdict.",
+            instructions="Verify the implementation.",
+            output_contract={
+                "type": "object",
+                "required": ["verdict"],
+                "properties": {
+                    "verdict": {"enum": ["approve", "changes_requested"]},
+                },
+                "additionalProperties": False,
+            },
+        )
+    )
+    definition = WorkflowDefinition(
+        key="semantic-repair",
+        version=1,
+        entry_node="verify",
+        nodes=(
+            NodeDefinition(
+                key="verify",
+                kind=NodeKind.TASK,
+                executor_key="fake",
+                phase_pack=phase_pack.reference,
+            ),
+            NodeDefinition(key="repair", kind=NodeKind.TASK, executor_key="fake"),
+            NodeDefinition(
+                key="done", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.SUCCEEDED
+            ),
+        ),
+        edges=(
+            EdgeDefinition(
+                source="verify",
+                outcome=NodeOutcome.SUCCESS,
+                target="done",
+                condition=ArtifactCondition(path="/verdict", equals="approve"),
+            ),
+            EdgeDefinition(
+                source="verify",
+                outcome=NodeOutcome.SUCCESS,
+                target="repair",
+                condition=ArtifactCondition(path="/verdict", equals="changes_requested"),
+            ),
+            EdgeDefinition(source="repair", outcome=NodeOutcome.SUCCESS, target="done"),
+        ),
+    )
+    workflow_service = WorkflowService(unit_of_work_factory)
+    dispatch = TaskDispatchService(unit_of_work_factory)
+    await workflow_service.register_definition(definition)
+    await workflow_service.start(run.id, definition.key)
+    verification = await dispatch.claim_next("verifier", {"fake"})
+    assert verification is not None
+
+    routed = await dispatch.complete(
+        verification,
+        TaskResult(
+            outcome=NodeOutcome.SUCCESS,
+            output={"verdict": "changes_requested"},
+        ),
+    )
+
+    assert routed.status is WorkflowStatus.RUNNING
+    assert routed.nodes["repair"].status is NodeExecutionStatus.READY
+    assert store.artifacts[-1].outcome is NodeOutcome.SUCCESS
+    assert store.artifacts[-1].content == {"verdict": "changes_requested"}
+    assert store.events[-1].payload["output_contract_rejected"] is False
 
 
 async def test_direct_workflow_completion_enforces_phase_output_contract() -> None:

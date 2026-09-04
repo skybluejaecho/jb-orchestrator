@@ -319,6 +319,15 @@ ORCH-038 adds a composable starter kit:
 - structured OpenClaw terminal output promoted to contract-validated phase artifacts
 - original provider terminal results retained in the external execution ledger
 
+ORCH-039 adds deterministic artifact-conditional routing:
+
+- task edges may match a contract-validated artifact value through an RFC 6901 JSON Pointer
+- conditional edges for one outcome share a path and use distinct scalar values
+- an optional unconditional edge provides an explicit default route
+- absent matches without a default fail the workflow instead of guessing a destination
+- conditions remain pinned in workflow snapshots and round-trip through REST and bundles
+- the starter delivery workflow routes `approve` to human review and `changes_requested` to repair
+
 ## Prerequisites
 
 - Python 3.12
@@ -538,6 +547,25 @@ Starter Kit에는 기획만 실행하는 구성, bounded repair loop를 포함�
 동시에 수행하는 fork/join 구성이 함께 들어 있다. 이들은 선택 가능한 예제이며 실행 순서를
 강제하는 내장 lifecycle이 아니다. `apply` 전에 Project URL, 기본 Workflow binding과 OpenClaw
 agent 설정을 실제 환경에 맞게 수정한다.
+
+Task 결과의 구조화된 값으로 다음 노드를 선택하려면 같은 outcome에 조건 간선을 선언한다.
+조건은 출력 계약 검증이 끝난 Artifact에 적용된다.
+
+```yaml
+edges:
+  - source: verify
+    outcome: success
+    target: review
+    condition: {path: /verdict, equals: approve}
+  - source: verify
+    outcome: success
+    target: repair
+    condition: {path: /verdict, equals: changes_requested}
+```
+
+한 source/outcome의 조건들은 동일한 JSON Pointer 경로와 서로 다른 scalar 값을 사용해야 한다.
+조건 없는 간선을 하나 추가하면 일치하지 않을 때의 default가 된다. default도 일치 조건도
+없으면 Workflow는 재현 가능한 실패로 종료하며 임의의 경로를 선택하지 않는다.
 
 ## Quality checks
 

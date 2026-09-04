@@ -14,6 +14,7 @@ from jb_orchestrator.phase_packs import (
     PhasePackReference,
 )
 from jb_orchestrator.workflows import (
+    ArtifactCondition,
     EdgeDefinition,
     NodeDefinition,
     NodeInputMapping,
@@ -67,7 +68,12 @@ def test_definition_and_snapshot_json_round_trip() -> None:
             ),
         ),
         edges=(
-            EdgeDefinition(source="task", outcome=NodeOutcome.SUCCESS, target="done"),
+            EdgeDefinition(
+                source="task",
+                outcome=NodeOutcome.SUCCESS,
+                target="done",
+                condition=ArtifactCondition(path="/summary", equals="complete"),
+            ),
             EdgeDefinition(source="prepare", outcome=NodeOutcome.SUCCESS, target="task"),
         ),
     )

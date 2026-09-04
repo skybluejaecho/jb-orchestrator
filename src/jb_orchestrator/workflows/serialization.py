@@ -15,6 +15,7 @@ from jb_orchestrator.phase_packs.serialization import phase_pack_from_dict, phas
 from jb_orchestrator.skills import SkillReference
 from jb_orchestrator.skills.serialization import skill_from_dict, skill_to_dict
 from jb_orchestrator.workflows.models import (
+    ArtifactCondition,
     EdgeDefinition,
     NodeDefinition,
     NodeInputMapping,
@@ -91,15 +92,31 @@ def node_from_dict(data: dict[str, Any]) -> NodeDefinition:
     )
 
 
-def edge_to_dict(edge: EdgeDefinition) -> dict[str, str]:
-    return {"source": edge.source, "outcome": edge.outcome.value, "target": edge.target}
+def edge_to_dict(edge: EdgeDefinition) -> dict[str, Any]:
+    value: dict[str, Any] = {
+        "source": edge.source,
+        "outcome": edge.outcome.value,
+        "target": edge.target,
+    }
+    if edge.condition is not None:
+        value["condition"] = {
+            "path": edge.condition.path,
+            "equals": edge.condition.equals,
+        }
+    return value
 
 
 def edge_from_dict(data: dict[str, Any]) -> EdgeDefinition:
+    condition = data.get("condition")
     return EdgeDefinition(
         source=str(data["source"]),
         outcome=NodeOutcome(str(data["outcome"])),
         target=str(data["target"]),
+        condition=(
+            ArtifactCondition(path=str(condition["path"]), equals=condition.get("equals"))
+            if isinstance(condition, dict)
+            else None
+        ),
     )
 
 

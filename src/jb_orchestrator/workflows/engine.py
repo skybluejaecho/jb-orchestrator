@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 
 from jb_orchestrator.workflows.exceptions import WorkflowExecutionError
 from jb_orchestrator.workflows.models import (
+    EdgeDefinition,
     NodeExecution,
     NodeExecutionStatus,
     NodeKind,
@@ -108,7 +109,7 @@ class WorkflowEngine:
         node.updated_at = changed_at
         self._clear_lease(node)
         self._touch(execution, changed_at)
-        self._route(execution, node_key, outcome, changed_at)
+        self._route(execution, node_key, outcome, changed_at, output=output)
 
     def fail_task(
         self,
@@ -205,15 +206,59 @@ class WorkflowEngine:
         source: str,
         outcome: NodeOutcome,
         changed_at: datetime,
+        *,
+        output: dict[str, Any] | None = None,
     ) -> None:
-        targets = execution.snapshot.targets(source, outcome)
+        edges = execution.snapshot.route_edges(source, outcome)
+        targets = self._select_targets(edges, output)
         if not targets:
-            self._fail(execution, f"no edge for {source}:{outcome}", changed_at)
+            reason = (
+                f"no matching edge for {source}:{outcome}"
+                if edges
+                else f"no edge for {source}:{outcome}"
+            )
+            self._fail(execution, reason, changed_at)
             return
         for target in targets:
             self._activate(execution, target, changed_at)
             if execution.is_terminal:
                 return
+
+    @classmethod
+    def _select_targets(
+        cls,
+        edges: tuple[EdgeDefinition, ...],
+        output: dict[str, Any] | None,
+    ) -> tuple[str, ...]:
+        conditional = [edge for edge in edges if edge.condition is not None]
+        if not conditional:
+            return tuple(sorted(edge.target for edge in edges))
+        for edge in conditional:
+            condition = edge.condition
+            if condition is not None:
+                found, value = cls._json_pointer(output or {}, condition.path)
+                if found and type(value) is type(condition.equals) and value == condition.equals:
+                    return (edge.target,)
+        default = next((edge for edge in edges if edge.condition is None), None)
+        return (default.target,) if default is not None else ()
+
+    @staticmethod
+    def _json_pointer(document: dict[str, Any], pointer: str) -> tuple[bool, Any]:
+        value: Any = document
+        for token in pointer.split("/")[1:]:
+            key = token.replace("~1", "/").replace("~0", "~")
+            if isinstance(value, dict) and key in value:
+                value = value[key]
+                continue
+            if isinstance(value, list) and (
+                key == "0" or (key and key[0] != "0" and key.isascii() and key.isdigit())
+            ):
+                index = int(key)
+                if index < len(value):
+                    value = value[index]
+                    continue
+            return False, None
+        return True, value
 
     def _activate(self, execution: WorkflowExecution, node_key: str, changed_at: datetime) -> None:
         node = self._node_execution(execution, node_key)

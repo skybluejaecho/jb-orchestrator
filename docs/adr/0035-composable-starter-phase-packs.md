@@ -2,7 +2,7 @@
 
 ## 상태
 
-승인됨
+부분 대체됨 (ADR 0036)
 
 ## 배경
 
@@ -37,3 +37,9 @@ terminal envelope 안에 있어, 그 전체를 Artifact로 사용하면 Phase Pa
 사용자는 검증된 예제를 즉시 복사하면서도 고정된 lifecycle에 종속되지 않는다. Starter Kit은
 자동 적용하지 않으며 Project, OpenClaw agent 설정과 로컬 Skill root를 검토한 뒤 기존
 `validate`, `plan`, `apply` 순서로 적용한다. 의미 기반 자동 분기는 별도 정책 기능으로 남긴다.
+
+## 후속 결정
+
+ADR 0036은 마지막 문장의 후속 범위를 구현했다. `standard-delivery`의 contract-valid verdict는
+이제 Snapshot에 고정된 조건 정책으로 approval 또는 repair에 분기된다. Phase Pack과 Workflow가
+선택 가능한 조립 재료라는 나머지 결정은 유지된다.

@@ -80,6 +80,7 @@ from jb_orchestrator.phase_packs import (
 )
 from jb_orchestrator.skills import SkillDefinition, SkillReference
 from jb_orchestrator.workflows import (
+    ArtifactCondition,
     EdgeDefinition,
     NodeDefinition,
     NodeInputMapping,
@@ -184,7 +185,19 @@ def workflow_definition_from_payload(
             for node in payload.nodes
         ),
         edges=tuple(
-            EdgeDefinition(source=edge.source, outcome=edge.outcome, target=edge.target)
+            EdgeDefinition(
+                source=edge.source,
+                outcome=edge.outcome,
+                target=edge.target,
+                condition=(
+                    ArtifactCondition(
+                        path=edge.condition.path,
+                        equals=edge.condition.equals,
+                    )
+                    if edge.condition is not None
+                    else None
+                ),
+            )
             for edge in payload.edges
         ),
     )
