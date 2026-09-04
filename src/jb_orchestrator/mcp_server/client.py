@@ -66,6 +66,12 @@ class ControlPlaneClient:
             ),
         )
 
+    async def list_workflow_options(self, project_id: UUID) -> JsonObject:
+        return cast(
+            JsonObject,
+            await self._request("GET", f"/v1/projects/{project_id}/workflow-options"),
+        )
+
     async def dispatch_request(
         self,
         project_id: UUID,
@@ -76,7 +82,13 @@ class ControlPlaneClient:
         external_request_id: str | None = None,
         actor_id: str | None = None,
         conversation_id: str | None = None,
+        definition_key: str | None = None,
+        definition_version: int | None = None,
     ) -> JsonObject:
+        if (definition_key is None) != (definition_version is None):
+            raise ControlPlaneError(
+                "workflow override requires definition_key and definition_version"
+            )
         headers = {
             "Idempotency-Key": idempotency_key,
             "X-JB-Ingress-Key": "mcp",
@@ -91,7 +103,18 @@ class ControlPlaneClient:
             await self._request(
                 "POST",
                 f"/v1/projects/{project_id}/dispatches",
-                payload={"prompt": prompt, "title": title},
+                payload={
+                    "prompt": prompt,
+                    "title": title,
+                    "workflow": (
+                        {
+                            "definition_key": definition_key,
+                            "definition_version": definition_version,
+                        }
+                        if definition_key is not None and definition_version is not None
+                        else None
+                    ),
+                },
                 headers=headers,
             ),
         )
