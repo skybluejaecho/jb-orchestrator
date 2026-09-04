@@ -381,6 +381,14 @@ ORCH-045 adds opt-in Git worktree isolation for OpenClaw tasks:
 - workspace path, branch, and base ref are persisted in the external execution ledger and shown in Jarvis
 - completed branches remain available for deliberate review and merge; cleanup is never automatic
 
+ORCH-046 adds a guarded worktree review and release lifecycle:
+
+- `jb-openclaw workspace inspect` reports cleanliness and merge readiness against one local target ref
+- cleanup requires a terminal external run, clean files, an already-merged HEAD, and exact UUID confirmation
+- the linked worktree and exact local branch are removed without fetching, pushing, merging, or opening a PR
+- branch deletion uses an expected-HEAD Git reference update to avoid deleting a concurrently changed ref
+- successful cleanup records a durable release timestamp and event, which Jarvis displays through SSE refresh
+
 ## Prerequisites
 
 - Python 3.12

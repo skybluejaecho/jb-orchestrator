@@ -47,6 +47,7 @@ class OpenClawExecutor:
                 session_key=session_key,
                 agent_id=agent_id,
                 workspace_path=assignment.path,
+                workspace_repository_path=assignment.repository_path,
                 workspace_branch=assignment.branch,
                 workspace_base_ref=assignment.base_ref,
             )

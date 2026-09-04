@@ -1,13 +1,19 @@
 import subprocess
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import pytest
 from jb_openclaw_executor.acceptance import (
     OpenClawAcceptanceError,
+    app,
     local_diagnostics,
     run_acceptance,
 )
+from jb_openclaw_executor.workspace import OpenClawWorkspaceError
+from typer.testing import CliRunner
+
+runner = CliRunner()
 
 
 class FakeBridge:
@@ -134,3 +140,24 @@ def test_local_diagnostics_requires_remote_tls_fingerprint(
                 "OPENCLAW_GATEWAY_TOKEN": "secret",
             },
         )
+
+
+def test_workspace_cleanup_requires_exact_execution_confirmation() -> None:
+    execution_id = uuid4()
+
+    result = runner.invoke(
+        app,
+        [
+            "workspace",
+            "cleanup",
+            "--external-execution-id",
+            str(execution_id),
+            "--merged-into",
+            "develop",
+            "--confirm",
+            "different-id",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, OpenClawWorkspaceError)

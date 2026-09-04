@@ -40,6 +40,7 @@ Control Plane으로 요청을 proxy한다. 요청 작성 화면은 프로젝트 
 외부 런타임 영역에는 노드별 executor, agent ID, session key, run ID와 현재 상태가 표시된다.
 표시 값은 OpenClaw 자체 메모리를 추측한 것이 아니라 Worker가 DB에 기록한 실행 매핑이다.
 격리된 Git worktree가 할당된 실행은 생성된 branch, base ref와 로컬 path도 함께 표시한다.
+안전한 cleanup이 완료되면 DB의 release 시각을 반영해 해당 worktree가 정리됐음을 표시한다.
 승인 대기 노드는 승인 또는 반려를 한 번 더 확인한 뒤 처리한다. 진행 중인 실행을 취소하려면
 화면에 표시된 실행 식별 문구를 정확하게 입력해야 한다. Jarvis는 로컬 실행만 지원하며 외부
 네트워크 공개나 Sites 배포는 별도 사용자 인증 계층을 추가하기 전에는 허용하지 않는다.

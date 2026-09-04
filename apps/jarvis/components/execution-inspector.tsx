@@ -69,8 +69,10 @@ type ExternalExecution = {
   external_session_key: string;
   external_agent_id: string | null;
   workspace_path: string | null;
+  workspace_repository_path: string | null;
   workspace_branch: string | null;
   workspace_base_ref: string | null;
+  workspace_released_at: string | null;
   external_run_id: string | null;
   status: string;
   failure_reason: string | null;
@@ -293,6 +295,14 @@ export function ExecutionInspector({
                           {external.executor_key}
                         </span>
                         <StatusBadge status={external.status} />
+                        {external.workspace_released_at && (
+                          <Badge
+                            variant="outline"
+                            className="border-white/10 bg-white/5 text-white/45"
+                          >
+                            worktree 정리됨
+                          </Badge>
+                        )}
                       </div>
                       <dl className="grid gap-2 text-xs sm:grid-cols-[5.5rem_minmax(0,1fr)]">
                         <dt className="text-white/35">에이전트</dt>
