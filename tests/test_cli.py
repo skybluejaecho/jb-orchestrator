@@ -30,6 +30,16 @@ def test_doctor_command() -> None:
     assert payload["database_configured"] is True
 
 
+def test_bundle_validate_command_does_not_require_control_plane(tmp_path: Path) -> None:
+    bundle = tmp_path / "orchestrator.yaml"
+    bundle.write_text("schema_version: 1\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["bundle", "validate", str(bundle)])
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {"external_dependencies": [], "status": "valid"}
+
+
 def test_skill_digest_command(tmp_path: Path) -> None:
     skill = tmp_path / "review"
     skill.mkdir()
