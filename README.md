@@ -356,6 +356,14 @@ ORCH-042 adds request-scoped Skill composition:
 - the augmented node definitions and resolved Skills are pinned in the immutable execution snapshot
 - MCP and Jarvis share the same task-node Skill add-on contract
 
+ORCH-043 adds an explicit OpenClaw deployment acceptance boundary:
+
+- pinned official Gateway protocol and bridge contract tests run as an independent CI job
+- local diagnostics validate Node.js, bridge, credential/device state, and remote TLS pinning
+- operator-invoked live checks prove idempotent replay and same-session continuation
+- exact-run cancellation is available as a separate, usage-incurring opt-in probe
+- diagnostic reports omit prompts, session contents, and credentials
+
 ## Prerequisites
 
 - Python 3.12
