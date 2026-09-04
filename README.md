@@ -245,6 +245,14 @@ ORCH-029 verifies and operationalizes the MCP connection:
 - one-command API token and project-scope diagnostics
 - concrete OpenClaw Control Agent role and instruction template
 
+ORCH-030 validates the deployable stdio process boundary:
+
+- real child-process launch of the installed jb-mcp module
+- MCP initialization and tool inventory over operating-system stdio pipes
+- authenticated project lookup through a live local HTTP socket
+- bounded readiness timeout with child-process cleanup
+- one `jb mcp smoke` command to run before host registration
+
 ## Prerequisites
 
 - Python 3.12
@@ -318,11 +326,14 @@ MCP 서버는 `JB_API_TOKEN`이 없으면 시작하지 않습니다.
 ```powershell
 uv run jb mcp check --project-id <project-uuid>
 uv run jb mcp config --project-path <repository-path>
+uv run jb mcp smoke --project-id <project-uuid>
 ```
 
 첫 명령은 현재 token의 API 연결 및 프로젝트 권한을 확인합니다. 두 번째 명령은 실제 token을
-노출하지 않고 범용 stdio MCP host 설정을 출력합니다. OpenClaw 역할 분리와 Control Agent
-지시문은 `docs/openclaw-control-agent.md`에 정리되어 있습니다.
+노출하지 않고 범용 stdio MCP host 설정을 출력합니다. 세 번째 명령은 `jb-mcp`를 실제 별도
+프로세스로 실행해 MCP 초기화, 도구 목록, 인증된 프로젝트 조회를 15초 안에 검증합니다.
+OpenClaw 역할 분리와 Control Agent 지시문은 `docs/openclaw-control-agent.md`에 정리되어
+있습니다.
 
 제공 도구는 `get_project`, `list_project_requests`, `list_project_workflows`,
 `dispatch_request`, `get_request`, `get_run`, `get_workflow_execution`, `list_artifacts`,
