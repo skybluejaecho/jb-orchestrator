@@ -253,6 +253,14 @@ ORCH-030 validates the deployable stdio process boundary:
 - bounded readiness timeout with child-process cleanup
 - one `jb mcp smoke` command to run before host registration
 
+ORCH-031 starts Jarvis as a local observation dashboard:
+
+- responsive project, request, and workflow control-room view
+- server-side bearer proxy keeping service-account tokens out of the browser
+- project SSE reconnection with snapshot refresh after durable events
+- explicit loading, empty, disconnected, and live states
+- read-only first increment independent from OpenClaw or any executor runtime
+
 ## Prerequisites
 
 - Python 3.12
@@ -295,6 +303,16 @@ uv run jb-worker --list-executors
 uv run jb-mcp
 # After installing at least one executor adapter:
 uv run jb-worker --once
+```
+
+Jarvis 로컬 대시보드는 별도 터미널에서 실행합니다. 사용자 인증 계층을 추가하기 전까지
+외부 네트워크에 공개하거나 배포하지 않습니다.
+
+```powershell
+Copy-Item apps/jarvis/.env.example apps/jarvis/.env.local
+Set-Location apps/jarvis
+npm install
+npm run dev
 ```
 
 ### MCP host registration
