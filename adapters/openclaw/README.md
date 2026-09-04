@@ -63,8 +63,29 @@ The source repository must be below an allowed root, `cwd` must be its exact Git
 the worktree root must not contain or be contained by the repository. Git is invoked without a shell.
 
 Completed worktrees and branches are intentionally retained for review, commit, push, or merge. This
-increment does not automatically merge or delete them. Remove reviewed worktrees with an explicit
-operator Git command and never point the worktree root at a repository or broad user directory.
+adapter does not automatically commit, push, or merge them. Inspect one completed assignment against
+a local target ref before cleanup:
+
+```powershell
+uv run jb-openclaw workspace inspect `
+  --external-execution-id <external-execution-uuid> `
+  --merged-into develop
+```
+
+Cleanup requires a terminal provider execution, a clean worktree, and a HEAD already contained in
+the specified local target ref. It also requires repeating the exact external execution UUID:
+
+```powershell
+uv run jb-openclaw workspace cleanup `
+  --external-execution-id <external-execution-uuid> `
+  --merged-into develop `
+  --confirm <external-execution-uuid>
+```
+
+The command removes only that linked worktree and deletes its exact local branch with an expected-HEAD
+guard. It then records `workspace_released_at` in PostgreSQL. It never fetches, pushes, creates a PR,
+or merges. Ensure the local target ref is current before using it as merge evidence, and never point
+the worktree root at a repository or broad user directory.
 
 The selected JB model profile supplies the OpenClaw provider and model override. Verified skill
 entrypoint paths are appended to the task message so the agent receives the exact materialized
