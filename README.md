@@ -364,6 +364,14 @@ ORCH-043 adds an explicit OpenClaw deployment acceptance boundary:
 - exact-run cancellation is available as a separate, usage-incurring opt-in probe
 - diagnostic reports omit prompts, session contents, and credentials
 
+ORCH-044 exposes external agent ownership in Jarvis:
+
+- execution detail loads the matching external execution ledger records from the Control Plane
+- each record identifies its Workflow node, executor, external agent, session, run, and status
+- provider failure reasons remain visible next to the responsible external run
+- empty states distinguish nodes not yet assigned to an external runtime
+- the server-side proxy retains the service-account token and returns no provider terminal payloads
+
 ## Prerequisites
 
 - Python 3.12
