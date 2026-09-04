@@ -13,6 +13,7 @@ from jb_orchestrator import __version__
 from jb_orchestrator.application import SecurityService
 from jb_orchestrator.config import get_settings
 from jb_orchestrator.infrastructure.database import SqlAlchemyUnitOfWork, create_session_factory
+from jb_orchestrator.mcp_server import ControlPlaneClient, ControlPlaneError
 from jb_orchestrator.security import ApiPermission
 from jb_orchestrator.skills.materialization import (
     SkillMaterializationError,
@@ -25,11 +26,13 @@ request_app = typer.Typer(no_args_is_help=True, help="Submit and inspect user re
 run_app = typer.Typer(no_args_is_help=True, help="Inspect and control runs.")
 skill_app = typer.Typer(no_args_is_help=True, help="Inspect and prepare skills.")
 auth_app = typer.Typer(no_args_is_help=True, help="Manage API service accounts.")
+mcp_app = typer.Typer(no_args_is_help=True, help="Configure and verify the MCP adapter.")
 app.add_typer(project_app, name="project")
 app.add_typer(request_app, name="request")
 app.add_typer(run_app, name="run")
 app.add_typer(skill_app, name="skill")
 app.add_typer(auth_app, name="auth")
+app.add_typer(mcp_app, name="mcp")
 
 
 def call_api(method: str, path: str, *, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -128,6 +131,55 @@ def revoke_service_account(account_id: UUID) -> None:
 
     asyncio.run(security_service().revoke(account_id))
     echo_json({"account_id": str(account_id), "revoked": True})
+
+
+@mcp_app.command("config")
+def render_mcp_config(
+    project_path: Annotated[
+        Path | None, typer.Option(help="Absolute path containing the jb-orchestrator project.")
+    ] = None,
+) -> None:
+    """Render a generic stdio MCP host configuration without exposing a token."""
+
+    resolved_path = (project_path or Path.cwd()).resolve()
+    if not (resolved_path / "pyproject.toml").is_file():
+        typer.echo(f"jb-orchestrator pyproject.toml not found below: {resolved_path}", err=True)
+        raise typer.Exit(code=1)
+    settings = get_settings()
+    echo_json(
+        {
+            "mcpServers": {
+                "jb-orchestrator": {
+                    "command": "uv",
+                    "args": ["run", "--project", str(resolved_path), "jb-mcp"],
+                    "env": {
+                        "JB_CONTROL_PLANE_URL": settings.control_plane_url,
+                        "JB_API_TOKEN": "<service-account-token>",
+                    },
+                }
+            }
+        }
+    )
+
+
+@mcp_app.command("check")
+def check_mcp_connection(
+    project_id: Annotated[UUID, typer.Option(help="Authorized project UUID to query.")],
+) -> None:
+    """Verify token, API connectivity, and project scope used by jb-mcp."""
+
+    try:
+        project = asyncio.run(ControlPlaneClient.from_settings().get_project(project_id))
+    except ControlPlaneError as exc:
+        typer.echo(f"MCP control-plane check failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    echo_json(
+        {
+            "authenticated": True,
+            "control_plane_url": get_settings().control_plane_url,
+            "project": project,
+        }
+    )
 
 
 @skill_app.command("digest")
