@@ -50,3 +50,17 @@ npm run build
 dispatch payload, 멱등 재시도 규칙, 실행 상세·산출물 조회, 승인 결정과 실행 취소 계약을
 검증한다. 동일한 검사는 GitHub Actions의 `Jarvis` job에서 모든 `develop` 및 `main` PR과
 push에 실행된다.
+
+## System smoke
+
+실제 PostgreSQL, Control Plane, Worker와 Jarvis process 사이의 계약은 저장소 root에서 다음
+명령으로 검증한다. 반드시 비어 있는 일회용 test database를 사용해야 한다.
+
+```powershell
+$env:JB_ENVIRONMENT = "test"
+uv run alembic upgrade head
+uv run --with-editable tools/system-smoke-executor jb system smoke
+```
+
+smoke executor는 외부 agent runtime을 호출하지 않으며 `JB_ENVIRONMENT=test`가 아니면 시작을
+거부한다.

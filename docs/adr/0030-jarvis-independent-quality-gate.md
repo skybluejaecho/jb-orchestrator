@@ -19,7 +19,7 @@
 - server proxy 테스트는 browser가 bearer token을 덮어쓸 수 없는지 검증한다.
 - dispatch 테스트는 ingress, idempotency key, 정규화된 payload와 upstream 오류를 검증한다.
 - 입력 fingerprint와 idempotency key 선택을 순수 함수로 분리해 재시도 규칙을 검증한다.
-- 실제 DB·API·Worker를 함께 사용하는 system smoke test는 별도 후속 단계로 유지한다.
+- 실제 DB·API·Worker를 함께 사용하는 system smoke test는 ADR 0033의 독립 단계로 유지한다.
 
 ## 결과
 
