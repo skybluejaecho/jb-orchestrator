@@ -389,9 +389,7 @@ async def test_request_skill_addons_are_pinned_without_mutating_definition() -> 
             project,
             "Review this change",
             "skill-addon-1",
-            skill_addons=(
-                NodeSkillAddon(node_key="work", skills=(skill.reference,)),
-            ),
+            skill_addons=(NodeSkillAddon(node_key="work", skills=(skill.reference,)),),
         )
     )
 
@@ -437,8 +435,6 @@ async def test_request_skill_addons_reject_non_task_and_unknown_nodes() -> None:
                     project,
                     "Invalid add-on",
                     f"invalid-{node_key}",
-                    skill_addons=(
-                        NodeSkillAddon(node_key=node_key, skills=(skill.reference,)),
-                    ),
+                    skill_addons=(NodeSkillAddon(node_key=node_key, skills=(skill.reference,)),),
                 )
             )

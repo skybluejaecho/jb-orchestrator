@@ -172,12 +172,8 @@ async def test_project_binding_and_one_call_dispatch_api() -> None:
     assert other_ingress.json()["request"]["origin"]["ingress_key"] == "jarvis"
     assert overridden.status_code == 201
     assert overridden.json()["workflow"]["definition_key"] == "delivery"
-    overridden_execution = store.workflow_executions[
-        UUID(overridden.json()["workflow"]["id"])
-    ]
-    assert [skill.key for skill in overridden_execution.snapshot.skills] == [
-        "security-review"
-    ]
+    overridden_execution = store.workflow_executions[UUID(overridden.json()["workflow"]["id"])]
+    assert [skill.key for skill in overridden_execution.snapshot.skills] == ["security-review"]
     assert store.events[-2].payload["selection_source"] == "request_override"
 
 

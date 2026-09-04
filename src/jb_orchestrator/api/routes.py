@@ -350,8 +350,7 @@ async def list_project_workflow_options(
         ),
         workflows=tuple(_workflow_option_response(value) for value in options.workflows),
         available_skills=tuple(
-            WorkflowSkillSummaryResponse.model_validate(skill)
-            for skill in options.available_skills
+            WorkflowSkillSummaryResponse.model_validate(skill) for skill in options.available_skills
         ),
     )
 

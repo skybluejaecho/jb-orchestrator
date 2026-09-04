@@ -149,14 +149,10 @@ class RequestDispatchService:
                     raise ResourceConflict(
                         f"bound workflow definition is unavailable: {project_id}"
                     )
-                default_workflow = await self._resolve_composition(
-                    unit_of_work, default_definition
-                )
+                default_workflow = await self._resolve_composition(unit_of_work, default_definition)
             compositions_list: list[WorkflowComposition] = []
             for definition in definitions:
-                compositions_list.append(
-                    await self._resolve_composition(unit_of_work, definition)
-                )
+                compositions_list.append(await self._resolve_composition(unit_of_work, definition))
         return ProjectWorkflowOptions(
             default=binding,
             default_workflow=default_workflow,
@@ -183,14 +179,10 @@ class RequestDispatchService:
             phase_packs.append(phase_pack)
 
         skill_references = {
-            skill_reference
-            for node in definition.nodes
-            for skill_reference in node.skills
+            skill_reference for node in definition.nodes for skill_reference in node.skills
         }
         skill_references.update(
-            skill_reference
-            for phase_pack in phase_packs
-            for skill_reference in phase_pack.skills
+            skill_reference for phase_pack in phase_packs for skill_reference in phase_pack.skills
         )
         skills: list[SkillDefinition] = []
         for skill_reference in sorted(
@@ -280,9 +272,7 @@ class RequestDispatchService:
                     )
                 selection_source = "project_binding"
 
-            definition = await self._apply_skill_addons(
-                unit_of_work, definition, normalized_addons
-            )
+            definition = await self._apply_skill_addons(unit_of_work, definition, normalized_addons)
 
             request = UserRequest(
                 project_id=project.id,
@@ -384,8 +374,7 @@ class RequestDispatchService:
                     {
                         "node_key": addon.node_key,
                         "skills": [
-                            {"key": skill.key, "version": skill.version}
-                            for skill in addon.skills
+                            {"key": skill.key, "version": skill.version} for skill in addon.skills
                         ],
                     }
                     for addon in skill_addons
@@ -429,9 +418,7 @@ class RequestDispatchService:
             if node is None:
                 raise ResourceConflict(f"request skill add-on node not found: {node_key}")
             if node.kind.value != "task":
-                raise ResourceConflict(
-                    f"request skill add-ons require a task node: {node_key}"
-                )
+                raise ResourceConflict(f"request skill add-ons require a task node: {node_key}")
             for skill in skills:
                 if await unit_of_work.skills.get(skill.key, skill.version) is None:
                     raise ResourceNotFound(f"skill not found: {skill.key}@{skill.version}")

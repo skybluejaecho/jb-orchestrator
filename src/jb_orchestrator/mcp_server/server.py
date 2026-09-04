@@ -92,9 +92,7 @@ def create_server(client: ControlPlaneClient | None = None) -> FastMCP[None]:
             Field(pattern=r"^[a-z0-9][a-z0-9._-]*$", max_length=128),
         ] = None,
         definition_version: Annotated[int | None, Field(ge=1)] = None,
-        skill_addons: Annotated[
-            list[NodeSkillAddonInput] | None, Field(max_length=64)
-        ] = None,
+        skill_addons: Annotated[list[NodeSkillAddonInput] | None, Field(max_length=64)] = None,
     ) -> dict[str, Any]:
         """Start a workflow with optional exact task-node Skill add-ons; reuse key on retry."""
 
