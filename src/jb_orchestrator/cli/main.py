@@ -13,12 +13,12 @@ from jb_orchestrator import __version__
 from jb_orchestrator.application import SecurityService
 from jb_orchestrator.config import get_settings
 from jb_orchestrator.infrastructure.database import SqlAlchemyUnitOfWork, create_session_factory
-from jb_orchestrator.mcp_server import ControlPlaneClient, ControlPlaneError, probe_runtime
 from jb_orchestrator.security import ApiPermission
 from jb_orchestrator.skills.materialization import (
     SkillMaterializationError,
     compute_directory_digest,
 )
+from jb_orchestrator.system_smoke import SystemSmokeError, run_system_smoke
 
 app = typer.Typer(no_args_is_help=True, help="Administer jb-orchestrator.")
 project_app = typer.Typer(no_args_is_help=True, help="Manage registered projects.")
@@ -27,12 +27,18 @@ run_app = typer.Typer(no_args_is_help=True, help="Inspect and control runs.")
 skill_app = typer.Typer(no_args_is_help=True, help="Inspect and prepare skills.")
 auth_app = typer.Typer(no_args_is_help=True, help="Manage API service accounts.")
 mcp_app = typer.Typer(no_args_is_help=True, help="Configure and verify the MCP adapter.")
+system_app = typer.Typer(no_args_is_help=True, help="Verify complete local system boundaries.")
 app.add_typer(project_app, name="project")
 app.add_typer(request_app, name="request")
 app.add_typer(run_app, name="run")
 app.add_typer(skill_app, name="skill")
 app.add_typer(auth_app, name="auth")
 app.add_typer(mcp_app, name="mcp")
+app.add_typer(system_app, name="system")
+
+
+class McpCommandError(RuntimeError):
+    """An MCP-specific CLI operation failed."""
 
 
 def call_api(method: str, path: str, *, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -89,6 +95,28 @@ def doctor() -> None:
 def security_service() -> SecurityService:
     session_factory = create_session_factory()
     return SecurityService(lambda: SqlAlchemyUnitOfWork(session_factory))
+
+
+async def get_mcp_project(project_id: UUID) -> dict[str, Any]:
+    """Load the MCP client only for the command that requires it."""
+
+    from jb_orchestrator.mcp_server import ControlPlaneClient, ControlPlaneError
+
+    try:
+        return await ControlPlaneClient.from_settings().get_project(project_id)
+    except ControlPlaneError as exc:
+        raise McpCommandError(str(exc)) from exc
+
+
+async def probe_mcp_runtime(project_id: UUID) -> Any:
+    """Load the MCP protocol client only for the command that requires it."""
+
+    from jb_orchestrator.mcp_server import ControlPlaneError, probe_runtime
+
+    try:
+        return await probe_runtime(project_id)
+    except ControlPlaneError as exc:
+        raise McpCommandError(str(exc)) from exc
 
 
 @auth_app.command("issue")
@@ -169,8 +197,8 @@ def check_mcp_connection(
     """Verify token, API connectivity, and project scope used by jb-mcp."""
 
     try:
-        project = asyncio.run(ControlPlaneClient.from_settings().get_project(project_id))
-    except ControlPlaneError as exc:
+        project = asyncio.run(get_mcp_project(project_id))
+    except McpCommandError as exc:
         typer.echo(f"MCP control-plane check failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     echo_json(
@@ -189,8 +217,8 @@ def smoke_test_mcp_runtime(
     """Launch jb-mcp and verify the complete stdio protocol boundary."""
 
     try:
-        result = asyncio.run(probe_runtime(project_id))
-    except ControlPlaneError as exc:
+        result = asyncio.run(probe_mcp_runtime(project_id))
+    except McpCommandError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
     echo_json(
@@ -201,6 +229,32 @@ def smoke_test_mcp_runtime(
             "tools": list(result.tools),
         }
     )
+
+
+@system_app.command("smoke")
+def smoke_test_local_system(
+    project_path: Annotated[
+        Path | None, typer.Option(help="Repository root containing apps/jarvis.")
+    ] = None,
+    api_port: Annotated[int, typer.Option(help="Temporary Control Plane port.")] = 18080,
+    jarvis_port: Annotated[int, typer.Option(help="Temporary Jarvis port.")] = 13000,
+    timeout_seconds: Annotated[
+        float, typer.Option(help="Per-process readiness and transition timeout.")
+    ] = 30.0,
+) -> None:
+    """Exercise PostgreSQL, API, Worker, and Jarvis using disposable test data."""
+
+    try:
+        result = run_system_smoke(
+            (project_path or Path.cwd()).resolve(),
+            api_port=api_port,
+            jarvis_port=jarvis_port,
+            timeout_seconds=timeout_seconds,
+        )
+    except SystemSmokeError as exc:
+        typer.echo(f"system smoke failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    echo_json(result.as_dict())
 
 
 @skill_app.command("digest")

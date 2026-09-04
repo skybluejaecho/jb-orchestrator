@@ -293,6 +293,14 @@ ORCH-035 adds guarded execution cancellation to Jarvis:
 - Control Plane conflict propagation for terminal-state and concurrent-update races
 - detail and overview reconciliation after cancellation and subsequent SSE events
 
+ORCH-036 adds a process-level local system smoke test:
+
+- real PostgreSQL migrations, authenticated Control Plane, Worker, and Jarvis processes
+- deterministic test-only executor installed only for the smoke command
+- end-to-end request dispatch, task artifact, approval, completion, and cancellation checks
+- bounded readiness and transition timeouts with child-process cleanup
+- a dedicated CI job that exercises the complete local deployment boundary
+
 ## Prerequisites
 
 - Python 3.12
@@ -498,6 +506,20 @@ npm run lint
 npm test
 npm run build
 ```
+
+전체 로컬 경계는 반드시 비어 있는 일회용 PostgreSQL test database에서 검증합니다. 다음 명령은
+smoke 전용 executor를 임시 설치하고 Control Plane, Worker와 Jarvis를 실제 별도 process로
+실행합니다.
+
+```powershell
+$env:JB_ENVIRONMENT = "test"
+$env:JB_DATABASE_URL = "postgresql+asyncpg://jb_orchestrator:jb_orchestrator@localhost:5432/jb_orchestrator"
+uv run alembic upgrade head
+uv run --with-editable tools/system-smoke-executor jb system smoke
+```
+
+이 명령은 지정한 database에 고유한 smoke project와 service account를 생성하므로 개발 또는
+운영 database에는 실행하지 않습니다.
 
 ## Branch strategy
 

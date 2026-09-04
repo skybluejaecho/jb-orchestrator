@@ -1,0 +1,15 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "jb-system-smoke-executor"
+version = "0.1.0"
+description = "Test-only deterministic executor for the jb-orchestrator system smoke test."
+requires-python = ">=3.12"
+
+[project.entry-points."jb_orchestrator.executors"]
+system-smoke = "jb_system_smoke_executor:create_executor"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/jb_system_smoke_executor"]
