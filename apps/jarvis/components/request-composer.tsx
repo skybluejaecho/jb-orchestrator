@@ -14,6 +14,10 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  prepareDispatchAttempt,
+  type DispatchAttempt,
+} from '@/lib/dispatch-attempt';
 
 type ProjectSummary = {
   id: string;
@@ -56,10 +60,9 @@ export function RequestComposer({
   const [prompt, setPrompt] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const idempotencyKey = useRef<string | null>(null);
+  const dispatchAttempt = useRef<DispatchAttempt | null>(null);
 
-  const invalidateKey = () => {
-    idempotencyKey.current = null;
+  const clearError = () => {
     setError(null);
   };
 
@@ -67,9 +70,13 @@ export function RequestComposer({
     event.preventDefault();
     if (!project || !prompt.trim() || submitting) return;
 
-    const requestKey =
-      idempotencyKey.current ?? `jarvis-${crypto.randomUUID()}`;
-    idempotencyKey.current = requestKey;
+    const input = {
+      projectId: project.id,
+      title: title.trim() || null,
+      prompt: prompt.trim(),
+    };
+    const attempt = prepareDispatchAttempt(dispatchAttempt.current, input);
+    dispatchAttempt.current = attempt;
     setSubmitting(true);
     setError(null);
     try {
@@ -78,16 +85,12 @@ export function RequestComposer({
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Idempotency-Key': requestKey,
+            'Idempotency-Key': attempt.key,
           },
-          body: JSON.stringify({
-            projectId: project.id,
-            title: title.trim() || null,
-            prompt: prompt.trim(),
-          }),
+          body: JSON.stringify(input),
         }),
       );
-      idempotencyKey.current = null;
+      dispatchAttempt.current = null;
       setTitle('');
       setPrompt('');
       onDispatched(result);
@@ -126,7 +129,7 @@ export function RequestComposer({
               value={title}
               onChange={(event) => {
                 setTitle(event.target.value);
-                invalidateKey();
+                clearError();
               }}
               maxLength={255}
               placeholder="예: 로그인 오류 수정"
@@ -144,7 +147,7 @@ export function RequestComposer({
               value={prompt}
               onChange={(event) => {
                 setPrompt(event.target.value);
-                invalidateKey();
+                clearError();
               }}
               placeholder="완료할 작업, 제약 조건과 기대 결과를 적어주세요."
               className="min-h-20 resize-y border-white/10 bg-black/15 text-white placeholder:text-white/25"
