@@ -14,6 +14,7 @@ from jb_orchestrator.application.request_dispatch_services import (
     DispatchedRequest,
     ProjectWorkflowOptions,
     RequestDispatchService,
+    WorkflowComposition,
 )
 from jb_orchestrator.application.security_services import IssuedServiceAccount, SecurityService
 from jb_orchestrator.application.services import CreatedRequest, OrchestrationService
@@ -40,5 +41,6 @@ __all__ = [
     "SecurityService",
     "SkillCatalogService",
     "TaskDispatchService",
+    "WorkflowComposition",
     "WorkflowService",
 ]

@@ -111,6 +111,15 @@ async def test_project_binding_and_one_call_dispatch_api() -> None:
     assert [(item["key"], item["version"]) for item in options.json()["workflows"]] == [
         ("delivery", 1)
     ]
+    [workflow_option] = options.json()["workflows"]
+    assert options.json()["default_workflow"] == workflow_option
+    assert workflow_option["entry_node"] == "work"
+    assert [node["key"] for node in workflow_option["nodes"]] == ["work", "done"]
+    assert workflow_option["edges"] == [
+        {"source": "work", "outcome": "success", "target": "done", "condition": None}
+    ]
+    assert workflow_option["phase_packs"] == []
+    assert workflow_option["skills"] == []
     assert dispatched.status_code == 201
     assert dispatched.json()["request"]["status"] == "active"
     assert dispatched.json()["request"]["origin"] == {
