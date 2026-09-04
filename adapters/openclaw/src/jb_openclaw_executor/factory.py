@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from jb_openclaw_executor.bridge import OpenClawBridgeClient
 from jb_openclaw_executor.executor import OpenClawExecutor
+from jb_openclaw_executor.workspace import OpenClawWorkspaceManager
 from jb_orchestrator.application.external_execution_services import ExternalExecutionService
 from jb_orchestrator.config import get_settings
 from jb_orchestrator.infrastructure.database import SqlAlchemyUnitOfWork, create_session_factory
@@ -17,6 +18,9 @@ class OpenClawExecutorSettings(BaseSettings):
 
     bridge_path: Path = Path("tools/openclaw-gateway-spike/src/bridge.mjs")
     node_executable: str = "node"
+    workspace_root: Path | None = None
+    repository_roots: tuple[Path, ...] = ()
+    git_executable: str = "git"
 
 
 def create_executor() -> TaskExecutor:
@@ -30,4 +34,9 @@ def create_executor() -> TaskExecutor:
         adapter_settings.bridge_path,
         node_executable=adapter_settings.node_executable,
     )
-    return OpenClawExecutor(service, bridge)
+    workspace = OpenClawWorkspaceManager(
+        workspace_root=adapter_settings.workspace_root,
+        repository_roots=adapter_settings.repository_roots,
+        git_executable=adapter_settings.git_executable,
+    )
+    return OpenClawExecutor(service, bridge, workspace=workspace)

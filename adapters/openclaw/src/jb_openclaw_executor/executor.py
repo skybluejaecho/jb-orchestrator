@@ -4,6 +4,11 @@ import json
 from typing import Any
 
 from jb_openclaw_executor.bridge import OpenClawBridge
+from jb_openclaw_executor.workspace import (
+    OpenClawWorkspaceManager,
+    WorkspaceAssignment,
+    WorkspaceManager,
+)
 from jb_orchestrator.application.external_execution_services import ExternalExecutionService
 from jb_orchestrator.domain.exceptions import InvalidStateTransition
 from jb_orchestrator.external_executions import ExternalExecution, ExternalExecutionStatus
@@ -14,20 +19,43 @@ SUCCESS_STATUSES = frozenset({"ok", "success", "succeeded", "completed"})
 
 
 class OpenClawExecutor:
-    def __init__(self, service: ExternalExecutionService, bridge: OpenClawBridge) -> None:
+    def __init__(
+        self,
+        service: ExternalExecutionService,
+        bridge: OpenClawBridge,
+        *,
+        workspace: WorkspaceManager | None = None,
+    ) -> None:
         self._service = service
         self._bridge = bridge
+        self._workspace = workspace or OpenClawWorkspaceManager(
+            workspace_root=None, repository_roots=()
+        )
 
     async def execute(self, claim: TaskClaim) -> TaskResult:
         agent_id = self._optional_string(claim.configuration, "agent_id")
         session_key = self._optional_string(claim.configuration, "session_key") or (
             f"agent:{agent_id or 'main'}:jb:{claim.execution_id}:{claim.node_key}"
         )
-        execution = await self._service.prepare(claim, session_key=session_key, agent_id=agent_id)
+        execution = await self._service.get(claim.idempotency_key)
+        assignment = WorkspaceAssignment(cwd=self._optional_string(claim.configuration, "cwd"))
+        if execution is None or (not execution.is_terminal and execution.external_run_id is None):
+            assignment = await self._workspace.prepare(claim)
+        if execution is None:
+            execution = await self._service.prepare(
+                claim,
+                session_key=session_key,
+                agent_id=agent_id,
+                workspace_path=assignment.path,
+                workspace_branch=assignment.branch,
+                workspace_base_ref=assignment.base_ref,
+            )
         if execution.is_terminal:
             return self._stored_result(execution)
         if execution.external_run_id is None:
-            accepted = await self._bridge.start(self._start_request(claim, execution))
+            accepted = await self._bridge.start(
+                self._start_request(claim, execution, cwd=assignment.cwd)
+            )
             external_run_id = accepted.get("runId")
             if not isinstance(external_run_id, str) or not external_run_id:
                 raise RuntimeError("OpenClaw agent response did not include runId")
@@ -79,7 +107,13 @@ class OpenClawExecutor:
             # A terminal result won a cancellation race while the abort request was in flight.
             return
 
-    def _start_request(self, claim: TaskClaim, execution: ExternalExecution) -> dict[str, Any]:
+    def _start_request(
+        self,
+        claim: TaskClaim,
+        execution: ExternalExecution,
+        *,
+        cwd: str | None,
+    ) -> dict[str, Any]:
         request: dict[str, Any] = {
             "message": self._prompt(claim),
             "sessionKey": execution.external_session_key,
@@ -88,7 +122,7 @@ class OpenClawExecutor:
         }
         optional = {
             "agentId": execution.external_agent_id,
-            "cwd": self._optional_string(claim.configuration, "cwd"),
+            "cwd": cwd,
             "thinking": self._optional_string(claim.configuration, "thinking"),
         }
         request.update({key: value for key, value in optional.items() if value is not None})
