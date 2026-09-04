@@ -261,6 +261,14 @@ ORCH-031 starts Jarvis as a local observation dashboard:
 - explicit loading, empty, disconnected, and live states
 - read-only first increment independent from OpenClaw or any executor runtime
 
+ORCH-032 adds a bounded Jarvis request-ingress flow:
+
+- project-aware request composer using the existing default workflow binding
+- server-side dispatch proxy with a fixed `jarvis` ingress identity
+- retry-stable idempotency keys preventing duplicate execution after response loss
+- scoped `request.dispatch` permission without approval or cancellation authority
+- immediate snapshot refresh while SSE remains the durable update path
+
 ## Prerequisites
 
 - Python 3.12
