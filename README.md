@@ -372,6 +372,15 @@ ORCH-044 exposes external agent ownership in Jarvis:
 - empty states distinguish nodes not yet assigned to an external runtime
 - the server-side proxy retains the service-account token and returns no provider terminal payloads
 
+ORCH-045 adds opt-in Git worktree isolation for OpenClaw tasks:
+
+- mutating parallel nodes can run in deterministic execution/node/visit-specific worktrees
+- retries validate and reuse the same branch and path instead of creating duplicate workspaces
+- repository access is restricted to configured roots and worktrees must live outside repositories
+- explicit base refs keep Git Flow branch origins operator-controlled
+- workspace path, branch, and base ref are persisted in the external execution ledger and shown in Jarvis
+- completed branches remain available for deliberate review and merge; cleanup is never automatic
+
 ## Prerequisites
 
 - Python 3.12
