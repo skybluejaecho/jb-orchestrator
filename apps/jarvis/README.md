@@ -36,10 +36,12 @@ Control Plane으로 요청을 proxy한다. 요청 작성 화면은 프로젝트 
 프로젝트 기본값 자체는 변경되지 않는다. 선택한 Workflow의 노드, Phase Pack, Skill source는
 제출 전에 읽기 전용 구성 미리보기로 표시된다. 등록된 최신 Skill은 task 노드마다 선택적으로
 추가할 수 있으며 해당 요청의 Snapshot에만 고정된다. 요청 제출은 `jarvis` ingress와 멱등성 key를 사용한다.
-실행을 선택하면 노드 상태와 산출물을 조회할 수 있고, 승인 대기 노드는 승인 또는 반려를
-한 번 더 확인한 뒤 처리한다. 진행 중인 실행을 취소하려면 화면에 표시된 실행 식별 문구를
-정확하게 입력해야 한다. Jarvis는 로컬 실행만 지원하며 외부 네트워크 공개나 Sites 배포는
-별도 사용자 인증 계층을 추가하기 전에는 허용하지 않는다.
+실행을 선택하면 노드 상태와 산출물뿐 아니라 Control Plane의 외부 실행 원장도 함께 조회한다.
+외부 런타임 영역에는 노드별 executor, agent ID, session key, run ID와 현재 상태가 표시된다.
+표시 값은 OpenClaw 자체 메모리를 추측한 것이 아니라 Worker가 DB에 기록한 실행 매핑이다.
+승인 대기 노드는 승인 또는 반려를 한 번 더 확인한 뒤 처리한다. 진행 중인 실행을 취소하려면
+화면에 표시된 실행 식별 문구를 정확하게 입력해야 한다. Jarvis는 로컬 실행만 지원하며 외부
+네트워크 공개나 Sites 배포는 별도 사용자 인증 계층을 추가하기 전에는 허용하지 않는다.
 
 ## Checks
 
@@ -51,7 +53,7 @@ npm run build
 ```
 
 계약 테스트는 Control Plane을 실제로 실행하지 않고 server proxy의 인증 header, 오류 전달,
-dispatch payload, 멱등 재시도 규칙, 실행 상세·산출물 조회, 승인 결정과 실행 취소 계약을
+dispatch payload, 멱등 재시도 규칙, 실행 상세·산출물·외부 실행 조회, 승인 결정과 실행 취소 계약을
 검증한다. 동일한 검사는 GitHub Actions의 `Jarvis` job에서 모든 `develop` 및 `main` PR과
 push에 실행된다.
 

@@ -24,11 +24,20 @@ describe('GET /api/execution', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('실행 상세와 산출물을 서버 token으로 함께 조회한다', async () => {
+  it('실행 상세, 산출물과 외부 실행을 서버 token으로 함께 조회한다', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(Response.json({ id: 'execution-1', nodes: [] }))
-      .mockResolvedValueOnce(Response.json([{ id: 'artifact-1' }]));
+      .mockResolvedValueOnce(Response.json([{ id: 'artifact-1' }]))
+      .mockResolvedValueOnce(
+        Response.json([
+          {
+            id: 'external-1',
+            external_agent_id: 'reviewer',
+            external_session_key: 'agent:reviewer:execution-1',
+          },
+        ]),
+      );
     vi.stubGlobal('fetch', fetchMock);
 
     const response = await GET(
@@ -39,11 +48,19 @@ describe('GET /api/execution', () => {
     await expect(response.json()).resolves.toEqual({
       execution: { id: 'execution-1', nodes: [] },
       artifacts: [{ id: 'artifact-1' }],
+      external_executions: [
+        {
+          id: 'external-1',
+          external_agent_id: 'reviewer',
+          external_session_key: 'agent:reviewer:execution-1',
+        },
+      ],
     });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
       'http://control-plane.test/v1/workflow-executions/execution-1',
       'http://control-plane.test/v1/workflow-executions/execution-1/artifacts',
+      'http://control-plane.test/v1/external-executions?workflow_execution_id=execution-1',
     ]);
     for (const [, init] of fetchMock.mock.calls) {
       expect(new Headers(init?.headers).get('Authorization')).toBe(
