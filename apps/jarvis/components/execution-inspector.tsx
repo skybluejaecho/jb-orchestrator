@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import { ExecutionCancellation } from '@/components/execution-cancellation';
 
 type NodeExecution = {
   id: string;
@@ -389,6 +390,15 @@ export function ExecutionInspector({
                 </div>
               )}
             </section>
+
+            <ExecutionCancellation
+              executionId={detail.execution.id}
+              status={detail.execution.status}
+              onCancelled={async () => {
+                await load();
+                onChanged();
+              }}
+            />
           </>
         )}
       </CardContent>
