@@ -269,6 +269,14 @@ ORCH-032 adds a bounded Jarvis request-ingress flow:
 - scoped `request.dispatch` permission without approval or cancellation authority
 - immediate snapshot refresh while SSE remains the durable update path
 
+ORCH-033 makes Jarvis changes independently verifiable:
+
+- Node-based CI job for deterministic install, format, lint, test, and production build
+- server proxy tests proving bearer-token isolation and fail-closed configuration
+- dispatch contract tests covering headers, payload normalization, and upstream errors
+- retry tests proving stable idempotency keys for unchanged inputs
+- local and CI commands backed by the same committed npm lockfile
+
 ## Prerequisites
 
 - Python 3.12
@@ -460,6 +468,17 @@ uv run ruff check .
 uv run ruff format --check .
 uv run mypy
 uv run pytest
+```
+
+Jarvis는 별도 Node 품질 게이트를 사용합니다.
+
+```powershell
+Set-Location apps/jarvis
+npm ci --no-audit --no-fund
+npm run format:check
+npm run lint
+npm test
+npm run build
 ```
 
 ## Branch strategy
