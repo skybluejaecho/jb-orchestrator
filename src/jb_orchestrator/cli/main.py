@@ -13,7 +13,7 @@ from jb_orchestrator import __version__
 from jb_orchestrator.application import SecurityService
 from jb_orchestrator.config import get_settings
 from jb_orchestrator.infrastructure.database import SqlAlchemyUnitOfWork, create_session_factory
-from jb_orchestrator.mcp_server import ControlPlaneClient, ControlPlaneError
+from jb_orchestrator.mcp_server import ControlPlaneClient, ControlPlaneError, probe_runtime
 from jb_orchestrator.security import ApiPermission
 from jb_orchestrator.skills.materialization import (
     SkillMaterializationError,
@@ -178,6 +178,27 @@ def check_mcp_connection(
             "authenticated": True,
             "control_plane_url": get_settings().control_plane_url,
             "project": project,
+        }
+    )
+
+
+@mcp_app.command("smoke")
+def smoke_test_mcp_runtime(
+    project_id: Annotated[UUID, typer.Option(help="Authorized project UUID to query.")],
+) -> None:
+    """Launch jb-mcp and verify the complete stdio protocol boundary."""
+
+    try:
+        result = asyncio.run(probe_runtime(project_id))
+    except ControlPlaneError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    echo_json(
+        {
+            "project": result.project,
+            "server": {"name": result.server_name, "version": result.server_version},
+            "status": "ready",
+            "tools": list(result.tools),
         }
     )
 
