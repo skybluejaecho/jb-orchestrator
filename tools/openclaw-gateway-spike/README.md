@@ -77,3 +77,7 @@ The client provides host-owned Ed25519 identity and scoped device-token persiste
 deployment must additionally protect the state directory, rotate credentials operationally,
 persist the mapping from JB task/run IDs to OpenClaw `sessionKey`/`runId`, and reconcile active runs
 after reconnect.
+
+The installable adapter owns the production-boundary acceptance command. After these contract tests
+pass, use `uv run jb-openclaw doctor` and the explicitly opted-in `jb-openclaw acceptance` flow
+documented in `adapters/openclaw/README.md` against the target deployment.

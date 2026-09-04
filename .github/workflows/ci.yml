@@ -74,6 +74,29 @@ jobs:
       - name: Build Jarvis
         run: npm run build
 
+  openclaw-contract:
+    name: OpenClaw contract
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/openclaw-gateway-spike
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.19.0
+          cache: npm
+          cache-dependency-path: tools/openclaw-gateway-spike/package-lock.json
+
+      - name: Install official OpenClaw dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Verify OpenClaw Gateway contract
+        run: npm test
+
   test:
     name: Test
     runs-on: ubuntu-latest

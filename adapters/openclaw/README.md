@@ -54,3 +54,32 @@ envelope and will follow the workflow failure edge when it violates a phase cont
 
 Before a non-loopback production deployment, validate pairing, TLS pinning, reconnect event
 reconciliation, filesystem ACLs, and credential rotation against the deployed Gateway version.
+
+## Explicit live acceptance
+
+Live checks are deliberately excluded from CI because they require a separately operated Gateway,
+credentials, and provider usage. CI instead runs the pinned official protocol contract tests in
+`tools/openclaw-gateway-spike`.
+
+After installing this adapter and the Node dependencies, diagnose the configured endpoint without
+starting an agent turn:
+
+```powershell
+uv run jb-openclaw doctor
+```
+
+Then use a dedicated session and a new stable prefix for one explicit acceptance attempt. This
+starts two agent turns: the first request is replayed with the same idempotency key, and the second
+request proves continuation on the same session.
+
+```powershell
+uv run jb-openclaw acceptance `
+  --session-key "agent:acceptance:jb-orchestrator" `
+  --idempotency-prefix "acceptance-2026-09-04-01" `
+  --message "Return a short acknowledgement for the JB acceptance check."
+```
+
+Add `--verify-cancellation` only when the deployed Gateway's cancellation path must also be tested;
+it starts one additional turn and immediately aborts its exact run ID. Reusing an idempotency prefix
+reuses the corresponding Gateway run rather than creating a new attempt. The command reports only
+Gateway health/count summaries and run identifiers, not prompts, session contents, or credentials.
