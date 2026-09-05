@@ -1,0 +1,1 @@
+"""GitHub publisher adapter tests."""

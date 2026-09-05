@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "jb-github-publisher"
+version = "0.1.0.dev0"
+description = "GitHub pull-request publisher adapter for jb-orchestrator."
+requires-python = ">=3.12"
+dependencies = [
+  "httpx>=0.28,<1",
+  "jb-orchestrator>=0.1.0.dev0",
+  "pydantic-settings>=2.7,<3",
+]
+
+[project.entry-points."jb_orchestrator.scm_publishers"]
+github = "jb_github_publisher:create_publisher"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/jb_github_publisher"]
