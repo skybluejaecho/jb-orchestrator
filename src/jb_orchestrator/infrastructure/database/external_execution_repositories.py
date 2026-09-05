@@ -23,6 +23,7 @@ def external_execution_from_record(record: ExternalExecutionRecord) -> ExternalE
         workspace_repository_path=record.workspace_repository_path,
         workspace_branch=record.workspace_branch,
         workspace_base_ref=record.workspace_base_ref,
+        workspace_scope=record.workspace_scope,
         workspace_released_at=record.workspace_released_at,
         external_run_id=record.external_run_id,
         status=record.status,
@@ -53,6 +54,7 @@ class SqlAlchemyExternalExecutionRepository:
                 workspace_repository_path=execution.workspace_repository_path,
                 workspace_branch=execution.workspace_branch,
                 workspace_base_ref=execution.workspace_base_ref,
+                workspace_scope=execution.workspace_scope,
                 workspace_released_at=execution.workspace_released_at,
                 external_run_id=execution.external_run_id,
                 status=execution.status,
@@ -112,5 +114,6 @@ class SqlAlchemyExternalExecutionRepository:
         record.terminal_result = execution.terminal_result
         record.failure_reason = execution.failure_reason
         record.workspace_released_at = execution.workspace_released_at
+        record.workspace_scope = execution.workspace_scope
         record.updated_at = execution.updated_at
         record.completed_at = execution.completed_at

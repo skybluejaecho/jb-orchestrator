@@ -51,6 +51,7 @@ def _external_execution(claim: TaskClaim, assignment: WorkspaceAssignment) -> Ex
         workspace_repository_path=assignment.repository_path,
         workspace_branch=assignment.branch,
         workspace_base_ref=assignment.base_ref,
+        workspace_scope=assignment.scope,
     )
 
 
@@ -83,6 +84,8 @@ async def test_git_worktree_assignment_is_isolated_and_retry_stable(tmp_path: Pa
     assert first.branch == _git(Path(first.path), "branch", "--show-current")
     expected_commit = _git(repository, "rev-parse", "develop")
     assert first.base_ref == expected_commit
+    assert first.scope == manager.scope
+    assert first.scope is not None
     assert _git(Path(first.path), "rev-parse", "HEAD") == expected_commit
 
 

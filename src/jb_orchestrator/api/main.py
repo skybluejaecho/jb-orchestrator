@@ -21,6 +21,7 @@ from jb_orchestrator.application.security_services import SecurityService
 from jb_orchestrator.application.services import OrchestrationService
 from jb_orchestrator.application.skill_services import SkillCatalogService
 from jb_orchestrator.application.workflow_services import WorkflowService
+from jb_orchestrator.application.workspace_operation_services import WorkspaceOperationService
 from jb_orchestrator.config import get_settings
 from jb_orchestrator.domain.exceptions import DomainValidationError, InvalidStateTransition
 from jb_orchestrator.infrastructure.database import SqlAlchemyUnitOfWork, create_session_factory
@@ -40,6 +41,7 @@ def create_app(
     request_dispatch_service: RequestDispatchService | None = None,
     project_observation_service: ProjectObservationService | None = None,
     security_service: SecurityService | None = None,
+    workspace_operation_service: WorkspaceOperationService | None = None,
     auth_enabled: bool | None = None,
 ) -> FastAPI:
     """Build the API application."""
@@ -57,6 +59,7 @@ def create_app(
         or external_execution_service is None
         or request_dispatch_service is None
         or project_observation_service is None
+        or workspace_operation_service is None
         or (auth_enabled and security_service is None)
     ):
         session_factory = create_session_factory()
@@ -84,6 +87,10 @@ def create_app(
         project_observation_service = ProjectObservationService(
             lambda: SqlAlchemyUnitOfWork(session_factory)
         )
+    if workspace_operation_service is None:
+        workspace_operation_service = WorkspaceOperationService(
+            lambda: SqlAlchemyUnitOfWork(session_factory)
+        )
     if auth_enabled and security_service is None:
         security_service = SecurityService(lambda: SqlAlchemyUnitOfWork(session_factory))
     app.state.orchestration_service = service
@@ -95,6 +102,7 @@ def create_app(
     app.state.external_execution_service = external_execution_service
     app.state.request_dispatch_service = request_dispatch_service
     app.state.project_observation_service = project_observation_service
+    app.state.workspace_operation_service = workspace_operation_service
     app.state.security_service = security_service
     app.state.auth_enabled = auth_enabled
 

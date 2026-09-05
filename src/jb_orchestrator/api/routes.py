@@ -3,7 +3,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Query, Request, status
+from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 
 from jb_orchestrator.api.dependencies import (
@@ -16,6 +16,7 @@ from jb_orchestrator.api.dependencies import (
     get_request_dispatch_service,
     get_skill_catalog_service,
     get_workflow_service,
+    get_workspace_operation_service,
 )
 from jb_orchestrator.api.event_streams import external_execution_event_stream, project_event_stream
 from jb_orchestrator.api.schemas import (
@@ -53,6 +54,8 @@ from jb_orchestrator.api.schemas import (
     WorkflowRequestContextResponse,
     WorkflowSkillSummaryResponse,
     WorkflowStart,
+    WorkspaceOperationCreate,
+    WorkspaceOperationResponse,
 )
 from jb_orchestrator.application import (
     BudgetService,
@@ -69,6 +72,7 @@ from jb_orchestrator.application import (
     SkillCatalogService,
     WorkflowComposition,
     WorkflowService,
+    WorkspaceOperationService,
 )
 from jb_orchestrator.config import get_settings
 from jb_orchestrator.domain import (
@@ -108,6 +112,9 @@ RequestDispatchServiceDependency = Annotated[
 ]
 ExternalExecutionServiceDependency = Annotated[
     ExternalExecutionService, Depends(get_external_execution_service)
+]
+WorkspaceOperationServiceDependency = Annotated[
+    WorkspaceOperationService, Depends(get_workspace_operation_service)
 ]
 ProjectObservationServiceDependency = Annotated[
     ProjectObservationService, Depends(get_project_observation_service)
@@ -744,3 +751,46 @@ async def get_external_execution(
     service: ExternalExecutionServiceDependency,
 ) -> ExternalExecutionResponse:
     return ExternalExecutionResponse.model_validate(await service.get_by_id(execution_id))
+
+
+@router.post(
+    "/external-executions/{execution_id}/workspace-operations",
+    response_model=WorkspaceOperationResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def request_workspace_operation(
+    execution_id: UUID,
+    payload: WorkspaceOperationCreate,
+    request: Request,
+    response: Response,
+    service: WorkspaceOperationServiceDependency,
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=255)],
+) -> WorkspaceOperationResponse:
+    principal = getattr(request.state, "principal", None)
+    requested_by = principal.account_key if principal is not None else "anonymous"
+    operation, replayed = await service.request(
+        execution_id,
+        kind=payload.kind,
+        target_ref=payload.target_ref,
+        confirmation=payload.confirmation,
+        idempotency_key=idempotency_key,
+        requested_by=requested_by,
+    )
+    if replayed:
+        response.status_code = status.HTTP_200_OK
+    return WorkspaceOperationResponse.model_validate(operation)
+
+
+@router.get(
+    "/external-executions/{execution_id}/workspace-operations",
+    response_model=list[WorkspaceOperationResponse],
+)
+async def list_workspace_operations(
+    execution_id: UUID,
+    service: WorkspaceOperationServiceDependency,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[WorkspaceOperationResponse]:
+    return [
+        WorkspaceOperationResponse.model_validate(operation)
+        for operation in await service.list_for_execution(execution_id, limit=limit)
+    ]

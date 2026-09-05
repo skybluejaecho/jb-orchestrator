@@ -18,6 +18,7 @@ from jb_orchestrator.workflows import (
     NodeOutcome,
     WorkflowStatus,
 )
+from jb_orchestrator.workspace_operations import WorkspaceOperationKind, WorkspaceOperationStatus
 
 
 class ProjectCreate(BaseModel):
@@ -231,10 +232,37 @@ class ExternalExecutionResponse(BaseModel):
     workspace_repository_path: str | None
     workspace_branch: str | None
     workspace_base_ref: str | None
+    workspace_scope: str | None
     workspace_released_at: datetime | None
     external_run_id: str | None
     status: ExternalExecutionStatus
     terminal_result: dict[str, Any] | None
+    failure_reason: str | None
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None
+
+
+class WorkspaceOperationCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: WorkspaceOperationKind
+    target_ref: str = Field(min_length=1, max_length=255)
+    confirmation: str | None = Field(default=None, max_length=36)
+
+
+class WorkspaceOperationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    external_execution_id: UUID
+    kind: WorkspaceOperationKind
+    target_ref: str
+    idempotency_key: str
+    requested_by: str
+    status: WorkspaceOperationStatus
+    worker_id: str | None
+    result: dict[str, Any] | None
     failure_reason: str | None
     created_at: datetime
     updated_at: datetime

@@ -27,6 +27,7 @@ class ExternalExecutionService:
         workspace_repository_path: str | None = None,
         workspace_branch: str | None = None,
         workspace_base_ref: str | None = None,
+        workspace_scope: str | None = None,
     ) -> ExternalExecution:
         async with self._unit_of_work_factory() as unit_of_work:
             existing = await unit_of_work.external_executions.get_by_idempotency_key(
@@ -46,6 +47,7 @@ class ExternalExecutionService:
                 workspace_repository_path=workspace_repository_path,
                 workspace_branch=workspace_branch,
                 workspace_base_ref=workspace_base_ref,
+                workspace_scope=workspace_scope,
             )
             await unit_of_work.external_executions.add(execution)
             await self._append_event(unit_of_work, execution, "external_execution.prepared")
@@ -181,6 +183,7 @@ class ExternalExecutionService:
                     "workspace_repository_path": execution.workspace_repository_path,
                     "workspace_branch": execution.workspace_branch,
                     "workspace_base_ref": execution.workspace_base_ref,
+                    "workspace_scope": execution.workspace_scope,
                     "workspace_released_at": (
                         execution.workspace_released_at.isoformat()
                         if execution.workspace_released_at is not None

@@ -13,6 +13,7 @@ from jb_orchestrator.application.request_dispatch_services import RequestDispatc
 from jb_orchestrator.application.services import OrchestrationService
 from jb_orchestrator.application.skill_services import SkillCatalogService
 from jb_orchestrator.application.workflow_services import WorkflowService
+from jb_orchestrator.application.workspace_operation_services import WorkspaceOperationService
 
 
 def get_orchestration_service(request: Request) -> OrchestrationService:
@@ -61,6 +62,12 @@ def get_external_execution_service(request: Request) -> ExternalExecutionService
     """Return the external execution query service owned by this app instance."""
 
     return cast(ExternalExecutionService, request.app.state.external_execution_service)
+
+
+def get_workspace_operation_service(request: Request) -> WorkspaceOperationService:
+    """Return the durable workspace command service owned by this app instance."""
+
+    return cast(WorkspaceOperationService, request.app.state.workspace_operation_service)
 
 
 def get_project_observation_service(request: Request) -> ProjectObservationService:

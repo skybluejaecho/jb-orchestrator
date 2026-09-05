@@ -87,6 +87,33 @@ guard. It then records `workspace_released_at` in PostgreSQL. It never fetches, 
 or merges. Ensure the local target ref is current before using it as merge evidence, and never point
 the worktree root at a repository or broad user directory.
 
+### Durable workspace commands
+
+Remote clients submit inspect and cleanup requests to the Control Plane instead of touching the
+worker filesystem. Grant the submitting service account `project.read` and `workspace.manage` for the
+project. Every POST requires an `Idempotency-Key` header. A cleanup payload must repeat the exact
+external execution UUID in `confirmation`.
+
+Run a workspace command worker on a host using the same `JB_OPENCLAW_WORKSPACE_ROOT` and
+`JB_OPENCLAW_REPOSITORY_ROOTS` configuration that created the assignment:
+
+```powershell
+uv run jb-openclaw workspace worker --worker-id local-workspaces
+```
+
+Use `--once` for one polling attempt. The worker claims only commands matching the opaque scope
+derived from its configured worktree root and repository allowlist. PostgreSQL leases make a crashed
+claim recoverable. Inspection and cleanup results are available from:
+
+```text
+POST /v1/external-executions/{id}/workspace-operations
+GET  /v1/external-executions/{id}/workspace-operations
+```
+
+Assignments created before migration `0019_workspace_operations` have no scope and continue to use
+the direct `workspace inspect` and `workspace cleanup` commands. The queue never fetches, commits,
+pushes, merges, or opens a pull request.
+
 The selected JB model profile supplies the OpenClaw provider and model override. Verified skill
 entrypoint paths are appended to the task message so the agent receives the exact materialized
 versions selected by the workflow snapshot.

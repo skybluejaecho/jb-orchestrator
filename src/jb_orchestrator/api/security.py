@@ -64,4 +64,6 @@ def required_permission(method: str, path: str) -> ApiPermission:
         return ApiPermission.WORKFLOW_APPROVE
     if path.endswith("/cancel"):
         return ApiPermission.RUN_CANCEL
+    if path.endswith("/workspace-operations"):
+        return ApiPermission.WORKSPACE_MANAGE
     return ApiPermission.PROJECT_ADMIN

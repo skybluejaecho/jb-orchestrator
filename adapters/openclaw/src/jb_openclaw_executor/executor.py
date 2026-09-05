@@ -50,6 +50,7 @@ class OpenClawExecutor:
                 workspace_repository_path=assignment.repository_path,
                 workspace_branch=assignment.branch,
                 workspace_base_ref=assignment.base_ref,
+                workspace_scope=assignment.scope,
             )
         if execution.is_terminal:
             return self._stored_result(execution)

@@ -37,6 +37,10 @@ from jb_orchestrator.workflows import (
     WorkflowStatus,
     WorkflowTaskCandidate,
 )
+from jb_orchestrator.workspace_operations import (
+    WorkspaceOperation,
+    WorkspaceOperationStatus,
+)
 
 
 @dataclass
@@ -59,6 +63,7 @@ class MemoryStore:
     budget_reservations: dict[str, BudgetReservation] = field(default_factory=dict)
     usage_records: list[UsageRecord] = field(default_factory=list)
     external_executions: dict[str, ExternalExecution] = field(default_factory=dict)
+    workspace_operations: dict[UUID, WorkspaceOperation] = field(default_factory=dict)
     service_accounts: dict[UUID, ServiceAccount] = field(default_factory=dict)
 
 
@@ -240,6 +245,73 @@ class MemoryExternalExecutionRepository:
         self._store.external_executions[execution.idempotency_key] = execution
 
 
+class MemoryWorkspaceOperationRepository:
+    def __init__(self, store: MemoryStore) -> None:
+        self._store = store
+
+    async def try_add(self, operation: WorkspaceOperation) -> bool:
+        if await self.get_by_idempotency_key(
+            operation.external_execution_id, operation.idempotency_key
+        ):
+            return False
+        self._store.workspace_operations[operation.id] = operation
+        return True
+
+    async def get(
+        self, operation_id: UUID, *, for_update: bool = False
+    ) -> WorkspaceOperation | None:
+        return self._store.workspace_operations.get(operation_id)
+
+    async def get_by_idempotency_key(
+        self, external_execution_id: UUID, idempotency_key: str
+    ) -> WorkspaceOperation | None:
+        return next(
+            (
+                operation
+                for operation in self._store.workspace_operations.values()
+                if operation.external_execution_id == external_execution_id
+                and operation.idempotency_key == idempotency_key
+            ),
+            None,
+        )
+
+    async def list_for_execution(
+        self, external_execution_id: UUID, *, limit: int = 100
+    ) -> list[WorkspaceOperation]:
+        matches = [
+            operation
+            for operation in self._store.workspace_operations.values()
+            if operation.external_execution_id == external_execution_id
+        ]
+        return sorted(matches, key=lambda value: (value.created_at, value.id), reverse=True)[:limit]
+
+    async def claim_next(
+        self, *, worker_id: str, workspace_scope: str, lease_seconds: int
+    ) -> WorkspaceOperation | None:
+        now = datetime.now().astimezone()
+        candidates = [
+            operation
+            for operation in self._store.workspace_operations.values()
+            if operation.workspace_scope == workspace_scope
+            and (
+                operation.status is WorkspaceOperationStatus.PENDING
+                or (
+                    operation.status is WorkspaceOperationStatus.CLAIMED
+                    and operation.lease_expires_at is not None
+                    and operation.lease_expires_at <= now
+                )
+            )
+        ]
+        if not candidates:
+            return None
+        operation = min(candidates, key=lambda value: (value.created_at, value.id))
+        operation.claim(worker_id, lease_seconds=lease_seconds, at=now)
+        return operation
+
+    async def save(self, operation: WorkspaceOperation) -> None:
+        self._store.workspace_operations[operation.id] = operation
+
+
 class MemoryEventRepository:
     def __init__(self, store: MemoryStore) -> None:
         self._store = store
@@ -295,6 +367,11 @@ class MemoryEventRepository:
             for execution in self._store.external_executions.values()
             if execution.run_id in run_ids
         }
+        workspace_operation_ids = {
+            operation.id
+            for operation in self._store.workspace_operations.values()
+            if operation.external_execution_id in external_ids
+        }
         budget_account_ids = {
             account.id
             for account in self._store.budget_accounts.values()
@@ -311,6 +388,7 @@ class MemoryEventRepository:
             "run": run_ids,
             "workflow_execution": workflow_ids,
             "external_execution": external_ids,
+            "workspace_operation": workspace_operation_ids,
             "budget_account": budget_account_ids,
             "budget_reservation": budget_reservation_ids,
         }
@@ -648,6 +726,7 @@ class MemoryUnitOfWork:
         self.budget_reservations = MemoryBudgetReservationRepository(store)
         self.usage_records = MemoryUsageRecordRepository(store)
         self.external_executions = MemoryExternalExecutionRepository(store)
+        self.workspace_operations = MemoryWorkspaceOperationRepository(store)
         self.workflow_definitions = MemoryWorkflowDefinitionRepository(store)
         self.workflow_executions = MemoryWorkflowExecutionRepository(store)
         self.project_workflow_bindings = MemoryProjectWorkflowBindingRepository(store)

@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import re
+import socket
 import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -25,6 +26,8 @@ from jb_openclaw_executor.workspace import (
     OpenClawWorkspaceManager,
     WorkspaceReview,
 )
+from jb_openclaw_executor.workspace_runtime import WorkspaceOperationRuntime
+from jb_orchestrator.application import WorkspaceOperationService
 from jb_orchestrator.application.exceptions import ApplicationError
 from jb_orchestrator.application.external_execution_services import ExternalExecutionService
 from jb_orchestrator.config import get_settings
@@ -71,6 +74,17 @@ def workspace_manager_from_settings() -> OpenClawWorkspaceManager:
         workspace_root=settings.workspace_root,
         repository_roots=settings.repository_roots,
         git_executable=settings.git_executable,
+    )
+
+
+def workspace_runtime(worker_id: str, *, poll_interval: float) -> WorkspaceOperationRuntime:
+    session_factory = create_session_factory(get_settings())
+    return WorkspaceOperationRuntime(
+        worker_id,
+        WorkspaceOperationService(lambda: SqlAlchemyUnitOfWork(session_factory)),
+        ExternalExecutionService(lambda: SqlAlchemyUnitOfWork(session_factory)),
+        workspace_manager_from_settings(),
+        poll_interval_seconds=poll_interval,
     )
 
 
@@ -409,6 +423,29 @@ def cleanup_workspace(
         }
     )
     typer.echo(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+
+
+@workspace_app.command("worker")
+def run_workspace_worker(
+    once: Annotated[bool, typer.Option(help="Poll one operation and exit.")] = False,
+    worker_id: Annotated[str | None, typer.Option(help="Stable workspace worker identity.")] = None,
+    poll_interval: Annotated[
+        float, typer.Option(min=0.1, help="Idle polling interval in seconds.")
+    ] = 1.0,
+) -> None:
+    """Process queued commands for the configured local worktree root."""
+
+    runtime = workspace_runtime(
+        worker_id or f"{socket.gethostname()}-workspace", poll_interval=poll_interval
+    )
+    if once:
+        worked = asyncio.run(runtime.run_once())
+        typer.echo("Workspace operation processed." if worked else "No workspace operation found.")
+        return
+    try:
+        asyncio.run(runtime.run())
+    except KeyboardInterrupt:
+        typer.echo("Workspace worker stopped.")
 
 
 def main() -> None:

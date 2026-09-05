@@ -22,6 +22,7 @@ from jb_orchestrator.application.services import CreatedRequest, OrchestrationSe
 from jb_orchestrator.application.skill_services import SkillCatalogService
 from jb_orchestrator.application.task_dispatch import TaskDispatchService
 from jb_orchestrator.application.workflow_services import WorkflowService
+from jb_orchestrator.application.workspace_operation_services import WorkspaceOperationService
 
 __all__ = [
     "BudgetService",
@@ -45,4 +46,5 @@ __all__ = [
     "TaskDispatchService",
     "WorkflowComposition",
     "WorkflowService",
+    "WorkspaceOperationService",
 ]

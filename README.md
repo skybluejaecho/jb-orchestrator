@@ -389,6 +389,15 @@ ORCH-046 adds a guarded worktree review and release lifecycle:
 - branch deletion uses an expected-HEAD Git reference update to avoid deleting a concurrently changed ref
 - successful cleanup records a durable release timestamp and event, which Jarvis displays through SSE refresh
 
+ORCH-047 adds a durable workspace operation queue:
+
+- clients submit idempotent inspect or explicitly confirmed cleanup commands to the Control Plane
+- PostgreSQL owns pending, claimed, succeeded, and failed operation state plus audit events
+- an opaque scope derived from the worktree root and repository allowlist routes work to a compatible host
+- `jb-openclaw workspace worker` claims operations with leases and executes the ORCH-046 safety gates
+- `workspace.manage` is independent from read, dispatch, approval, and cancellation permissions
+- project SSE includes workspace operation lifecycle changes without making Jarvis a state owner
+
 ## Prerequisites
 
 - Python 3.12

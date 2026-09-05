@@ -1,6 +1,7 @@
 from httpx import ASGITransport, AsyncClient
 
 from jb_orchestrator.api.main import create_app
+from jb_orchestrator.api.security import required_permission
 from jb_orchestrator.application import OrchestrationService, SecurityService
 from jb_orchestrator.domain import Project
 from jb_orchestrator.security import ApiPermission
@@ -79,3 +80,11 @@ async def test_revoked_token_is_rejected() -> None:
         )
 
     assert response.status_code == 401
+
+
+def test_workspace_commands_have_a_dedicated_write_permission() -> None:
+    execution_id = "00000000-0000-0000-0000-000000000000"
+    path = f"/v1/external-executions/{execution_id}/workspace-operations"
+
+    assert required_permission("GET", path) is ApiPermission.PROJECT_READ
+    assert required_permission("POST", path) is ApiPermission.WORKSPACE_MANAGE
