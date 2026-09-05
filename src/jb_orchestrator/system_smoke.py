@@ -578,6 +578,10 @@ def run_system_smoke(
             failed_publication = cast(dict[str, Any], publications[0])
             if failed_publication.get("status") != "failed":
                 raise SystemSmokeError("first SCM publication attempt did not fail as expected")
+            if failed_publication.get("failure_code") != "provider_unavailable":
+                raise SystemSmokeError("transient SCM provider failure was not classified")
+            if failed_publication.get("failure_retryable") is not True:
+                raise SystemSmokeError("transient SCM provider failure was not marked retryable")
             retried_publication = _request(
                 jarvis,
                 "POST",
