@@ -318,6 +318,37 @@ def _workflow_payload(key: str) -> dict[str, Any]:
     }
 
 
+def _run_scm_worker(
+    project_root: Path,
+    environment: Mapping[str, str],
+    fixture: ScmSmokeRepository,
+    *,
+    timeout_seconds: float,
+) -> None:
+    worker = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "jb_orchestrator.scm.worker_main",
+            "--once",
+            "--workspace-scope",
+            fixture.workspace_scope,
+            "--lease-seconds",
+            "30",
+            "--operation-timeout",
+            "20",
+        ],
+        cwd=project_root,
+        env=dict(environment),
+        capture_output=True,
+        timeout=timeout_seconds,
+        check=False,
+    )
+    if worker.returncode != 0:
+        output = (worker.stdout + worker.stderr).decode(errors="replace")
+        raise SystemSmokeError(f"SCM worker failed with exit code {worker.returncode}\n{output}")
+
+
 def run_system_smoke(
     project_root: Path,
     *,
@@ -381,7 +412,11 @@ def run_system_smoke(
             scm_fixture = prepare_scm_repository(log_directory, suffix)
         except Exception as exc:
             raise SystemSmokeError(f"cannot prepare SCM smoke repository: {exc}") from exc
-        github_stub = GitHubApiStub(scm_fixture.source_branch, scm_fixture.target_branch)
+        github_stub = GitHubApiStub(
+            scm_fixture.source_branch,
+            scm_fixture.target_branch,
+            fail_first_create=True,
+        )
         github_stub.__enter__()
         processes: list[_ManagedProcess] = []
         clients: list[httpx.Client] = []
@@ -527,30 +562,12 @@ def run_system_smoke(
                 "JB_GITHUB_WEB_HOST": "github.local",
                 "JB_GITHUB_ALLOW_INSECURE_LOOPBACK": "true",
             }
-            scm_worker = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "jb_orchestrator.scm.worker_main",
-                    "--once",
-                    "--workspace-scope",
-                    scm_fixture.workspace_scope,
-                    "--lease-seconds",
-                    "30",
-                    "--operation-timeout",
-                    "20",
-                ],
-                cwd=project_root,
-                env=scm_environment,
-                capture_output=True,
-                timeout=timeout_seconds,
-                check=False,
+            _run_scm_worker(
+                project_root,
+                scm_environment,
+                scm_fixture,
+                timeout_seconds=timeout_seconds,
             )
-            if scm_worker.returncode != 0:
-                output = (scm_worker.stdout + scm_worker.stderr).decode(errors="replace")
-                raise SystemSmokeError(
-                    f"SCM worker failed with exit code {scm_worker.returncode}\n{output}"
-                )
             publications = _request(
                 jarvis,
                 "GET",
@@ -558,6 +575,28 @@ def run_system_smoke(
             )
             if not isinstance(publications, list) or len(publications) != 1:
                 raise SystemSmokeError("SCM publication was not durably listed")
+            failed_publication = cast(dict[str, Any], publications[0])
+            if failed_publication.get("status") != "failed":
+                raise SystemSmokeError("first SCM publication attempt did not fail as expected")
+            retried_publication = _request(
+                jarvis,
+                "POST",
+                "/api/scm-publications/retry",
+                payload={"publicationId": publication["id"]},
+            )
+            if retried_publication.get("status") != "pending":
+                raise SystemSmokeError("failed SCM publication was not queued for retry")
+            _run_scm_worker(
+                project_root,
+                scm_environment,
+                scm_fixture,
+                timeout_seconds=timeout_seconds,
+            )
+            publications = _request(
+                jarvis,
+                "GET",
+                f"/api/scm-publications?externalExecutionId={external_execution_id}",
+            )
             completed_publication = cast(dict[str, Any], publications[0])
             if completed_publication.get("status") != "succeeded":
                 raise SystemSmokeError(
@@ -570,6 +609,8 @@ def run_system_smoke(
             review_url = str(result.get("review_url", ""))
             if review_url != "https://github.local/system-smoke/repository/pull/53":
                 raise SystemSmokeError("SCM publication returned an unexpected review URL")
+            if completed_publication.get("attempt_count") != 2:
+                raise SystemSmokeError("SCM publication retry attempt was not counted")
 
             second = _request(
                 jarvis,
