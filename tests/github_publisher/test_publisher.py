@@ -22,7 +22,7 @@ class FakeGit:
             ("rev-parse", "--show-toplevel"): str(workspace.resolve()),
             ("branch", "--show-current"): branch,
             ("status", "--porcelain"): status,
-            ("remote", "get-url", "origin"): remote_url,
+            ("config", "--get", "remote.origin.url"): remote_url,
             ("rev-parse", "HEAD"): "a" * 40,
         }
 

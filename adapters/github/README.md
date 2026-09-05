@@ -20,11 +20,15 @@ Optional settings:
     JB_GITHUB_GIT_TIMEOUT_SECONDS=120
     JB_GITHUB_HTTP_TIMEOUT_SECONDS=30
 
+`JB_GITHUB_ALLOW_INSECURE_LOOPBACK=true` is reserved for the process smoke fixture. The adapter
+accepts it only with `JB_ENVIRONMENT=test` and a loopback HTTP API URL; it rejects every remote HTTP
+host and any non-test environment.
+
 The API token needs Pull requests repository permission with write access. The Git push uses the
 remote's existing SSH key or Git credential helper; the API token is deliberately not inserted into
 Git command arguments or remote URLs. That Git identity needs permission to push the source branch.
 
-For GitHub Enterprise, set both API URL and web host. API traffic must use HTTPS.
+For GitHub Enterprise, set both API URL and web host. Production API traffic must use HTTPS.
 
 ## Run
 

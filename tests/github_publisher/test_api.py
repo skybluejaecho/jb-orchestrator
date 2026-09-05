@@ -6,6 +6,23 @@ from jb_github_publisher.api import GitHubApiClient, GitHubApiError
 from jb_github_publisher.repository import GitHubRepository
 
 
+def test_api_allows_http_only_for_explicit_loopback_fixture() -> None:
+    with pytest.raises(ValueError, match="HTTPS"):
+        GitHubApiClient("token", api_url="http://127.0.0.1:8080")
+    with pytest.raises(ValueError, match="HTTPS"):
+        GitHubApiClient(
+            "token",
+            api_url="http://github.example",
+            allow_insecure_loopback=True,
+        )
+
+    GitHubApiClient(
+        "token",
+        api_url="http://127.0.0.1:8080",
+        allow_insecure_loopback=True,
+    )
+
+
 def client(handler: Callable[[httpx.Request], httpx.Response]) -> GitHubApiClient:
     return GitHubApiClient(
         "secret-token",

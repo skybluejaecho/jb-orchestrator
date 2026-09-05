@@ -30,13 +30,20 @@ class GitHubApiClient:
         api_version: str = "2026-03-10",
         timeout_seconds: float = 30.0,
         transport: httpx.AsyncBaseTransport | None = None,
+        allow_insecure_loopback: bool = False,
     ) -> None:
         normalized_token = token.strip()
         normalized_url = api_url.strip().rstrip("/")
         if not normalized_token:
             raise ValueError("GitHub token must not be empty")
-        if urlparse(normalized_url).scheme != "https":
-            raise ValueError("GitHub API URL must use HTTPS")
+        parsed_url = urlparse(normalized_url)
+        insecure_loopback = (
+            allow_insecure_loopback
+            and parsed_url.scheme == "http"
+            and parsed_url.hostname in {"127.0.0.1", "localhost", "::1"}
+        )
+        if parsed_url.scheme != "https" and not insecure_loopback:
+            raise ValueError("GitHub API URL must use HTTPS, except test-only loopback HTTP")
         if not api_version.strip() or timeout_seconds <= 0:
             raise ValueError("GitHub API version and positive timeout are required")
         self._token = normalized_token

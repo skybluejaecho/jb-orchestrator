@@ -18,3 +18,4 @@ class GitHubPublisherSettings(BaseSettings):
     remote_name: str = "origin"
     git_timeout_seconds: float = Field(default=120.0, gt=0)
     http_timeout_seconds: float = Field(default=30.0, gt=0)
+    allow_insecure_loopback: bool = False
