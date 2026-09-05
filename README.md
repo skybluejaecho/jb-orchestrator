@@ -416,6 +416,17 @@ ORCH-049 defines a provider-neutral SCM publication boundary:
   group and are selected by an explicit provider key
 - publication remains separate from workspace cleanup, remote merge, and branch deletion
 
+ORCH-050 adds a durable SCM publication ledger:
+
+- publication requests derive repository and source branch from trusted Project and
+  ExternalExecution records
+- only terminal, unreleased managed workspaces can be submitted for remote review
+- PostgreSQL stores idempotent pending, claimed, succeeded, and failed publication state
+- workers claim by explicit provider key and opaque workspace scope with expiring leases
+- scm.publish is independent from project read, dispatch, approval, cancellation, and workspace
+  maintenance permissions
+- project event streams include publication lifecycle changes without storing SCM credentials
+
 ## Prerequisites
 
 - Python 3.12
