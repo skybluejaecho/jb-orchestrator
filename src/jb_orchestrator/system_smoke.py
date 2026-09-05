@@ -508,18 +508,16 @@ def run_system_smoke(
             except Exception as exc:
                 raise SystemSmokeError(f"cannot prepare SCM execution: {exc}") from exc
             publication = _request(
-                api,
+                jarvis,
                 "POST",
-                f"/v1/external-executions/{external_execution_id}/scm-publications",
-                headers={
-                    "Authorization": f"Bearer {jarvis_token}",
-                    "Idempotency-Key": f"smoke-publication-{suffix}",
-                },
+                "/api/scm-publications",
                 payload={
-                    "provider_key": "github",
-                    "target_branch": scm_fixture.target_branch,
+                    "externalExecutionId": external_execution_id,
+                    "providerKey": "github",
+                    "targetBranch": scm_fixture.target_branch,
                     "title": "System smoke publication",
                     "body": "Created by the disposable SCM system smoke.",
+                    "idempotencyKey": f"smoke-publication-{suffix}",
                 },
             )
             scm_environment = base_environment | {
@@ -554,10 +552,9 @@ def run_system_smoke(
                     f"SCM worker failed with exit code {scm_worker.returncode}\n{output}"
                 )
             publications = _request(
-                api,
+                jarvis,
                 "GET",
-                f"/v1/external-executions/{external_execution_id}/scm-publications",
-                headers={"Authorization": f"Bearer {jarvis_token}"},
+                f"/api/scm-publications?externalExecutionId={external_execution_id}",
             )
             if not isinstance(publications, list) or len(publications) != 1:
                 raise SystemSmokeError("SCM publication was not durably listed")
