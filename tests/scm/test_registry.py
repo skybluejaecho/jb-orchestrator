@@ -45,6 +45,7 @@ class StubEntryPoint:
 def publication_request() -> ScmPublicationRequest:
     return ScmPublicationRequest(
         repository="owner/repository",
+        workspace_path="C:/worktrees/review",
         source_branch="feature/work",
         target_branch="develop",
         title="Review work",

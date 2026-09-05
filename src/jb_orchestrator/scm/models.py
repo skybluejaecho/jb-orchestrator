@@ -112,6 +112,7 @@ class ScmPublicationRequest:
     """A credential-free request to publish one branch for human review."""
 
     repository: str
+    workspace_path: str
     source_branch: str
     target_branch: str
     title: str
@@ -121,6 +122,7 @@ class ScmPublicationRequest:
     def __post_init__(self) -> None:
         for field_name in (
             "repository",
+            "workspace_path",
             "source_branch",
             "target_branch",
             "title",
