@@ -183,4 +183,6 @@ jobs:
         run: uv run alembic upgrade head
 
       - name: Run complete local system smoke
-        run: uv run --with-editable tools/system-smoke-executor jb system smoke
+        run: >-
+          uv run --with-editable . --with-editable adapters/github
+          --with-editable tools/system-smoke-executor jb system smoke
