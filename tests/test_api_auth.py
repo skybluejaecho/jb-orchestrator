@@ -96,3 +96,7 @@ def test_scm_publications_have_a_dedicated_write_permission() -> None:
 
     assert required_permission("GET", path) is ApiPermission.PROJECT_READ
     assert required_permission("POST", path) is ApiPermission.SCM_PUBLISH
+    assert (
+        required_permission("POST", f"/v1/scm-publications/{execution_id}/retry")
+        is ApiPermission.SCM_PUBLISH
+    )

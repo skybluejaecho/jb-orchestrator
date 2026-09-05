@@ -40,3 +40,35 @@ async def test_publication_request_list_and_replay() -> None:
     assert first.json()["source_branch"] == "feature/review"
     assert len(listed.json()) == 1
     assert invalid.status_code == 422
+
+
+async def test_failed_publication_can_be_retried_through_api() -> None:
+    store = MemoryStore()
+    execution = await managed_execution(store)
+    publications = ScmPublicationService(lambda: MemoryUnitOfWork(store))
+    publication, _ = await publications.request(
+        execution.id,
+        provider_key="github",
+        target_branch="develop",
+        title="Review feature",
+        body="",
+        idempotency_key="publish-retry",
+        requested_by="jarvis",
+    )
+    claimed = await publications.claim_next(
+        worker_id="publisher-a",
+        provider_key="github",
+        workspace_scope="git-worktree:scope-a",
+    )
+    assert claimed is not None and claimed.lease_token is not None
+    await publications.fail(claimed.id, claimed.lease_token, "temporary failure")
+    app = create_app(scm_publication_service=publications)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        retried = await client.post(f"/v1/scm-publications/{publication.id}/retry")
+        repeated = await client.post(f"/v1/scm-publications/{publication.id}/retry")
+
+    assert retried.status_code == 202
+    assert retried.json()["status"] == "pending"
+    assert retried.json()["attempt_count"] == 1
+    assert repeated.status_code == 200

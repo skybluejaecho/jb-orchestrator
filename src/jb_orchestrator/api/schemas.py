@@ -296,6 +296,7 @@ class ScmPublicationResponse(BaseModel):
     worker_id: str | None
     result: dict[str, Any] | None
     failure_reason: str | None
+    attempt_count: int
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None

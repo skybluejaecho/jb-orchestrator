@@ -1,7 +1,9 @@
+from uuid import uuid4
+
 import pytest
 
 from jb_orchestrator.domain import DomainValidationError
-from jb_orchestrator.scm import ScmPublicationRequest, ScmPublicationResult
+from jb_orchestrator.scm import ScmPublication, ScmPublicationRequest, ScmPublicationResult
 
 
 def test_publication_request_normalizes_credential_free_review_input() -> None:
@@ -73,3 +75,30 @@ def test_publication_result_requires_provider_identifiers() -> None:
             review_url=" ",
             review_id="49",
         )
+
+
+def test_failed_publication_preserves_attempt_count_and_can_be_retried() -> None:
+    publication = ScmPublication(
+        external_execution_id=uuid4(),
+        provider_key="github",
+        repository="https://github.com/example/project.git",
+        source_branch="feature/review",
+        target_branch="develop",
+        title="Review",
+        body="",
+        workspace_scope="scope-a",
+        idempotency_key="publish-1",
+        requested_by="jarvis",
+    )
+    publication.claim("worker-a", lease_seconds=30)
+    assert publication.lease_token is not None
+    publication.fail(publication.lease_token, "temporary failure")
+
+    publication.retry()
+
+    assert publication.status.value == "pending"
+    assert publication.attempt_count == 1
+    assert publication.worker_id is None
+    assert publication.lease_token is None
+    assert publication.failure_reason is None
+    assert publication.completed_at is None

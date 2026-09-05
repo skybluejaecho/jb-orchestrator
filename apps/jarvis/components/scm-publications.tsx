@@ -5,6 +5,7 @@ import {
   ExternalLink,
   GitPullRequestArrow,
   LoaderCircle,
+  RotateCcw,
   Send,
   X,
 } from 'lucide-react';
@@ -25,6 +26,7 @@ type ScmPublication = {
   status: 'pending' | 'claimed' | 'succeeded' | 'failed';
   result: Record<string, unknown> | null;
   failure_reason: string | null;
+  attempt_count: number;
   created_at: string;
 };
 
@@ -80,6 +82,7 @@ export function ScmPublications({
   const [title, setTitle] = useState(defaultTitle);
   const [body, setBody] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -135,6 +138,30 @@ export function ScmPublications({
       );
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const retry = async (publicationId: string) => {
+    setRetryingId(publicationId);
+    setError(null);
+    try {
+      await readJson(
+        await fetch('/api/scm-publications/retry', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ publicationId }),
+        }),
+      );
+      await load();
+      await onChanged();
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : '게시 재시도를 등록하지 못했습니다.',
+      );
+    } finally {
+      setRetryingId(null);
     }
   };
 
@@ -291,6 +318,31 @@ export function ScmPublications({
                   <span className="ml-auto font-mono text-white/30">
                     {publication.source_branch} → {publication.target_branch}
                   </span>
+                </div>
+                <div className="mt-1.5 flex items-center gap-2">
+                  <span className="font-mono text-white/30">
+                    시도 {publication.attempt_count}회
+                  </span>
+                  {publication.status === 'failed' && canPublish && (
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="outline"
+                      className="ml-auto"
+                      disabled={retryingId !== null}
+                      onClick={() => void retry(publication.id)}
+                    >
+                      {retryingId === publication.id ? (
+                        <LoaderCircle
+                          aria-hidden="true"
+                          className="animate-spin"
+                        />
+                      ) : (
+                        <RotateCcw aria-hidden="true" />
+                      )}
+                      다시 시도
+                    </Button>
+                  )}
                 </div>
                 {publication.failure_reason && (
                   <p className="mt-1.5 text-red-100/80">

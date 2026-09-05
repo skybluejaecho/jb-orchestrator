@@ -93,6 +93,7 @@ async def test_scm_publication_round_trips_and_claims_by_provider_and_scope() ->
     assert repeated.id == requested.id
     assert claimed is not None
     assert claimed.status is ScmPublicationStatus.CLAIMED
+    assert claimed.attempt_count == 1
     assert claimed.lease_token is not None
     completed = await publications.succeed(
         claimed.id,

@@ -100,6 +100,18 @@ class SecurityService:
                     if external_execution is not None
                     else None
                 )
+            elif resource_type == "scm_publication":
+                publication = await unit_of_work.scm_publications.get(resource_id)
+                external_execution = (
+                    await unit_of_work.external_executions.get(publication.external_execution_id)
+                    if publication is not None
+                    else None
+                )
+                run = (
+                    await unit_of_work.runs.get(external_execution.run_id)
+                    if external_execution is not None
+                    else None
+                )
             else:
                 raise ValueError(f"unknown authorization resource type: {resource_type}")
             if run is None:

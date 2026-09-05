@@ -2,7 +2,8 @@ import subprocess
 from pathlib import Path
 
 import httpx
-from jb_github_publisher.api import GitHubApiClient
+import pytest
+from jb_github_publisher.api import GitHubApiClient, GitHubApiError
 from jb_github_publisher.git_client import SubprocessGitClient
 from jb_github_publisher.publisher import GitHubPublisher
 from jb_github_publisher.repository import GitHubRepository
@@ -100,3 +101,31 @@ async def test_real_github_publisher_pushes_and_creates_review(tmp_path: Path) -
 
     assert result.review_url == "https://github.local/system-smoke/repository/pull/53"
     assert stub.created is True
+
+
+async def test_github_api_stub_can_fail_first_create_for_retry_smoke() -> None:
+    repository = GitHubRepository("system-smoke", "repository")
+    with GitHubApiStub("feature/smoke", "develop", fail_first_create=True) as stub:
+        client = GitHubApiClient(
+            "smoke-token",
+            api_url=stub.api_url,
+            allow_insecure_loopback=True,
+        )
+        with pytest.raises(GitHubApiError, match="HTTP 503"):
+            await client.find_or_create_pull_request(
+                repository,
+                source_branch="feature/smoke",
+                target_branch="develop",
+                title="Smoke",
+                body="",
+            )
+        result = await client.find_or_create_pull_request(
+            repository,
+            source_branch="feature/smoke",
+            target_branch="develop",
+            title="Smoke",
+            body="",
+        )
+
+    assert result.number == 53
+    assert stub.create_attempts == 2

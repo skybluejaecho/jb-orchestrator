@@ -76,12 +76,20 @@ def _git(cwd: Path, *arguments: str) -> str:
 class GitHubApiStub:
     """Minimal loopback GitHub PR API used only by the disposable system smoke."""
 
-    def __init__(self, source_branch: str, target_branch: str) -> None:
+    def __init__(
+        self,
+        source_branch: str,
+        target_branch: str,
+        *,
+        fail_first_create: bool = False,
+    ) -> None:
         self._source_branch = source_branch
         self._target_branch = target_branch
+        self._fail_first_create = fail_first_create
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
         self.created = False
+        self.create_attempts = 0
 
     @property
     def api_url(self) -> str:
@@ -112,6 +120,10 @@ class GitHubApiStub:
                     return
                 if payload.get("base") != owner._target_branch:
                     owner._respond(self, 422, {"message": "unexpected base"})
+                    return
+                owner.create_attempts += 1
+                if owner._fail_first_create and owner.create_attempts == 1:
+                    owner._respond(self, 503, {"message": "temporary smoke failure"})
                     return
                 owner.created = True
                 owner._respond(
