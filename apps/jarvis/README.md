@@ -7,7 +7,8 @@ Workflow 상태를 Control Plane API에서 읽고 프로젝트 SSE stream으로 
 
 Jarvis는 프로젝트 상태를 조회하고 사용자의 요청을 제출하며 명시적인 승인 결정을
 처리하고 실행을 취소하며 작업공간 검토 명령을 등록하므로 `project.read`,
-`request.dispatch`, `workflow.approve`, `run.cancel`, `workspace.manage`, `all_projects` 범위를
+`request.dispatch`, `workflow.approve`, `run.cancel`, `workspace.manage`, `scm.publish`,
+`all_projects` 범위를
 가진 전용 서비스 계정을 사용한다.
 
 ```powershell
@@ -19,6 +20,7 @@ uv run jb auth issue `
   --permission workflow.approve `
   --permission run.cancel `
   --permission workspace.manage `
+  --permission scm.publish `
   --all-projects
 
 Copy-Item apps/jarvis/.env.example apps/jarvis/.env.local
@@ -47,6 +49,10 @@ Control Plane으로 요청을 proxy한다. 요청 작성 화면은 프로젝트 
 종료된 뒤 전체 외부 실행 UUID를 정확히 입력해야 정리를 요청할 수 있다. 실제 Git 작업은
 동일한 scope의 `jb-openclaw workspace worker`가 수행하며 Jarvis는 작업 상태를 낙관적으로
 변경하지 않는다.
+종료되었고 아직 정리되지 않은 worktree는 GitHub PR 게시 요청을 등록할 수 있다. 대상 브랜치,
+PR 제목과 본문을 확인한 뒤 요청하며, Jarvis는 PostgreSQL 게시 원장의 대기·처리·성공·실패
+상태를 표시한다. 성공 URL은 HTTPS일 때만 외부 링크로 제공된다. 실제 push와 PR 생성은 동일한
+scope를 담당하는 `jb-scm-worker`가 수행한다.
 승인 대기 노드는 승인 또는 반려를 한 번 더 확인한 뒤 처리한다. 진행 중인 실행을 취소하려면
 화면에 표시된 실행 식별 문구를 정확하게 입력해야 한다. Jarvis는 로컬 실행만 지원하며 외부
 네트워크 공개나 Sites 배포는 별도 사용자 인증 계층을 추가하기 전에는 허용하지 않는다.
@@ -61,9 +67,9 @@ npm run build
 ```
 
 계약 테스트는 Control Plane을 실제로 실행하지 않고 server proxy의 인증 header, 오류 전달,
-dispatch payload, 멱등 재시도 규칙, 실행 상세·산출물·외부 실행 조회, 승인 결정과 실행 취소 계약을
-검증한다. 동일한 검사는 GitHub Actions의 `Jarvis` job에서 모든 `develop` 및 `main` PR과
-push에 실행된다.
+dispatch payload, 멱등 재시도 규칙, 실행 상세·산출물·외부 실행 조회, 승인 결정, 실행 취소와
+SCM 게시 계약을 검증한다. 동일한 검사는 GitHub Actions의 `Jarvis` job에서 모든 `develop` 및
+`main` PR과 push에 실행된다.
 
 ## System smoke
 
@@ -73,7 +79,7 @@ push에 실행된다.
 ```powershell
 $env:JB_ENVIRONMENT = "test"
 uv run alembic upgrade head
-uv run --with-editable tools/system-smoke-executor jb system smoke
+uv run --with-editable . --with-editable adapters/github --with-editable tools/system-smoke-executor jb system smoke
 ```
 
 smoke executor는 외부 agent runtime을 호출하지 않으며 `JB_ENVIRONMENT=test`가 아니면 시작을

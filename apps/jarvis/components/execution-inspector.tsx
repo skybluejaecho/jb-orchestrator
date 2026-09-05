@@ -25,6 +25,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { ExecutionCancellation } from '@/components/execution-cancellation';
+import { ScmPublications } from '@/components/scm-publications';
 import { WorkspaceOperations } from '@/components/workspace-operations';
 
 type NodeExecution = {
@@ -358,21 +359,43 @@ export function ExecutionInspector({
                         </p>
                       )}
                       {external.workspace_path && (
-                        <WorkspaceOperations
-                          externalExecutionId={external.id}
-                          externalStatus={external.status}
-                          workspaceScope={external.workspace_scope}
-                          releasedAt={external.workspace_released_at}
-                          defaultTargetRef={
-                            detail.execution.request_context?.default_branch ??
-                            'develop'
-                          }
-                          revision={revision}
-                          onChanged={async () => {
-                            await load();
-                            onChanged();
-                          }}
-                        />
+                        <>
+                          <ScmPublications
+                            externalExecutionId={external.id}
+                            externalStatus={external.status}
+                            sourceBranch={external.workspace_branch}
+                            releasedAt={external.workspace_released_at}
+                            defaultTargetBranch={
+                              detail.execution.request_context
+                                ?.default_branch ?? 'develop'
+                            }
+                            defaultTitle={`${
+                              detail.execution.request_context?.title ??
+                              external.workspace_branch ??
+                              external.node_key
+                            } 검토`}
+                            revision={revision}
+                            onChanged={async () => {
+                              await load();
+                              onChanged();
+                            }}
+                          />
+                          <WorkspaceOperations
+                            externalExecutionId={external.id}
+                            externalStatus={external.status}
+                            workspaceScope={external.workspace_scope}
+                            releasedAt={external.workspace_released_at}
+                            defaultTargetRef={
+                              detail.execution.request_context
+                                ?.default_branch ?? 'develop'
+                            }
+                            revision={revision}
+                            onChanged={async () => {
+                              await load();
+                              onChanged();
+                            }}
+                          />
+                        </>
                       )}
                     </article>
                   ))}
