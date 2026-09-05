@@ -36,6 +36,8 @@ type ScmPublication = {
     | null;
   failure_retryable: boolean | null;
   attempt_count: number;
+  automatic_retry_limit: number;
+  next_attempt_at: string | null;
   created_at: string;
 };
 
@@ -67,7 +69,14 @@ function statusClass(status: ScmPublication['status']): string {
 
 function failureLabel(publication: ScmPublication): string | null {
   if (!publication.failure_code) return null;
-  if (publication.failure_retryable) return '재시도 가능';
+  if (publication.next_attempt_at) return '자동 재시도 예약됨';
+  if (
+    publication.failure_retryable &&
+    publication.automatic_retry_limit > 0 &&
+    publication.attempt_count > publication.automatic_retry_limit
+  )
+    return '자동 재시도 한도 도달';
+  if (publication.failure_retryable) return '수동 재시도 가능';
   if (publication.failure_code === 'workspace_state')
     return '작업공간 확인 필요';
   if (publication.failure_code === 'provider_rejected')
@@ -380,6 +389,15 @@ export function ScmPublications({
                 {publication.failure_reason && (
                   <p className="mt-1.5 text-red-100/80">
                     {publication.failure_reason}
+                  </p>
+                )}
+                {publication.next_attempt_at && (
+                  <p className="mt-1.5 text-amber-100/80">
+                    자동 재시도 예정{' '}
+                    {new Date(publication.next_attempt_at).toLocaleString(
+                      'ko-KR',
+                    )}{' '}
+                    · 자동 재시도 최대 {publication.automatic_retry_limit}회
                   </p>
                 )}
                 {reviewUrl && (
