@@ -407,6 +407,15 @@ ORCH-048 adds guarded workspace operations to Jarvis:
 - pending and claimed work is shown without optimistic completion, then refreshed from project SSE
 - pre-ORCH-047 assignments remain clearly routed to the direct OpenClaw CLI
 
+ORCH-049 defines a provider-neutral SCM publication boundary:
+
+- `ScmPublisher.publish_review` publishes one source branch for human review without merging it
+- requests carry repository, branch, review text, and idempotency identity but never credentials
+- results retain provider-neutral review URL and stable provider identifiers
+- installed GitHub, GitLab, or other adapters use the `jb_orchestrator.scm_publishers` entry-point
+  group and are selected by an explicit provider key
+- publication remains separate from workspace cleanup, remote merge, and branch deletion
+
 ## Prerequisites
 
 - Python 3.12
