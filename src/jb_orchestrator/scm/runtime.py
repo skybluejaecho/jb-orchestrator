@@ -6,8 +6,10 @@ from dataclasses import asdict
 from jb_orchestrator.application import ExternalExecutionService, ScmPublicationService
 from jb_orchestrator.scm.models import (
     ScmPublication,
+    ScmPublicationFailureCode,
     ScmPublicationRequest,
     ScmPublicationResult,
+    ScmPublisherFailure,
 )
 from jb_orchestrator.scm.registry import ScmPublisherRegistry
 
@@ -82,8 +84,13 @@ class ScmPublicationRuntime:
             )
             self._validate_result(publication, result)
         except Exception as exc:
+            code, retryable = self._classify_failure(exc)
             await self._publications.fail(
-                publication.id, lease_token, str(exc) or type(exc).__name__
+                publication.id,
+                lease_token,
+                str(exc) or type(exc).__name__,
+                code=code,
+                retryable=retryable,
             )
         else:
             await self._publications.succeed(publication.id, lease_token, asdict(result))
@@ -123,3 +130,15 @@ class ScmPublicationRuntime:
             raise ScmPublicationResultMismatch(
                 "SCM publisher result mismatched: " + ", ".join(mismatches)
             )
+
+    @staticmethod
+    def _classify_failure(exc: Exception) -> tuple[ScmPublicationFailureCode, bool]:
+        if isinstance(exc, ScmPublisherFailure):
+            return exc.code, exc.retryable
+        if isinstance(exc, TimeoutError):
+            return ScmPublicationFailureCode.TIMEOUT, True
+        if isinstance(exc, ScmPublicationResultMismatch):
+            return ScmPublicationFailureCode.RESULT_MISMATCH, False
+        if isinstance(exc, ValueError):
+            return ScmPublicationFailureCode.WORKSPACE_STATE, False
+        return ScmPublicationFailureCode.UNEXPECTED, False

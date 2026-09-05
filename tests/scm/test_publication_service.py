@@ -6,7 +6,7 @@ from jb_orchestrator.application import ExternalExecutionService, ScmPublication
 from jb_orchestrator.application.exceptions import ResourceConflict
 from jb_orchestrator.domain import Project, Run, UserRequest
 from jb_orchestrator.external_executions import ExternalExecutionStatus
-from jb_orchestrator.scm import ScmPublicationStatus
+from jb_orchestrator.scm import ScmPublicationFailureCode, ScmPublicationStatus
 from jb_orchestrator.worker import TaskClaim
 from tests.support import MemoryStore, MemoryUnitOfWork
 
@@ -195,7 +195,18 @@ async def test_failed_publication_retry_preserves_record_and_attempt_history() -
         workspace_scope="git-worktree:scope-a",
     )
     assert claimed is not None and claimed.lease_token is not None
-    failed = await service.fail(claimed.id, claimed.lease_token, "temporary failure")
+    failed = await service.fail(
+        claimed.id,
+        claimed.lease_token,
+        "temporary failure",
+        code=ScmPublicationFailureCode.PROVIDER_UNAVAILABLE,
+        retryable=True,
+    )
+
+    assert failed.failure_code is ScmPublicationFailureCode.PROVIDER_UNAVAILABLE
+    assert failed.failure_retryable is True
+    assert store.events[-1].payload["failure_code"] == "provider_unavailable"
+    assert store.events[-1].payload["failure_retryable"] is True
 
     retried, replayed = await service.retry(failed.id, requested_by="jarvis")
     repeated, repeated_replayed = await service.retry(failed.id, requested_by="jarvis")

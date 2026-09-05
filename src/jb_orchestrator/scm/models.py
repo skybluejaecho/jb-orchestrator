@@ -16,6 +16,26 @@ class ScmPublicationStatus(StrEnum):
     FAILED = "failed"
 
 
+class ScmPublicationFailureCode(StrEnum):
+    """Stable, provider-neutral reason categories for failed publications."""
+
+    WORKSPACE_STATE = "workspace_state"
+    PROVIDER_REJECTED = "provider_rejected"
+    PROVIDER_UNAVAILABLE = "provider_unavailable"
+    TIMEOUT = "timeout"
+    RESULT_MISMATCH = "result_mismatch"
+    UNEXPECTED = "unexpected"
+
+
+class ScmPublisherFailure(RuntimeError):
+    """Typed adapter failure that can safely cross the publisher boundary."""
+
+    def __init__(self, reason: str, *, code: ScmPublicationFailureCode, retryable: bool) -> None:
+        super().__init__(reason)
+        self.code = code
+        self.retryable = retryable
+
+
 @dataclass(slots=True, kw_only=True)
 class ScmPublication:
     """One idempotent, leaseable request to publish a managed branch for review."""
@@ -37,6 +57,8 @@ class ScmPublication:
     lease_expires_at: datetime | None = None
     result: dict[str, Any] | None = None
     failure_reason: str | None = None
+    failure_code: ScmPublicationFailureCode | None = None
+    failure_retryable: bool | None = None
     attempt_count: int = 0
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -92,6 +114,8 @@ class ScmPublication:
         self.lease_expires_at = None
         self.result = None
         self.failure_reason = None
+        self.failure_code = None
+        self.failure_retryable = None
         self.completed_at = None
         self.updated_at = changed_at
 
@@ -103,11 +127,21 @@ class ScmPublication:
         self.status = ScmPublicationStatus.SUCCEEDED
         self.result = result
         self.failure_reason = None
+        self.failure_code = None
+        self.failure_retryable = None
         self.lease_expires_at = None
         self.completed_at = changed_at
         self.updated_at = changed_at
 
-    def fail(self, lease_token: UUID, reason: str, *, at: datetime | None = None) -> None:
+    def fail(
+        self,
+        lease_token: UUID,
+        reason: str,
+        *,
+        code: ScmPublicationFailureCode = ScmPublicationFailureCode.UNEXPECTED,
+        retryable: bool = False,
+        at: datetime | None = None,
+    ) -> None:
         self._require_claim(lease_token)
         normalized = reason.strip()
         if not normalized:
@@ -115,6 +149,8 @@ class ScmPublication:
         changed_at = at or datetime.now(UTC)
         self.status = ScmPublicationStatus.FAILED
         self.failure_reason = normalized
+        self.failure_code = code
+        self.failure_retryable = retryable
         self.lease_expires_at = None
         self.completed_at = changed_at
         self.updated_at = changed_at

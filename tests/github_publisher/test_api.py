@@ -5,6 +5,8 @@ import pytest
 from jb_github_publisher.api import GitHubApiClient, GitHubApiError
 from jb_github_publisher.repository import GitHubRepository
 
+from jb_orchestrator.scm import ScmPublicationFailureCode
+
 
 def test_api_allows_http_only_for_explicit_loopback_fixture() -> None:
     with pytest.raises(ValueError, match="HTTPS"):
@@ -132,6 +134,43 @@ async def test_api_errors_expose_status_and_request_id_without_response_body() -
         )
 
     assert "sensitive" not in str(error.value)
+    assert error.value.code is ScmPublicationFailureCode.PROVIDER_REJECTED
+    assert error.value.retryable is False
+
+
+async def test_api_marks_provider_outage_as_retryable() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503)
+
+    with pytest.raises(GitHubApiError, match="HTTP 503") as error:
+        await client(handler).find_or_create_pull_request(
+            GitHubRepository("example", "project"),
+            source_branch="feature/work",
+            target_branch="develop",
+            title="Review work",
+            body="",
+        )
+
+    assert error.value.code is ScmPublicationFailureCode.PROVIDER_UNAVAILABLE
+    assert error.value.retryable is True
+
+
+async def test_api_sanitizes_and_classifies_transport_failure() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("sensitive endpoint detail", request=request)
+
+    with pytest.raises(GitHubApiError, match="ConnectError") as error:
+        await client(handler).find_or_create_pull_request(
+            GitHubRepository("example", "project"),
+            source_branch="feature/work",
+            target_branch="develop",
+            title="Review work",
+            body="",
+        )
+
+    assert "sensitive" not in str(error.value)
+    assert error.value.code is ScmPublicationFailureCode.PROVIDER_UNAVAILABLE
+    assert error.value.retryable is True
 
 
 async def test_api_rejects_pull_request_for_another_branch() -> None:

@@ -26,6 +26,15 @@ type ScmPublication = {
   status: 'pending' | 'claimed' | 'succeeded' | 'failed';
   result: Record<string, unknown> | null;
   failure_reason: string | null;
+  failure_code:
+    | 'workspace_state'
+    | 'provider_rejected'
+    | 'provider_unavailable'
+    | 'timeout'
+    | 'result_mismatch'
+    | 'unexpected'
+    | null;
+  failure_retryable: boolean | null;
   attempt_count: number;
   created_at: string;
 };
@@ -54,6 +63,17 @@ function statusClass(status: ScmPublication['status']): string {
   if (status === 'succeeded')
     return 'border-emerald-300/20 bg-emerald-300/8 text-emerald-100';
   return 'border-cyan-300/20 bg-cyan-300/8 text-cyan-100';
+}
+
+function failureLabel(publication: ScmPublication): string | null {
+  if (!publication.failure_code) return null;
+  if (publication.failure_retryable) return '재시도 가능';
+  if (publication.failure_code === 'workspace_state')
+    return '작업공간 확인 필요';
+  if (publication.failure_code === 'provider_rejected')
+    return '공급자 요청 확인 필요';
+  if (publication.failure_code === 'result_mismatch') return '결과 검증 실패';
+  return '수동 확인 필요';
 }
 
 export function ScmPublications({
@@ -300,6 +320,7 @@ export function ScmPublications({
         <div className="space-y-2">
           {publications.slice(0, 5).map((publication) => {
             const reviewUrl = safeReviewUrl(publication.result);
+            const classifiedFailure = failureLabel(publication);
             return (
               <div
                 key={publication.id}
@@ -323,6 +344,18 @@ export function ScmPublications({
                   <span className="font-mono text-white/30">
                     시도 {publication.attempt_count}회
                   </span>
+                  {classifiedFailure && (
+                    <Badge
+                      variant="outline"
+                      className={
+                        publication.failure_retryable
+                          ? 'border-amber-300/20 bg-amber-300/8 text-amber-100'
+                          : 'border-white/10 bg-white/5 text-white/50'
+                      }
+                    >
+                      {classifiedFailure}
+                    </Badge>
+                  )}
                   {publication.status === 'failed' && canPublish && (
                     <Button
                       type="button"

@@ -3,7 +3,12 @@ from uuid import uuid4
 import pytest
 
 from jb_orchestrator.domain import DomainValidationError
-from jb_orchestrator.scm import ScmPublication, ScmPublicationRequest, ScmPublicationResult
+from jb_orchestrator.scm import (
+    ScmPublication,
+    ScmPublicationFailureCode,
+    ScmPublicationRequest,
+    ScmPublicationResult,
+)
 
 
 def test_publication_request_normalizes_credential_free_review_input() -> None:
@@ -92,7 +97,15 @@ def test_failed_publication_preserves_attempt_count_and_can_be_retried() -> None
     )
     publication.claim("worker-a", lease_seconds=30)
     assert publication.lease_token is not None
-    publication.fail(publication.lease_token, "temporary failure")
+    publication.fail(
+        publication.lease_token,
+        "temporary failure",
+        code=ScmPublicationFailureCode.PROVIDER_UNAVAILABLE,
+        retryable=True,
+    )
+
+    assert publication.failure_code is ScmPublicationFailureCode.PROVIDER_UNAVAILABLE
+    assert publication.failure_retryable is True
 
     publication.retry()
 
@@ -101,4 +114,6 @@ def test_failed_publication_preserves_attempt_count_and_can_be_retried() -> None
     assert publication.worker_id is None
     assert publication.lease_token is None
     assert publication.failure_reason is None
+    assert publication.failure_code is None
+    assert publication.failure_retryable is None
     assert publication.completed_at is None

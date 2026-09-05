@@ -2,6 +2,7 @@ from httpx import ASGITransport, AsyncClient
 
 from jb_orchestrator.api.main import create_app
 from jb_orchestrator.application import ExternalExecutionService, ScmPublicationService
+from jb_orchestrator.scm import ScmPublicationFailureCode
 from tests.scm.test_publication_service import managed_execution
 from tests.support import MemoryStore, MemoryUnitOfWork
 
@@ -61,14 +62,25 @@ async def test_failed_publication_can_be_retried_through_api() -> None:
         workspace_scope="git-worktree:scope-a",
     )
     assert claimed is not None and claimed.lease_token is not None
-    await publications.fail(claimed.id, claimed.lease_token, "temporary failure")
+    await publications.fail(
+        claimed.id,
+        claimed.lease_token,
+        "temporary failure",
+        code=ScmPublicationFailureCode.PROVIDER_UNAVAILABLE,
+        retryable=True,
+    )
     app = create_app(scm_publication_service=publications)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        [failed_payload] = (
+            await client.get(f"/v1/external-executions/{execution.id}/scm-publications")
+        ).json()
         retried = await client.post(f"/v1/scm-publications/{publication.id}/retry")
         repeated = await client.post(f"/v1/scm-publications/{publication.id}/retry")
 
     assert retried.status_code == 202
+    assert failed_payload["failure_code"] == "provider_unavailable"
+    assert failed_payload["failure_retryable"] is True
     assert retried.json()["status"] == "pending"
     assert retried.json()["attempt_count"] == 1
     assert repeated.status_code == 200

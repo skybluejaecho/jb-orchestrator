@@ -6,11 +6,23 @@ from urllib.parse import urlparse
 from jb_github_publisher.api import GitHubApiClient
 from jb_github_publisher.git_client import GitClient
 from jb_github_publisher.repository import parse_github_repository
-from jb_orchestrator.scm import ScmPublicationRequest, ScmPublicationResult
+from jb_orchestrator.scm import (
+    ScmPublicationFailureCode,
+    ScmPublicationRequest,
+    ScmPublicationResult,
+    ScmPublisherFailure,
+)
 
 
-class GitHubPublicationError(RuntimeError):
+class GitHubPublicationError(ScmPublisherFailure):
     """A publication request violates the adapter safety boundary."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(
+            reason,
+            code=ScmPublicationFailureCode.WORKSPACE_STATE,
+            retryable=False,
+        )
 
 
 class GitHubPublisher:

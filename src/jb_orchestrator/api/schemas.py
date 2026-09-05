@@ -11,7 +11,7 @@ from jb_orchestrator.budgets import UsageKind
 from jb_orchestrator.domain import ProjectStatus, RequestStatus, RunStatus
 from jb_orchestrator.external_executions import ExternalExecutionStatus
 from jb_orchestrator.model_routing import ModelTier, RequirementLevel
-from jb_orchestrator.scm import ScmPublicationStatus
+from jb_orchestrator.scm import ScmPublicationFailureCode, ScmPublicationStatus
 from jb_orchestrator.skills import SkillSourceKind
 from jb_orchestrator.workflows import (
     NodeExecutionStatus,
@@ -296,6 +296,8 @@ class ScmPublicationResponse(BaseModel):
     worker_id: str | None
     result: dict[str, Any] | None
     failure_reason: str | None
+    failure_code: ScmPublicationFailureCode | None
+    failure_retryable: bool | None
     attempt_count: int
     created_at: datetime
     updated_at: datetime

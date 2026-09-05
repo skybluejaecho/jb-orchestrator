@@ -471,6 +471,15 @@ ORCH-055 adds explicit, ledger-preserving recovery for failed SCM publications:
 - Jarvis shows attempt counts and offers retry only for eligible failed records
 - the system smoke proves first-attempt failure followed by a successful Jarvis-triggered retry
 
+ORCH-056 adds provider-neutral failure classification before any automatic retry policy:
+
+- durable failures retain a stable code and retryable decision next to the human-readable reason
+- adapters report typed failures without leaking provider-specific exceptions into the Control Plane
+- runtime timeouts and result or workspace validation failures receive deterministic classifications
+- GitHub 408, 429, 5xx, and transport failures are distinguished from permanent provider rejection
+- Jarvis shows whether retry is reasonable or operator investigation is required
+- explicit retry remains operator-controlled; bounded automatic backoff is a separate policy
+
 ## Prerequisites
 
 - Python 3.12
