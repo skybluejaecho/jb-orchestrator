@@ -22,6 +22,7 @@ from jb_orchestrator.infrastructure.database.models import (
     ExternalExecutionRecord,
     ProjectRecord,
     RunRecord,
+    ScmPublicationRecord,
     UserRequestRecord,
     WorkflowExecutionRecord,
     WorkspaceOperationRecord,
@@ -298,6 +299,9 @@ class SqlAlchemyEventRepository:
         workspace_operation_ids = select(WorkspaceOperationRecord.id).where(
             WorkspaceOperationRecord.external_execution_id.in_(external_ids)
         )
+        scm_publication_ids = select(ScmPublicationRecord.id).where(
+            ScmPublicationRecord.external_execution_id.in_(external_ids)
+        )
         budget_account_ids = select(BudgetAccountRecord.id).where(
             BudgetAccountRecord.project_id == project_id
         )
@@ -329,6 +333,10 @@ class SqlAlchemyEventRepository:
                 and_(
                     EventRecord.aggregate_type == "workspace_operation",
                     EventRecord.aggregate_id.in_(workspace_operation_ids),
+                ),
+                and_(
+                    EventRecord.aggregate_type == "scm_publication",
+                    EventRecord.aggregate_id.in_(scm_publication_ids),
                 ),
                 and_(
                     EventRecord.aggregate_type == "budget_account",
