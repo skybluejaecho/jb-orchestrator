@@ -27,6 +27,7 @@ from jb_orchestrator.domain import (
 from jb_orchestrator.external_executions import ExternalExecution, ExternalExecutionStatus
 from jb_orchestrator.model_routing import ModelProfile
 from jb_orchestrator.phase_packs import PhasePackDefinition
+from jb_orchestrator.scm import ScmPublication, ScmPublicationStatus
 from jb_orchestrator.security import ServiceAccount
 from jb_orchestrator.skills import SkillDefinition
 from jb_orchestrator.workflows import (
@@ -64,6 +65,7 @@ class MemoryStore:
     usage_records: list[UsageRecord] = field(default_factory=list)
     external_executions: dict[str, ExternalExecution] = field(default_factory=dict)
     workspace_operations: dict[UUID, WorkspaceOperation] = field(default_factory=dict)
+    scm_publications: dict[UUID, ScmPublication] = field(default_factory=dict)
     service_accounts: dict[UUID, ServiceAccount] = field(default_factory=dict)
 
 
@@ -312,6 +314,72 @@ class MemoryWorkspaceOperationRepository:
         self._store.workspace_operations[operation.id] = operation
 
 
+class MemoryScmPublicationRepository:
+    def __init__(self, store: MemoryStore) -> None:
+        self._store = store
+
+    async def try_add(self, publication: ScmPublication) -> bool:
+        if await self.get_by_idempotency_key(
+            publication.external_execution_id, publication.idempotency_key
+        ):
+            return False
+        self._store.scm_publications[publication.id] = publication
+        return True
+
+    async def get(self, publication_id: UUID, *, for_update: bool = False) -> ScmPublication | None:
+        return self._store.scm_publications.get(publication_id)
+
+    async def get_by_idempotency_key(
+        self, external_execution_id: UUID, idempotency_key: str
+    ) -> ScmPublication | None:
+        return next(
+            (
+                publication
+                for publication in self._store.scm_publications.values()
+                if publication.external_execution_id == external_execution_id
+                and publication.idempotency_key == idempotency_key
+            ),
+            None,
+        )
+
+    async def list_for_execution(
+        self, external_execution_id: UUID, *, limit: int = 100
+    ) -> list[ScmPublication]:
+        matches = [
+            publication
+            for publication in self._store.scm_publications.values()
+            if publication.external_execution_id == external_execution_id
+        ]
+        return sorted(matches, key=lambda value: (value.created_at, value.id), reverse=True)[:limit]
+
+    async def claim_next(
+        self, *, worker_id: str, provider_key: str, workspace_scope: str, lease_seconds: int
+    ) -> ScmPublication | None:
+        now = datetime.now().astimezone()
+        candidates = [
+            publication
+            for publication in self._store.scm_publications.values()
+            if publication.provider_key == provider_key
+            and publication.workspace_scope == workspace_scope
+            and (
+                publication.status is ScmPublicationStatus.PENDING
+                or (
+                    publication.status is ScmPublicationStatus.CLAIMED
+                    and publication.lease_expires_at is not None
+                    and publication.lease_expires_at <= now
+                )
+            )
+        ]
+        if not candidates:
+            return None
+        publication = min(candidates, key=lambda value: (value.created_at, value.id))
+        publication.claim(worker_id, lease_seconds=lease_seconds, at=now)
+        return publication
+
+    async def save(self, publication: ScmPublication) -> None:
+        self._store.scm_publications[publication.id] = publication
+
+
 class MemoryEventRepository:
     def __init__(self, store: MemoryStore) -> None:
         self._store = store
@@ -372,6 +440,11 @@ class MemoryEventRepository:
             for operation in self._store.workspace_operations.values()
             if operation.external_execution_id in external_ids
         }
+        scm_publication_ids = {
+            publication.id
+            for publication in self._store.scm_publications.values()
+            if publication.external_execution_id in external_ids
+        }
         budget_account_ids = {
             account.id
             for account in self._store.budget_accounts.values()
@@ -389,6 +462,7 @@ class MemoryEventRepository:
             "workflow_execution": workflow_ids,
             "external_execution": external_ids,
             "workspace_operation": workspace_operation_ids,
+            "scm_publication": scm_publication_ids,
             "budget_account": budget_account_ids,
             "budget_reservation": budget_reservation_ids,
         }
@@ -727,6 +801,7 @@ class MemoryUnitOfWork:
         self.usage_records = MemoryUsageRecordRepository(store)
         self.external_executions = MemoryExternalExecutionRepository(store)
         self.workspace_operations = MemoryWorkspaceOperationRepository(store)
+        self.scm_publications = MemoryScmPublicationRepository(store)
         self.workflow_definitions = MemoryWorkflowDefinitionRepository(store)
         self.workflow_executions = MemoryWorkflowExecutionRepository(store)
         self.project_workflow_bindings = MemoryProjectWorkflowBindingRepository(store)
