@@ -221,6 +221,7 @@ async def _issue_tokens(suffix: str) -> tuple[str, str]:
                 ApiPermission.REQUEST_DISPATCH,
                 ApiPermission.WORKFLOW_APPROVE,
                 ApiPermission.RUN_CANCEL,
+                ApiPermission.WORKSPACE_MANAGE,
             ),
             all_projects=True,
         )
