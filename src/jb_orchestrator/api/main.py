@@ -17,6 +17,7 @@ from jb_orchestrator.application.model_services import ModelCatalogService
 from jb_orchestrator.application.phase_pack_services import PhasePackCatalogService
 from jb_orchestrator.application.project_observation_services import ProjectObservationService
 from jb_orchestrator.application.request_dispatch_services import RequestDispatchService
+from jb_orchestrator.application.scm_publication_services import ScmPublicationService
 from jb_orchestrator.application.security_services import SecurityService
 from jb_orchestrator.application.services import OrchestrationService
 from jb_orchestrator.application.skill_services import SkillCatalogService
@@ -42,6 +43,7 @@ def create_app(
     project_observation_service: ProjectObservationService | None = None,
     security_service: SecurityService | None = None,
     workspace_operation_service: WorkspaceOperationService | None = None,
+    scm_publication_service: ScmPublicationService | None = None,
     auth_enabled: bool | None = None,
 ) -> FastAPI:
     """Build the API application."""
@@ -60,6 +62,7 @@ def create_app(
         or request_dispatch_service is None
         or project_observation_service is None
         or workspace_operation_service is None
+        or scm_publication_service is None
         or (auth_enabled and security_service is None)
     ):
         session_factory = create_session_factory()
@@ -91,6 +94,10 @@ def create_app(
         workspace_operation_service = WorkspaceOperationService(
             lambda: SqlAlchemyUnitOfWork(session_factory)
         )
+    if scm_publication_service is None:
+        scm_publication_service = ScmPublicationService(
+            lambda: SqlAlchemyUnitOfWork(session_factory)
+        )
     if auth_enabled and security_service is None:
         security_service = SecurityService(lambda: SqlAlchemyUnitOfWork(session_factory))
     app.state.orchestration_service = service
@@ -103,6 +110,7 @@ def create_app(
     app.state.request_dispatch_service = request_dispatch_service
     app.state.project_observation_service = project_observation_service
     app.state.workspace_operation_service = workspace_operation_service
+    app.state.scm_publication_service = scm_publication_service
     app.state.security_service = security_service
     app.state.auth_enabled = auth_enabled
 

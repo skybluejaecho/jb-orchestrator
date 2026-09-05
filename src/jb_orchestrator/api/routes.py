@@ -14,6 +14,7 @@ from jb_orchestrator.api.dependencies import (
     get_phase_pack_catalog_service,
     get_project_observation_service,
     get_request_dispatch_service,
+    get_scm_publication_service,
     get_skill_catalog_service,
     get_workflow_service,
     get_workspace_operation_service,
@@ -37,6 +38,8 @@ from jb_orchestrator.api.schemas import (
     ProjectWorkflowBindingResponse,
     ProjectWorkflowOptionsResponse,
     RunResponse,
+    ScmPublicationCreate,
+    ScmPublicationResponse,
     SkillCreate,
     SkillResponse,
     TaskArtifactResponse,
@@ -69,6 +72,7 @@ from jb_orchestrator.application import (
     ProjectObservationService,
     RegisterProject,
     RequestDispatchService,
+    ScmPublicationService,
     SkillCatalogService,
     WorkflowComposition,
     WorkflowService,
@@ -115,6 +119,9 @@ ExternalExecutionServiceDependency = Annotated[
 ]
 WorkspaceOperationServiceDependency = Annotated[
     WorkspaceOperationService, Depends(get_workspace_operation_service)
+]
+ScmPublicationServiceDependency = Annotated[
+    ScmPublicationService, Depends(get_scm_publication_service)
 ]
 ProjectObservationServiceDependency = Annotated[
     ProjectObservationService, Depends(get_project_observation_service)
@@ -793,4 +800,48 @@ async def list_workspace_operations(
     return [
         WorkspaceOperationResponse.model_validate(operation)
         for operation in await service.list_for_execution(execution_id, limit=limit)
+    ]
+
+
+@router.post(
+    "/external-executions/{execution_id}/scm-publications",
+    response_model=ScmPublicationResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def request_scm_publication(
+    execution_id: UUID,
+    payload: ScmPublicationCreate,
+    request: Request,
+    response: Response,
+    service: ScmPublicationServiceDependency,
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=255)],
+) -> ScmPublicationResponse:
+    principal = getattr(request.state, "principal", None)
+    requested_by = principal.account_key if principal is not None else "anonymous"
+    publication, replayed = await service.request(
+        execution_id,
+        provider_key=payload.provider_key,
+        target_branch=payload.target_branch,
+        title=payload.title,
+        body=payload.body,
+        idempotency_key=idempotency_key,
+        requested_by=requested_by,
+    )
+    if replayed:
+        response.status_code = status.HTTP_200_OK
+    return ScmPublicationResponse.model_validate(publication)
+
+
+@router.get(
+    "/external-executions/{execution_id}/scm-publications",
+    response_model=list[ScmPublicationResponse],
+)
+async def list_scm_publications(
+    execution_id: UUID,
+    service: ScmPublicationServiceDependency,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[ScmPublicationResponse]:
+    return [
+        ScmPublicationResponse.model_validate(publication)
+        for publication in await service.list_for_execution(execution_id, limit=limit)
     ]
