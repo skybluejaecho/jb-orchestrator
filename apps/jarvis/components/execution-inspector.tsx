@@ -25,6 +25,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { ExecutionCancellation } from '@/components/execution-cancellation';
+import { WorkspaceOperations } from '@/components/workspace-operations';
 
 type NodeExecution = {
   id: string;
@@ -46,7 +47,11 @@ type Execution = {
   run_id: string;
   definition_key: string;
   definition_version: number;
-  request_context: { title: string | null; prompt: string } | null;
+  request_context: {
+    title: string | null;
+    prompt: string;
+    default_branch: string;
+  } | null;
   status: string;
   nodes: NodeExecution[];
   failure_reason: string | null;
@@ -72,6 +77,7 @@ type ExternalExecution = {
   workspace_repository_path: string | null;
   workspace_branch: string | null;
   workspace_base_ref: string | null;
+  workspace_scope: string | null;
   workspace_released_at: string | null;
   external_run_id: string | null;
   status: string;
@@ -350,6 +356,23 @@ export function ExecutionInspector({
                         <p className="mt-3 rounded-md border border-red-300/15 bg-red-300/5 p-2 text-xs text-red-100">
                           {external.failure_reason}
                         </p>
+                      )}
+                      {external.workspace_path && (
+                        <WorkspaceOperations
+                          externalExecutionId={external.id}
+                          externalStatus={external.status}
+                          workspaceScope={external.workspace_scope}
+                          releasedAt={external.workspace_released_at}
+                          defaultTargetRef={
+                            detail.execution.request_context?.default_branch ??
+                            'develop'
+                          }
+                          revision={revision}
+                          onChanged={async () => {
+                            await load();
+                            onChanged();
+                          }}
+                        />
                       )}
                     </article>
                   ))}
