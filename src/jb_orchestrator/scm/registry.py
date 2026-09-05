@@ -85,7 +85,12 @@ class ScmPublisherRegistry:
                 raise ScmPublisherRegistrationError(
                     f"SCM publisher entry point must load a callable factory: {entry.name}"
                 )
-            publisher = factory()
+            try:
+                publisher = factory()
+            except Exception as exc:
+                raise ScmPublisherRegistrationError(
+                    f"SCM publisher factory failed: {entry.name}"
+                ) from exc
             if not isinstance(publisher, ScmPublisher):
                 raise ScmPublisherRegistrationError(
                     f"SCM publisher factory returned an invalid adapter: {entry.name}"

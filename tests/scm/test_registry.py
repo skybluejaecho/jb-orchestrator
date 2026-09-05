@@ -93,3 +93,15 @@ def test_registry_loads_installed_factories() -> None:
 def test_registry_rejects_invalid_entry_points(loaded: object) -> None:
     with pytest.raises(ScmPublisherRegistrationError):
         ScmPublisherRegistry.from_entry_points([StubEntryPoint(name="invalid", value=loaded)])
+
+
+def test_registry_wraps_factory_failure_without_exposing_detail() -> None:
+    def failing_factory() -> object:
+        raise RuntimeError("secret configuration detail")
+
+    with pytest.raises(ScmPublisherRegistrationError, match=r"factory failed: github$") as error:
+        ScmPublisherRegistry.from_entry_points(
+            [StubEntryPoint(name="github", value=failing_factory)]
+        )
+
+    assert "secret configuration detail" not in str(error.value)

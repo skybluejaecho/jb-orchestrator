@@ -436,6 +436,16 @@ ORCH-051 executes durable publications through installed adapters:
 - provider, repository, and branch identifiers must match before success is recorded
 - adapter errors, timeouts, state drift, and mismatched results become durable failure records
 
+ORCH-052 adds the first concrete SCM publisher for GitHub:
+
+- the separately installed github entry point performs a non-force push of the exact worktree HEAD
+- repository URL, worktree root, clean state, current branch, remote identity, and Git refs are
+  validated before mutation
+- exact open head/base pull requests are reused, including one bounded HTTP 422 race recovery
+- the GitHub API token remains adapter-owned and is never injected into Git commands or URLs
+- response bodies and authorization data are excluded from durable failure messages
+- merge, force-push, branch deletion, and workspace cleanup remain explicit separate operations
+
 ## Prerequisites
 
 - Python 3.12
@@ -558,7 +568,7 @@ SCM publisher packages use a separate entry-point group:
 After installing a publisher, run one worker for the opaque scope emitted by the managed worktree
 host. The operation timeout must remain shorter than the lease:
 
-    uv run jb-scm-worker --workspace-scope <workspace-scope> --lease-seconds 300 --operation-timeout 240
+    uv run --with-editable . --with-editable adapters/github jb-scm-worker --workspace-scope <workspace-scope> --lease-seconds 300 --operation-timeout 240
 
 The adapter receives repository and branch data plus the trusted current worktree path. It reads
 credentials only from its own environment or secret store. The core worker never merges reviews,
