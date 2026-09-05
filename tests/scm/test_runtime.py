@@ -1,8 +1,10 @@
 from jb_orchestrator.application import ExternalExecutionService, ScmPublicationService
 from jb_orchestrator.scm import (
+    ScmPublicationFailureCode,
     ScmPublicationRequest,
     ScmPublicationResult,
     ScmPublicationStatus,
+    ScmPublisherFailure,
     ScmPublisherRegistry,
 )
 from jb_orchestrator.scm.runtime import ScmPublicationRuntime
@@ -94,6 +96,29 @@ async def test_runtime_records_adapter_failure() -> None:
     )
     assert failed.status is ScmPublicationStatus.FAILED
     assert failed.failure_reason == "provider unavailable"
+    assert failed.failure_code is ScmPublicationFailureCode.UNEXPECTED
+    assert failed.failure_retryable is False
+
+
+async def test_runtime_preserves_typed_retryable_adapter_failure() -> None:
+    class RetryablePublisher(RecordingPublisher):
+        async def publish_review(self, request: ScmPublicationRequest) -> ScmPublicationResult:
+            raise ScmPublisherFailure(
+                "provider temporarily unavailable",
+                code=ScmPublicationFailureCode.PROVIDER_UNAVAILABLE,
+                retryable=True,
+            )
+
+    store = MemoryStore()
+    runtime, publications = await queued_publication(store, RetryablePublisher())
+
+    assert await runtime.run_once()
+
+    [failed] = await publications.list_for_execution(
+        next(iter(store.external_executions.values())).id
+    )
+    assert failed.failure_code is ScmPublicationFailureCode.PROVIDER_UNAVAILABLE
+    assert failed.failure_retryable is True
 
 
 async def test_runtime_rejects_mismatched_provider_result() -> None:
@@ -107,6 +132,8 @@ async def test_runtime_rejects_mismatched_provider_result() -> None:
     )
     assert failed.status is ScmPublicationStatus.FAILED
     assert failed.failure_reason == "SCM publisher result mismatched: provider"
+    assert failed.failure_code is ScmPublicationFailureCode.RESULT_MISMATCH
+    assert failed.failure_retryable is False
 
 
 async def test_runtime_does_not_claim_another_workspace_scope() -> None:

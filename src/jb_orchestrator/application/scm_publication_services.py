@@ -8,7 +8,11 @@ from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNot
 from jb_orchestrator.application.unit_of_work import UnitOfWork
 from jb_orchestrator.domain import DomainEvent, DomainValidationError, Project
 from jb_orchestrator.external_executions import ExternalExecution
-from jb_orchestrator.scm import ScmPublication, ScmPublicationStatus
+from jb_orchestrator.scm import (
+    ScmPublication,
+    ScmPublicationFailureCode,
+    ScmPublicationStatus,
+)
 
 
 class ScmPublicationService:
@@ -149,8 +153,22 @@ class ScmPublicationService:
     ) -> ScmPublication:
         return await self._finish(publication_id, lease_token, result=result)
 
-    async def fail(self, publication_id: UUID, lease_token: UUID, reason: str) -> ScmPublication:
-        return await self._finish(publication_id, lease_token, failure_reason=reason)
+    async def fail(
+        self,
+        publication_id: UUID,
+        lease_token: UUID,
+        reason: str,
+        *,
+        code: ScmPublicationFailureCode = ScmPublicationFailureCode.UNEXPECTED,
+        retryable: bool = False,
+    ) -> ScmPublication:
+        return await self._finish(
+            publication_id,
+            lease_token,
+            failure_reason=reason,
+            failure_code=code,
+            failure_retryable=retryable,
+        )
 
     async def _finish(
         self,
@@ -159,6 +177,8 @@ class ScmPublicationService:
         *,
         result: dict[str, Any] | None = None,
         failure_reason: str | None = None,
+        failure_code: ScmPublicationFailureCode | None = None,
+        failure_retryable: bool = False,
     ) -> ScmPublication:
         async with self._unit_of_work_factory() as unit_of_work:
             publication = await unit_of_work.scm_publications.get(publication_id, for_update=True)
@@ -168,7 +188,12 @@ class ScmPublicationService:
                 publication.succeed(lease_token, result or {})
                 event_type = "scm_publication.succeeded"
             else:
-                publication.fail(lease_token, failure_reason)
+                publication.fail(
+                    lease_token,
+                    failure_reason,
+                    code=failure_code or ScmPublicationFailureCode.UNEXPECTED,
+                    retryable=failure_retryable,
+                )
                 event_type = "scm_publication.failed"
             await unit_of_work.scm_publications.save(publication)
             execution = await self._execution(unit_of_work, publication.external_execution_id)
@@ -215,6 +240,8 @@ class ScmPublicationService:
             "status": publication.status.value,
             "worker_id": publication.worker_id,
             "failure_reason": publication.failure_reason,
+            "failure_code": publication.failure_code.value if publication.failure_code else None,
+            "failure_retryable": publication.failure_retryable,
             "attempt_count": publication.attempt_count,
         }
         if actor is not None:

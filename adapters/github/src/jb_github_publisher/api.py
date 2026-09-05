@@ -7,10 +7,38 @@ from urllib.parse import urlparse
 import httpx
 
 from jb_github_publisher.repository import GitHubRepository
+from jb_orchestrator.scm import ScmPublicationFailureCode, ScmPublisherFailure
 
 
-class GitHubApiError(RuntimeError):
+class GitHubApiError(ScmPublisherFailure):
     """GitHub returned an unexpected or malformed response."""
+
+    def __init__(
+        self,
+        reason: str,
+        *,
+        status_code: int | None = None,
+        retryable: bool | None = None,
+    ) -> None:
+        can_retry = (
+            status_code in {408, 429} or (status_code is not None and status_code >= 500)
+            if retryable is None
+            else retryable
+        )
+        super().__init__(
+            reason,
+            code=(
+                ScmPublicationFailureCode.PROVIDER_UNAVAILABLE
+                if can_retry
+                else (
+                    ScmPublicationFailureCode.PROVIDER_REJECTED
+                    if status_code is not None
+                    else ScmPublicationFailureCode.UNEXPECTED
+                )
+            ),
+            retryable=can_retry,
+        )
+        self.status_code = status_code
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,7 +108,9 @@ class GitHubApiClient:
             )
             if existing is not None:
                 return existing
-            response = await client.post(
+            response = await self._request(
+                client,
+                "POST",
                 f"/repos/{repository.owner}/{repository.name}/pulls",
                 json={
                     "title": title,
@@ -115,7 +145,9 @@ class GitHubApiClient:
         source_branch: str,
         target_branch: str,
     ) -> GitHubPullRequest | None:
-        response = await client.get(
+        response = await cls._request(
+            client,
+            "GET",
             f"/repos/{repository.owner}/{repository.name}/pulls",
             params={
                 "state": "open",
@@ -136,6 +168,17 @@ class GitHubApiClient:
             source_branch=source_branch,
             target_branch=target_branch,
         )
+
+    @staticmethod
+    async def _request(
+        client: httpx.AsyncClient, method: str, url: str, **kwargs: Any
+    ) -> httpx.Response:
+        try:
+            return await client.request(method, url, **kwargs)
+        except httpx.TransportError as exc:
+            raise GitHubApiError(
+                f"GitHub request failed: {type(exc).__name__}", retryable=True
+            ) from exc
 
     @staticmethod
     def _pull_request(payload: Any, *, source_branch: str, target_branch: str) -> GitHubPullRequest:
@@ -164,4 +207,7 @@ class GitHubApiClient:
     def _error(action: str, response: httpx.Response) -> GitHubApiError:
         request_id = response.headers.get("x-github-request-id")
         suffix = f", request_id={request_id}" if request_id else ""
-        return GitHubApiError(f"GitHub {action} failed with HTTP {response.status_code}{suffix}")
+        return GitHubApiError(
+            f"GitHub {action} failed with HTTP {response.status_code}{suffix}",
+            status_code=response.status_code,
+        )

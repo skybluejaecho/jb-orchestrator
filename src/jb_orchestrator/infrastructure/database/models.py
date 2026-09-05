@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import (
     JSON,
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     Enum,
@@ -31,7 +32,7 @@ from jb_orchestrator.domain.runs import RunStatus
 from jb_orchestrator.external_executions import ExternalExecutionStatus
 from jb_orchestrator.infrastructure.database.base import Base
 from jb_orchestrator.model_routing import ModelTier
-from jb_orchestrator.scm import ScmPublicationStatus
+from jb_orchestrator.scm import ScmPublicationFailureCode, ScmPublicationStatus
 from jb_orchestrator.skills import SkillSourceKind
 from jb_orchestrator.workflows.models import NodeExecutionStatus, NodeOutcome, WorkflowStatus
 from jb_orchestrator.workspace_operations import WorkspaceOperationKind, WorkspaceOperationStatus
@@ -544,6 +545,10 @@ class ScmPublicationRecord(Base):
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     result: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     failure_reason: Mapped[str | None] = mapped_column(Text)
+    failure_code: Mapped[ScmPublicationFailureCode | None] = mapped_column(
+        string_enum(ScmPublicationFailureCode, "scm_publication_failure_code")
+    )
+    failure_retryable: Mapped[bool | None] = mapped_column(Boolean)
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
