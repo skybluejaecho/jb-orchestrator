@@ -462,6 +462,15 @@ ORCH-054 exposes the durable SCM publication flow in the local Jarvis dashboard:
 - completed review URLs become links only after Jarvis validates their HTTPS scheme
 - project SSE events refresh publication state without making the browser predict completion
 
+ORCH-055 adds explicit, ledger-preserving recovery for failed SCM publications:
+
+- every worker claim increments a durable attempt counter
+- only failed publications can be reset to pending; active retries replay safely
+- succeeded publications and released or changed worktrees remain non-retryable
+- project-scoped authorization resolves a publication back through its external execution
+- Jarvis shows attempt counts and offers retry only for eligible failed records
+- the system smoke proves first-attempt failure followed by a successful Jarvis-triggered retry
+
 ## Prerequisites
 
 - Python 3.12
