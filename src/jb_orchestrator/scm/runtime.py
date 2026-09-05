@@ -1,10 +1,13 @@
 """Lease-bounded runtime for durable SCM publication requests."""
 
 import asyncio
+import math
 from dataclasses import asdict
+from datetime import UTC, datetime, timedelta
 
 from jb_orchestrator.application import ExternalExecutionService, ScmPublicationService
 from jb_orchestrator.scm.models import (
+    MAX_AUTOMATIC_RETRY_LIMIT,
     ScmPublication,
     ScmPublicationFailureCode,
     ScmPublicationRequest,
@@ -32,6 +35,9 @@ class ScmPublicationRuntime:
         poll_interval_seconds: float = 1.0,
         lease_seconds: int = 300,
         operation_timeout_seconds: float = 240.0,
+        automatic_retry_limit: int = 0,
+        automatic_retry_base_delay_seconds: float = 30.0,
+        automatic_retry_max_delay_seconds: float = 300.0,
     ) -> None:
         if not worker_id.strip():
             raise ValueError("SCM publication worker id must not be empty")
@@ -43,6 +49,15 @@ class ScmPublicationRuntime:
             raise ValueError("SCM publication worker intervals must be positive")
         if operation_timeout_seconds >= lease_seconds:
             raise ValueError("SCM publication timeout must be shorter than its lease")
+        if not 0 <= automatic_retry_limit <= MAX_AUTOMATIC_RETRY_LIMIT:
+            raise ValueError(
+                f"SCM publication automatic retry limit must be between 0 and "
+                f"{MAX_AUTOMATIC_RETRY_LIMIT}"
+            )
+        if automatic_retry_base_delay_seconds <= 0 or automatic_retry_max_delay_seconds <= 0:
+            raise ValueError("SCM publication automatic retry delays must be positive")
+        if automatic_retry_base_delay_seconds > automatic_retry_max_delay_seconds:
+            raise ValueError("SCM publication retry base delay must not exceed maximum delay")
         self._worker_id = worker_id.strip()
         self._workspace_scope = workspace_scope.strip()
         self._publications = publications
@@ -51,6 +66,9 @@ class ScmPublicationRuntime:
         self._poll_interval_seconds = poll_interval_seconds
         self._lease_seconds = lease_seconds
         self._operation_timeout_seconds = operation_timeout_seconds
+        self._automatic_retry_limit = automatic_retry_limit
+        self._automatic_retry_base_delay_seconds = automatic_retry_base_delay_seconds
+        self._automatic_retry_max_delay_seconds = automatic_retry_max_delay_seconds
 
     async def run_once(self) -> bool:
         publication = await self._claim_next()
@@ -85,12 +103,15 @@ class ScmPublicationRuntime:
             self._validate_result(publication, result)
         except Exception as exc:
             code, retryable = self._classify_failure(exc)
+            next_attempt_at = self._next_attempt_at(publication) if retryable else None
             await self._publications.fail(
                 publication.id,
                 lease_token,
                 str(exc) or type(exc).__name__,
                 code=code,
                 retryable=retryable,
+                automatic_retry_limit=self._automatic_retry_limit,
+                next_attempt_at=next_attempt_at,
             )
         else:
             await self._publications.succeed(publication.id, lease_token, asdict(result))
@@ -142,3 +163,20 @@ class ScmPublicationRuntime:
         if isinstance(exc, ValueError):
             return ScmPublicationFailureCode.WORKSPACE_STATE, False
         return ScmPublicationFailureCode.UNEXPECTED, False
+
+    def _next_attempt_at(self, publication: ScmPublication) -> datetime | None:
+        if self._automatic_retry_limit == 0:
+            return None
+        if publication.attempt_count > self._automatic_retry_limit:
+            return None
+        exponent = publication.attempt_count - 1
+        steps_to_cap = math.ceil(
+            math.log2(
+                self._automatic_retry_max_delay_seconds / self._automatic_retry_base_delay_seconds
+            )
+        )
+        delay = min(
+            self._automatic_retry_base_delay_seconds * (2 ** min(exponent, steps_to_cap)),
+            self._automatic_retry_max_delay_seconds,
+        )
+        return datetime.now(UTC) + timedelta(seconds=delay)

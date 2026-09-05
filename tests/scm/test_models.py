@@ -1,8 +1,10 @@
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
 
 from jb_orchestrator.domain import DomainValidationError
+from jb_orchestrator.domain.exceptions import InvalidStateTransition
 from jb_orchestrator.scm import (
     ScmPublication,
     ScmPublicationFailureCode,
@@ -117,3 +119,57 @@ def test_failed_publication_preserves_attempt_count_and_can_be_retried() -> None
     assert publication.failure_code is None
     assert publication.failure_retryable is None
     assert publication.completed_at is None
+
+
+def test_failed_publication_can_only_be_claimed_when_scheduled_retry_is_due() -> None:
+    now = datetime(2026, 9, 5, tzinfo=UTC)
+    publication = ScmPublication(
+        external_execution_id=uuid4(),
+        provider_key="github",
+        repository="https://github.com/example/project.git",
+        source_branch="feature/review",
+        target_branch="develop",
+        title="Review",
+        body="",
+        workspace_scope="scope-a",
+        idempotency_key="publish-auto-retry",
+        requested_by="jarvis",
+    )
+    publication.claim("worker-a", lease_seconds=30, at=now)
+    assert publication.lease_token is not None
+    publication.fail(
+        publication.lease_token,
+        "temporary failure",
+        code=ScmPublicationFailureCode.PROVIDER_UNAVAILABLE,
+        retryable=True,
+        automatic_retry_limit=2,
+        next_attempt_at=now + timedelta(seconds=30),
+        at=now,
+    )
+
+    with pytest.raises(InvalidStateTransition, match="terminal"):
+        publication.claim("worker-b", lease_seconds=30, at=now + timedelta(seconds=29))
+
+    publication.claim("worker-b", lease_seconds=30, at=now + timedelta(seconds=30))
+
+    assert publication.status.value == "claimed"
+    assert publication.attempt_count == 2
+    assert publication.next_attempt_at is None
+    assert publication.failure_reason is None
+
+
+def test_publication_rejects_effectively_unbounded_automatic_retry_limit() -> None:
+    with pytest.raises(DomainValidationError, match="between 0 and 10"):
+        ScmPublication(
+            external_execution_id=uuid4(),
+            provider_key="github",
+            repository="https://github.com/example/project.git",
+            source_branch="feature/review",
+            target_branch="develop",
+            title="Review",
+            body="",
+            workspace_scope="scope-a",
+            idempotency_key="publish-unbounded",
+            requested_by="jarvis",
+            automatic_retry_limit=11,
+        )

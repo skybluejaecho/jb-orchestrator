@@ -31,6 +31,18 @@ def run(
     operation_timeout: float = typer.Option(
         240.0, min=1.0, help="Maximum provider operation duration in seconds."
     ),
+    automatic_retry_limit: int = typer.Option(
+        0,
+        min=0,
+        max=10,
+        help="Automatic retries after the initial attempt; disabled by default.",
+    ),
+    automatic_retry_base_delay: float = typer.Option(
+        30.0, min=0.1, help="Initial automatic retry delay in seconds."
+    ),
+    automatic_retry_max_delay: float = typer.Option(
+        300.0, min=0.1, help="Maximum automatic retry delay in seconds."
+    ),
 ) -> None:
     """Start a worker using installed jb_orchestrator.scm_publishers entry points."""
 
@@ -67,6 +79,9 @@ def run(
         poll_interval_seconds=poll_interval,
         lease_seconds=lease_seconds,
         operation_timeout_seconds=operation_timeout,
+        automatic_retry_limit=automatic_retry_limit,
+        automatic_retry_base_delay_seconds=automatic_retry_base_delay,
+        automatic_retry_max_delay_seconds=automatic_retry_max_delay,
     )
     if once:
         worked = asyncio.run(runtime.run_once())

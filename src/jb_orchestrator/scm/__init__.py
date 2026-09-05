@@ -1,6 +1,7 @@
 """Provider-neutral source-control publication boundary."""
 
 from jb_orchestrator.scm.models import (
+    MAX_AUTOMATIC_RETRY_LIMIT,
     ScmPublication,
     ScmPublicationFailureCode,
     ScmPublicationRequest,
@@ -18,6 +19,7 @@ from jb_orchestrator.scm.registry import (
 from jb_orchestrator.scm.repositories import ScmPublicationRepository
 
 __all__ = [
+    "MAX_AUTOMATIC_RETRY_LIMIT",
     "SCM_PUBLISHER_ENTRY_POINT_GROUP",
     "ScmPublication",
     "ScmPublicationFailureCode",

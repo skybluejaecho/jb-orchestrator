@@ -1,6 +1,7 @@
 """Application service for durable SCM publication requests."""
 
 from collections.abc import Callable
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -161,6 +162,8 @@ class ScmPublicationService:
         *,
         code: ScmPublicationFailureCode = ScmPublicationFailureCode.UNEXPECTED,
         retryable: bool = False,
+        automatic_retry_limit: int = 0,
+        next_attempt_at: datetime | None = None,
     ) -> ScmPublication:
         return await self._finish(
             publication_id,
@@ -168,6 +171,8 @@ class ScmPublicationService:
             failure_reason=reason,
             failure_code=code,
             failure_retryable=retryable,
+            automatic_retry_limit=automatic_retry_limit,
+            next_attempt_at=next_attempt_at,
         )
 
     async def _finish(
@@ -179,6 +184,8 @@ class ScmPublicationService:
         failure_reason: str | None = None,
         failure_code: ScmPublicationFailureCode | None = None,
         failure_retryable: bool = False,
+        automatic_retry_limit: int = 0,
+        next_attempt_at: datetime | None = None,
     ) -> ScmPublication:
         async with self._unit_of_work_factory() as unit_of_work:
             publication = await unit_of_work.scm_publications.get(publication_id, for_update=True)
@@ -193,11 +200,20 @@ class ScmPublicationService:
                     failure_reason,
                     code=failure_code or ScmPublicationFailureCode.UNEXPECTED,
                     retryable=failure_retryable,
+                    automatic_retry_limit=automatic_retry_limit,
+                    next_attempt_at=next_attempt_at,
                 )
                 event_type = "scm_publication.failed"
             await unit_of_work.scm_publications.save(publication)
             execution = await self._execution(unit_of_work, publication.external_execution_id)
             await self._event(unit_of_work, publication, execution, event_type)
+            if publication.next_attempt_at is not None:
+                await self._event(
+                    unit_of_work,
+                    publication,
+                    execution,
+                    "scm_publication.retry_scheduled",
+                )
             await unit_of_work.commit()
             return publication
 
@@ -243,6 +259,12 @@ class ScmPublicationService:
             "failure_code": publication.failure_code.value if publication.failure_code else None,
             "failure_retryable": publication.failure_retryable,
             "attempt_count": publication.attempt_count,
+            "automatic_retry_limit": publication.automatic_retry_limit,
+            "next_attempt_at": (
+                publication.next_attempt_at.isoformat()
+                if publication.next_attempt_at is not None
+                else None
+            ),
         }
         if actor is not None:
             payload["actor"] = actor

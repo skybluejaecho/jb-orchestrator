@@ -56,3 +56,18 @@ def test_worker_once_uses_discovered_publishers(monkeypatch: pytest.MonkeyPatch)
 
     assert result.exit_code == 0
     assert "No SCM publication found" in result.stdout
+
+
+def test_worker_rejects_negative_automatic_retry_limit() -> None:
+    result = runner.invoke(
+        app,
+        [
+            "--once",
+            "--workspace-scope",
+            "scope-a",
+            "--automatic-retry-limit",
+            "-1",
+        ],
+    )
+
+    assert result.exit_code == 2

@@ -299,6 +299,8 @@ class ScmPublicationResponse(BaseModel):
     failure_code: ScmPublicationFailureCode | None
     failure_retryable: bool | None
     attempt_count: int
+    automatic_retry_limit: int
+    next_attempt_at: datetime | None
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None

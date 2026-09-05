@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -11,7 +12,7 @@ from jb_orchestrator.application import (
 )
 from jb_orchestrator.external_executions import ExternalExecutionStatus
 from jb_orchestrator.infrastructure.database import Base, SqlAlchemyUnitOfWork
-from jb_orchestrator.scm import ScmPublicationStatus
+from jb_orchestrator.scm import ScmPublicationFailureCode, ScmPublicationStatus
 from jb_orchestrator.worker import TaskClaim
 
 
@@ -105,4 +106,38 @@ async def test_scm_publication_round_trips_and_claims_by_provider_and_scope() ->
         "review_url": "https://github.com/example/project/pull/1",
         "review_id": "1",
     }
+
+    scheduled, _ = await publications.request(
+        execution.id,
+        provider_key="github",
+        target_branch="develop",
+        title="Retry review",
+        body="",
+        idempotency_key="publish-2",
+        requested_by="test",
+    )
+    claimed = await publications.claim_next(
+        worker_id="publisher-a",
+        provider_key="github",
+        workspace_scope="git-worktree:scope-a",
+    )
+    assert claimed is not None and claimed.id == scheduled.id and claimed.lease_token is not None
+    await publications.fail(
+        claimed.id,
+        claimed.lease_token,
+        "temporary outage",
+        code=ScmPublicationFailureCode.PROVIDER_UNAVAILABLE,
+        retryable=True,
+        automatic_retry_limit=1,
+        next_attempt_at=datetime.now(UTC) - timedelta(seconds=1),
+    )
+
+    reclaimed = await publications.claim_next(
+        worker_id="publisher-b",
+        provider_key="github",
+        workspace_scope="git-worktree:scope-a",
+    )
+    assert reclaimed is not None
+    assert reclaimed.id == scheduled.id
+    assert reclaimed.attempt_count == 2
     await engine.dispose()
