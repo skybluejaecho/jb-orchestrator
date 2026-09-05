@@ -18,8 +18,10 @@ separate permissions, audit records, and workers.
 ## Decision
 
 Define a provider-neutral `ScmPublisher` port with one operation: `publish_review`. Its request
-contains only repository identity, source and target branches, review title and body, and an
-idempotency key. It never contains credentials. The result records stable provider, repository,
+contains only repository identity, trusted worktree path, source and target branches, review title
+and body, and an idempotency key. It never contains credentials. The worktree path is loaded from
+the ExternalExecution by the worker rather than accepted from clients or duplicated in the
+publication ledger. The result records stable provider, repository,
 branch, review URL, and review ID values.
 
 SCM adapters are installed under the `jb_orchestrator.scm_publishers` Python entry-point group and
