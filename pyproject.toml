@@ -39,6 +39,7 @@ jb = "jb_orchestrator.cli.main:main"
 jb-api = "jb_orchestrator.api.main:run"
 jb-mcp = "jb_orchestrator.mcp_server.main:main"
 jb-worker = "jb_orchestrator.worker.main:main"
+jb-scm-worker = "jb_orchestrator.scm.worker_main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/jb_orchestrator"]
