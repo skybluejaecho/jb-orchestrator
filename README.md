@@ -398,6 +398,15 @@ ORCH-047 adds a durable workspace operation queue:
 - `workspace.manage` is independent from read, dispatch, approval, and cancellation permissions
 - project SSE includes workspace operation lifecycle changes without making Jarvis a state owner
 
+ORCH-048 adds guarded workspace operations to Jarvis:
+
+- each managed external execution shows durable inspect and cleanup operation history
+- the project default branch seeds an editable local merge target ref
+- cleanup is available only for terminal executions and requires the complete external execution UUID
+- a same-origin Jarvis route validates commands while keeping the Control Plane token server-side
+- pending and claimed work is shown without optimistic completion, then refreshed from project SSE
+- pre-ORCH-047 assignments remain clearly routed to the direct OpenClaw CLI
+
 ## Prerequisites
 
 - Python 3.12
@@ -443,9 +452,9 @@ uv run jb-worker --once
 ```
 
 Jarvis 로컬 대시보드는 별도 터미널에서 실행합니다. 전용 서비스 계정에는 상태 조회와 요청
-제출 외에 승인 기능을 사용할 경우 `workflow.approve`, 취소 기능을 사용할 경우 `run.cancel`
-권한도 부여합니다. 사용자 인증 계층을 추가하기 전까지 외부 네트워크에 공개하거나 배포하지
-않습니다.
+제출 외에 승인 기능을 사용할 경우 `workflow.approve`, 취소 기능을 사용할 경우 `run.cancel`,
+작업공간 검사·정리 기능을 사용할 경우 `workspace.manage` 권한도 부여합니다. 사용자 인증
+계층을 추가하기 전까지 외부 네트워크에 공개하거나 배포하지 않습니다.
 
 ```powershell
 Copy-Item apps/jarvis/.env.example apps/jarvis/.env.local
