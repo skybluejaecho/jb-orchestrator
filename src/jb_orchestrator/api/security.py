@@ -66,4 +66,6 @@ def required_permission(method: str, path: str) -> ApiPermission:
         return ApiPermission.RUN_CANCEL
     if path.endswith("/workspace-operations"):
         return ApiPermission.WORKSPACE_MANAGE
+    if path.endswith("/scm-publications"):
+        return ApiPermission.SCM_PUBLISH
     return ApiPermission.PROJECT_ADMIN

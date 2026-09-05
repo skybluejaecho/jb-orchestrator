@@ -11,6 +11,7 @@ from jb_orchestrator.budgets import UsageKind
 from jb_orchestrator.domain import ProjectStatus, RequestStatus, RunStatus
 from jb_orchestrator.external_executions import ExternalExecutionStatus
 from jb_orchestrator.model_routing import ModelTier, RequirementLevel
+from jb_orchestrator.scm import ScmPublicationStatus
 from jb_orchestrator.skills import SkillSourceKind
 from jb_orchestrator.workflows import (
     NodeExecutionStatus,
@@ -261,6 +262,37 @@ class WorkspaceOperationResponse(BaseModel):
     idempotency_key: str
     requested_by: str
     status: WorkspaceOperationStatus
+    worker_id: str | None
+    result: dict[str, Any] | None
+    failure_reason: str | None
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None
+
+
+class ScmPublicationCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider_key: str = Field(pattern=r"^[a-z][a-z0-9._-]*$", max_length=64)
+    target_branch: str = Field(min_length=1, max_length=255)
+    title: str = Field(min_length=1, max_length=255)
+    body: str = Field(default="", max_length=65535)
+
+
+class ScmPublicationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    external_execution_id: UUID
+    provider_key: str
+    repository: str
+    source_branch: str
+    target_branch: str
+    title: str
+    body: str
+    idempotency_key: str
+    requested_by: str
+    status: ScmPublicationStatus
     worker_id: str | None
     result: dict[str, Any] | None
     failure_reason: str | None

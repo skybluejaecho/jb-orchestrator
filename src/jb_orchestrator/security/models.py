@@ -17,6 +17,7 @@ class ApiPermission(StrEnum):
     WORKFLOW_APPROVE = "workflow.approve"
     RUN_CANCEL = "run.cancel"
     WORKSPACE_MANAGE = "workspace.manage"
+    SCM_PUBLISH = "scm.publish"
     PROJECT_ADMIN = "project.admin"
 
 

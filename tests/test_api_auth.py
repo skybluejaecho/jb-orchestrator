@@ -88,3 +88,11 @@ def test_workspace_commands_have_a_dedicated_write_permission() -> None:
 
     assert required_permission("GET", path) is ApiPermission.PROJECT_READ
     assert required_permission("POST", path) is ApiPermission.WORKSPACE_MANAGE
+
+
+def test_scm_publications_have_a_dedicated_write_permission() -> None:
+    execution_id = "00000000-0000-0000-0000-000000000000"
+    path = f"/v1/external-executions/{execution_id}/scm-publications"
+
+    assert required_permission("GET", path) is ApiPermission.PROJECT_READ
+    assert required_permission("POST", path) is ApiPermission.SCM_PUBLISH

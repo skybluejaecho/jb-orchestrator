@@ -31,6 +31,7 @@ from jb_orchestrator.domain.runs import RunStatus
 from jb_orchestrator.external_executions import ExternalExecutionStatus
 from jb_orchestrator.infrastructure.database.base import Base
 from jb_orchestrator.model_routing import ModelTier
+from jb_orchestrator.scm import ScmPublicationStatus
 from jb_orchestrator.skills import SkillSourceKind
 from jb_orchestrator.workflows.models import NodeExecutionStatus, NodeOutcome, WorkflowStatus
 from jb_orchestrator.workspace_operations import WorkspaceOperationKind, WorkspaceOperationStatus
@@ -492,6 +493,51 @@ class WorkspaceOperationRecord(Base):
     requested_by: Mapped[str] = mapped_column(String(128), nullable=False)
     status: Mapped[WorkspaceOperationStatus] = mapped_column(
         string_enum(WorkspaceOperationStatus, "workspace_operation_status"), nullable=False
+    )
+    worker_id: Mapped[str | None] = mapped_column(String(255))
+    lease_token: Mapped[UUID | None] = mapped_column(Uuid)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    failure_reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ScmPublicationRecord(Base):
+    """Leaseable request to publish one executor-owned branch for review."""
+
+    __tablename__ = "scm_publications"
+    __table_args__ = (
+        UniqueConstraint(
+            "external_execution_id",
+            "idempotency_key",
+            name="uq_scm_publications_execution_key",
+        ),
+        Index(
+            "ix_scm_publications_claim",
+            "provider_key",
+            "workspace_scope",
+            "status",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    external_execution_id: Mapped[UUID] = mapped_column(
+        ForeignKey("external_executions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    provider_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    repository: Mapped[str] = mapped_column(String(2048), nullable=False)
+    source_branch: Mapped[str] = mapped_column(String(255), nullable=False)
+    target_branch: Mapped[str] = mapped_column(String(255), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    workspace_scope: Mapped[str] = mapped_column(String(128), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    requested_by: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[ScmPublicationStatus] = mapped_column(
+        string_enum(ScmPublicationStatus, "scm_publication_status"), nullable=False
     )
     worker_id: Mapped[str | None] = mapped_column(String(255))
     lease_token: Mapped[UUID | None] = mapped_column(Uuid)

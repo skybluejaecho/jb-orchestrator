@@ -10,6 +10,7 @@ from jb_orchestrator.application.model_services import ModelCatalogService
 from jb_orchestrator.application.phase_pack_services import PhasePackCatalogService
 from jb_orchestrator.application.project_observation_services import ProjectObservationService
 from jb_orchestrator.application.request_dispatch_services import RequestDispatchService
+from jb_orchestrator.application.scm_publication_services import ScmPublicationService
 from jb_orchestrator.application.services import OrchestrationService
 from jb_orchestrator.application.skill_services import SkillCatalogService
 from jb_orchestrator.application.workflow_services import WorkflowService
@@ -68,6 +69,12 @@ def get_workspace_operation_service(request: Request) -> WorkspaceOperationServi
     """Return the durable workspace command service owned by this app instance."""
 
     return cast(WorkspaceOperationService, request.app.state.workspace_operation_service)
+
+
+def get_scm_publication_service(request: Request) -> ScmPublicationService:
+    """Return the durable SCM publication service owned by this app instance."""
+
+    return cast(ScmPublicationService, request.app.state.scm_publication_service)
 
 
 def get_project_observation_service(request: Request) -> ProjectObservationService:
