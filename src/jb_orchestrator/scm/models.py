@@ -37,6 +37,7 @@ class ScmPublication:
     lease_expires_at: datetime | None = None
     result: dict[str, Any] | None = None
     failure_reason: str | None = None
+    attempt_count: int = 0
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     completed_at: datetime | None = None
@@ -61,6 +62,8 @@ class ScmPublication:
             raise DomainValidationError(
                 "SCM publication source_branch and target_branch must differ"
             )
+        if self.attempt_count < 0:
+            raise DomainValidationError("SCM publication attempt_count must not be negative")
 
     @property
     def is_terminal(self) -> bool:
@@ -73,9 +76,23 @@ class ScmPublication:
             raise DomainValidationError("SCM publication claim requires worker and positive lease")
         changed_at = at or datetime.now(UTC)
         self.status = ScmPublicationStatus.CLAIMED
+        self.attempt_count += 1
         self.worker_id = worker_id.strip()
         self.lease_token = uuid4()
         self.lease_expires_at = changed_at + timedelta(seconds=lease_seconds)
+        self.updated_at = changed_at
+
+    def retry(self, *, at: datetime | None = None) -> None:
+        if self.status is not ScmPublicationStatus.FAILED:
+            raise InvalidStateTransition("only failed SCM publication can be retried")
+        changed_at = at or datetime.now(UTC)
+        self.status = ScmPublicationStatus.PENDING
+        self.worker_id = None
+        self.lease_token = None
+        self.lease_expires_at = None
+        self.result = None
+        self.failure_reason = None
+        self.completed_at = None
         self.updated_at = changed_at
 
     def succeed(

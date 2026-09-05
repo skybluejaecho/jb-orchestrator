@@ -174,3 +174,37 @@ async def test_reused_idempotency_key_must_match_original_payload() -> None:
             idempotency_key="publish-1",
             requested_by="jarvis",
         )
+
+
+async def test_failed_publication_retry_preserves_record_and_attempt_history() -> None:
+    store = MemoryStore()
+    execution = await managed_execution(store)
+    service = ScmPublicationService(lambda: MemoryUnitOfWork(store))
+    requested, _ = await service.request(
+        execution.id,
+        provider_key="github",
+        target_branch="develop",
+        title="Review feature",
+        body="",
+        idempotency_key="publish-retry",
+        requested_by="jarvis",
+    )
+    claimed = await service.claim_next(
+        worker_id="publisher-a",
+        provider_key="github",
+        workspace_scope="git-worktree:scope-a",
+    )
+    assert claimed is not None and claimed.lease_token is not None
+    failed = await service.fail(claimed.id, claimed.lease_token, "temporary failure")
+
+    retried, replayed = await service.retry(failed.id, requested_by="jarvis")
+    repeated, repeated_replayed = await service.retry(failed.id, requested_by="jarvis")
+
+    assert retried.id == requested.id
+    assert retried.status is ScmPublicationStatus.PENDING
+    assert retried.attempt_count == 1
+    assert not replayed
+    assert repeated_replayed
+    assert repeated.id == requested.id
+    assert store.events[-1].event_type == "scm_publication.retried"
+    assert store.events[-1].payload["actor"] == "jarvis"

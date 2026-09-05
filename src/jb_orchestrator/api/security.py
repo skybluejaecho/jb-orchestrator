@@ -10,7 +10,7 @@ from jb_orchestrator.application import SecurityService
 from jb_orchestrator.security import ApiPermission, ApiPrincipal
 
 RESOURCE_PATH = re.compile(
-    r"^/v1/(?P<collection>projects|requests|runs|workflow-executions|external-executions)"
+    r"^/v1/(?P<collection>projects|requests|runs|workflow-executions|external-executions|scm-publications)"
     r"/(?P<id>[0-9a-fA-F-]{36})(?:/|$)"
 )
 RESOURCE_TYPES = {
@@ -19,6 +19,7 @@ RESOURCE_TYPES = {
     "runs": "run",
     "workflow-executions": "workflow_execution",
     "external-executions": "external_execution",
+    "scm-publications": "scm_publication",
 }
 
 
@@ -66,6 +67,8 @@ def required_permission(method: str, path: str) -> ApiPermission:
         return ApiPermission.RUN_CANCEL
     if path.endswith("/workspace-operations"):
         return ApiPermission.WORKSPACE_MANAGE
-    if path.endswith("/scm-publications"):
+    if path.endswith("/scm-publications") or (
+        "/scm-publications/" in path and path.endswith("/retry")
+    ):
         return ApiPermission.SCM_PUBLISH
     return ApiPermission.PROJECT_ADMIN

@@ -2,10 +2,11 @@ from uuid import uuid4
 
 import pytest
 
-from jb_orchestrator.application import SecurityService
+from jb_orchestrator.application import ScmPublicationService, SecurityService
 from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNotFound
 from jb_orchestrator.domain import Project
 from jb_orchestrator.security import ApiPermission
+from tests.scm.test_publication_service import managed_execution
 from tests.support import MemoryStore, MemoryUnitOfWork
 
 
@@ -59,3 +60,24 @@ async def test_issue_rejects_duplicate_key_and_missing_project() -> None:
             permissions={ApiPermission.PROJECT_ADMIN},
             all_projects=True,
         )
+
+
+async def test_resolve_project_id_traverses_scm_publication_owner() -> None:
+    store = MemoryStore()
+    execution = await managed_execution(store)
+    publication, _ = await ScmPublicationService(lambda: MemoryUnitOfWork(store)).request(
+        execution.id,
+        provider_key="github",
+        target_branch="develop",
+        title="Review feature",
+        body="",
+        idempotency_key="publish-1",
+        requested_by="jarvis",
+    )
+
+    project_id = await SecurityService(lambda: MemoryUnitOfWork(store)).resolve_project_id(
+        "scm_publication", publication.id
+    )
+
+    assert project_id is not None
+    assert project_id in store.projects

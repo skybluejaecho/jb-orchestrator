@@ -845,3 +845,24 @@ async def list_scm_publications(
         ScmPublicationResponse.model_validate(publication)
         for publication in await service.list_for_execution(execution_id, limit=limit)
     ]
+
+
+@router.post(
+    "/scm-publications/{publication_id}/retry",
+    response_model=ScmPublicationResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def retry_scm_publication(
+    publication_id: UUID,
+    request: Request,
+    response: Response,
+    service: ScmPublicationServiceDependency,
+) -> ScmPublicationResponse:
+    principal = getattr(request.state, "principal", None)
+    publication, replayed = await service.retry(
+        publication_id,
+        requested_by=principal.account_key if principal is not None else "anonymous",
+    )
+    if replayed:
+        response.status_code = status.HTTP_200_OK
+    return ScmPublicationResponse.model_validate(publication)

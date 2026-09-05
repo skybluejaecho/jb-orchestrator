@@ -8,7 +8,7 @@ from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNot
 from jb_orchestrator.application.unit_of_work import UnitOfWork
 from jb_orchestrator.domain import DomainEvent, DomainValidationError, Project
 from jb_orchestrator.external_executions import ExternalExecution
-from jb_orchestrator.scm import ScmPublication
+from jb_orchestrator.scm import ScmPublication, ScmPublicationStatus
 
 
 class ScmPublicationService:
@@ -91,6 +91,37 @@ class ScmPublicationService:
                 external_execution_id, limit=limit
             )
 
+    async def retry(
+        self, publication_id: UUID, *, requested_by: str
+    ) -> tuple[ScmPublication, bool]:
+        async with self._unit_of_work_factory() as unit_of_work:
+            publication = await unit_of_work.scm_publications.get(publication_id, for_update=True)
+            if publication is None:
+                raise ResourceNotFound(f"SCM publication not found: {publication_id}")
+            execution = await self._execution(unit_of_work, publication.external_execution_id)
+            if execution.workspace_released_at is not None:
+                raise ResourceConflict("SCM publication retry requires an unreleased workspace")
+            if execution.workspace_branch != publication.source_branch:
+                raise ResourceConflict("SCM publication source branch changed before retry")
+            if publication.status in {
+                ScmPublicationStatus.PENDING,
+                ScmPublicationStatus.CLAIMED,
+            }:
+                return publication, True
+            if publication.status is ScmPublicationStatus.SUCCEEDED:
+                raise ResourceConflict("succeeded SCM publication cannot be retried")
+            publication.retry()
+            await unit_of_work.scm_publications.save(publication)
+            await self._event(
+                unit_of_work,
+                publication,
+                execution,
+                "scm_publication.retried",
+                actor=requested_by.strip() or "anonymous",
+            )
+            await unit_of_work.commit()
+            return publication, False
+
     async def claim_next(
         self,
         *,
@@ -171,23 +202,28 @@ class ScmPublicationService:
         publication: ScmPublication,
         execution: ExternalExecution,
         event_type: str,
+        actor: str | None = None,
     ) -> None:
+        payload = {
+            "external_execution_id": str(execution.id),
+            "workflow_execution_id": str(execution.execution_id),
+            "run_id": str(execution.run_id),
+            "provider_key": publication.provider_key,
+            "repository": publication.repository,
+            "source_branch": publication.source_branch,
+            "target_branch": publication.target_branch,
+            "status": publication.status.value,
+            "worker_id": publication.worker_id,
+            "failure_reason": publication.failure_reason,
+            "attempt_count": publication.attempt_count,
+        }
+        if actor is not None:
+            payload["actor"] = actor
         await unit_of_work.events.append(
             DomainEvent(
                 aggregate_type="scm_publication",
                 aggregate_id=publication.id,
                 event_type=event_type,
-                payload={
-                    "external_execution_id": str(execution.id),
-                    "workflow_execution_id": str(execution.execution_id),
-                    "run_id": str(execution.run_id),
-                    "provider_key": publication.provider_key,
-                    "repository": publication.repository,
-                    "source_branch": publication.source_branch,
-                    "target_branch": publication.target_branch,
-                    "status": publication.status.value,
-                    "worker_id": publication.worker_id,
-                    "failure_reason": publication.failure_reason,
-                },
+                payload=payload,
             )
         )
