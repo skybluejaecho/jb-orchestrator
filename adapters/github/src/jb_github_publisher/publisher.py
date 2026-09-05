@@ -46,7 +46,9 @@ class GitHubPublisher:
             raise GitHubPublicationError("workspace branch does not match publication source")
         if await self._git.run(workspace, "status", "--porcelain"):
             raise GitHubPublicationError("workspace must be clean before publication")
-        remote_url = await self._git.run(workspace, "remote", "get-url", self._remote_name)
+        remote_url = await self._git.run(
+            workspace, "config", "--get", f"remote.{self._remote_name}.url"
+        )
         remote_repository = parse_github_repository(remote_url, web_host=self._web_host)
         if remote_repository.slug.casefold() != repository.slug.casefold():
             raise GitHubPublicationError("Git remote does not match publication repository")
