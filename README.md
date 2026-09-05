@@ -480,6 +480,15 @@ ORCH-056 adds provider-neutral failure classification before any automatic retry
 - Jarvis shows whether retry is reasonable or operator investigation is required
 - explicit retry remains operator-controlled; bounded automatic backoff is a separate policy
 
+ORCH-057 adds opt-in, bounded automatic recovery for transient SCM publication failures:
+
+- automatic retries are disabled by default and configured explicitly on each SCM worker
+- only failures classified as retryable receive a durable next-attempt timestamp
+- exponential delays are capped and the allowed retry count is persisted with the publication
+- due retries reclaim the same publication ID and continue its attempt counter
+- exhausted or permanent failures remain terminal instead of polling indefinitely
+- Jarvis renders the durable schedule while the system smoke proves recovery without browser action
+
 ## Prerequisites
 
 - Python 3.12
@@ -603,6 +612,11 @@ After installing a publisher, run one worker for the opaque scope emitted by the
 host. The operation timeout must remain shorter than the lease:
 
     uv run --with-editable . --with-editable adapters/github jb-scm-worker --workspace-scope <workspace-scope> --lease-seconds 300 --operation-timeout 240
+
+Bounded automatic retry is opt-in. This example allows two retries after the initial attempt with
+30 and 60 second delays, capped at five minutes:
+
+    uv run --with-editable . --with-editable adapters/github jb-scm-worker --workspace-scope <workspace-scope> --automatic-retry-limit 2 --automatic-retry-base-delay 30 --automatic-retry-max-delay 300
 
 The adapter receives repository and branch data plus the trusted current worktree path. It reads
 credentials only from its own environment or secret store. The core worker never merges reviews,
