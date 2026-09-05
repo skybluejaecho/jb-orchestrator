@@ -446,6 +446,14 @@ ORCH-052 adds the first concrete SCM publisher for GitHub:
 - response bodies and authorization data are excluded from durable failure messages
 - merge, force-push, branch deletion, and workspace cleanup remain explicit separate operations
 
+ORCH-053 extends the process-level system smoke through the complete SCM publication boundary:
+
+- a disposable feature worktree pushes its exact HEAD to a local bare Git remote
+- a loopback GitHub API stub records the pull-request creation without external network mutation
+- the Control Plane persists the request before a separately started SCM worker claims it
+- the worker discovers the real GitHub adapter entry point and writes the provider result back
+- insecure HTTP remains disabled except for an explicit loopback fixture in `JB_ENVIRONMENT=test`
+
 ## Prerequisites
 
 - Python 3.12
@@ -727,14 +735,14 @@ npm run build
 ```
 
 전체 로컬 경계는 반드시 비어 있는 일회용 PostgreSQL test database에서 검증합니다. 다음 명령은
-smoke 전용 executor를 임시 설치하고 Control Plane, Worker와 Jarvis를 실제 별도 process로
-실행합니다.
+smoke 전용 executor와 GitHub publisher를 임시 설치하고 Control Plane, Worker, SCM Worker와
+Jarvis를 실제 별도 process로 실행합니다.
 
 ```powershell
 $env:JB_ENVIRONMENT = "test"
 $env:JB_DATABASE_URL = "postgresql+asyncpg://jb_orchestrator:jb_orchestrator@localhost:5432/jb_orchestrator"
 uv run alembic upgrade head
-uv run --with-editable tools/system-smoke-executor jb system smoke
+uv run --with-editable . --with-editable adapters/github --with-editable tools/system-smoke-executor jb system smoke
 ```
 
 이 명령은 지정한 database에 고유한 smoke project와 service account를 생성하므로 개발 또는
