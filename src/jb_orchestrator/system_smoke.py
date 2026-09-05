@@ -1,6 +1,7 @@
 """Process-level smoke test for the local Control Plane, Worker, and Jarvis stack."""
 
 import asyncio
+import json
 import os
 import shutil
 import socket
@@ -12,15 +13,21 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 
-from jb_orchestrator.application import SecurityService
+from jb_orchestrator.application import ExternalExecutionService, SecurityService
 from jb_orchestrator.config import get_settings
+from jb_orchestrator.external_executions import ExternalExecutionStatus
 from jb_orchestrator.infrastructure.database import SqlAlchemyUnitOfWork, create_session_factory
 from jb_orchestrator.security import ApiPermission
-from jb_orchestrator.worker import ExecutorRegistry
+from jb_orchestrator.system_smoke_scm import (
+    GitHubApiStub,
+    ScmSmokeRepository,
+    prepare_scm_repository,
+)
+from jb_orchestrator.worker import ExecutorRegistry, TaskClaim
 
 SMOKE_EXECUTOR_KEY = "system-smoke"
 
@@ -34,10 +41,19 @@ class SystemSmokeResult:
     project_id: str
     completed_execution_id: str
     cancelled_execution_id: str
+    publication_id: str
+    review_url: str
 
     def as_dict(self) -> dict[str, Any]:
         return {
-            "components": ["postgresql", "control-plane", "worker", "jarvis"],
+            "components": [
+                "postgresql",
+                "control-plane",
+                "worker",
+                "scm-worker",
+                "github-publisher",
+                "jarvis",
+            ],
             "project_id": self.project_id,
             "executions": {
                 "approved": {
@@ -48,6 +64,12 @@ class SystemSmokeResult:
                     "id": self.cancelled_execution_id,
                     "status": "cancelled",
                 },
+            },
+            "scm_publication": {
+                "id": self.publication_id,
+                "provider": "github",
+                "review_url": self.review_url,
+                "status": "succeeded",
             },
             "status": "ready",
         }
@@ -221,11 +243,57 @@ async def _issue_tokens(suffix: str) -> tuple[str, str]:
                 ApiPermission.REQUEST_DISPATCH,
                 ApiPermission.WORKFLOW_APPROVE,
                 ApiPermission.RUN_CANCEL,
+                ApiPermission.SCM_PUBLISH,
                 ApiPermission.WORKSPACE_MANAGE,
             ),
             all_projects=True,
         )
         return setup.token, jarvis.token
+    finally:
+        await session_factory.kw["bind"].dispose()
+
+
+async def _prepare_scm_execution(
+    dispatched: Mapping[str, Any], fixture: ScmSmokeRepository, suffix: str
+) -> str:
+    settings = get_settings()
+    session_factory = create_session_factory(settings)
+    executions = ExternalExecutionService(lambda: SqlAlchemyUnitOfWork(session_factory))
+    idempotency_key = f"system-smoke-scm-{suffix}"
+    claim = TaskClaim(
+        execution_id=UUID(str(cast(dict[str, Any], dispatched["workflow"])["id"])),
+        run_id=UUID(str(cast(dict[str, Any], dispatched["run"])["id"])),
+        node_key="scm-publication",
+        executor_key=SMOKE_EXECUTOR_KEY,
+        worker_id="system-smoke-worker",
+        lease_token=uuid4(),
+        idempotency_key=idempotency_key,
+        visit_count=1,
+        attempt_count=1,
+        timeout_seconds=30,
+        workflow_key="system-smoke",
+        workflow_version=1,
+        instructions=None,
+        configuration={},
+        skills=(),
+    )
+    try:
+        execution = await executions.prepare(
+            claim,
+            session_key=f"system-smoke:{suffix}",
+            agent_id="system-smoke",
+            workspace_path=str(fixture.workspace),
+            workspace_repository_path=str(fixture.workspace),
+            workspace_branch=fixture.source_branch,
+            workspace_base_ref=fixture.target_branch,
+            workspace_scope=fixture.workspace_scope,
+        )
+        execution = await executions.finish(
+            idempotency_key,
+            ExternalExecutionStatus.SUCCEEDED,
+            terminal_result={"summary": "SCM smoke worktree ready"},
+        )
+        return str(execution.id)
     finally:
         await session_factory.kw["bind"].dispose()
 
@@ -276,6 +344,8 @@ def run_system_smoke(
     npm = shutil.which("npm")
     if npm is None:
         raise SystemSmokeError("npm is required for the Jarvis system smoke test")
+    if shutil.which("git") is None:
+        raise SystemSmokeError("git is required for the SCM system smoke test")
     try:
         executors = ExecutorRegistry.from_entry_points().supported_keys
     except Exception as exc:
@@ -307,6 +377,12 @@ def run_system_smoke(
 
     with tempfile.TemporaryDirectory(prefix="jb-system-smoke-") as temporary:
         log_directory = Path(temporary)
+        try:
+            scm_fixture = prepare_scm_repository(log_directory, suffix)
+        except Exception as exc:
+            raise SystemSmokeError(f"cannot prepare SCM smoke repository: {exc}") from exc
+        github_stub = GitHubApiStub(scm_fixture.source_branch, scm_fixture.target_branch)
+        github_stub.__enter__()
         processes: list[_ManagedProcess] = []
         clients: list[httpx.Client] = []
         try:
@@ -346,7 +422,7 @@ def run_system_smoke(
                 payload={
                     "key": workflow_key,
                     "name": "System Smoke Project",
-                    "repository_url": "https://example.invalid/system-smoke.git",
+                    "repository_url": scm_fixture.repository_url,
                     "default_branch": "develop",
                 },
             )
@@ -425,6 +501,79 @@ def run_system_smoke(
             )
             _poll_execution(jarvis, first_id, "succeeded", timeout_seconds=timeout_seconds)
 
+            try:
+                external_execution_id = asyncio.run(
+                    _prepare_scm_execution(first, scm_fixture, suffix)
+                )
+            except Exception as exc:
+                raise SystemSmokeError(f"cannot prepare SCM execution: {exc}") from exc
+            publication = _request(
+                api,
+                "POST",
+                f"/v1/external-executions/{external_execution_id}/scm-publications",
+                headers={
+                    "Authorization": f"Bearer {jarvis_token}",
+                    "Idempotency-Key": f"smoke-publication-{suffix}",
+                },
+                payload={
+                    "provider_key": "github",
+                    "target_branch": scm_fixture.target_branch,
+                    "title": "System smoke publication",
+                    "body": "Created by the disposable SCM system smoke.",
+                },
+            )
+            scm_environment = base_environment | {
+                "JB_GITHUB_TOKEN": "system-smoke-token",
+                "JB_GITHUB_WORKSPACE_ROOTS": json.dumps([str(log_directory.resolve())]),
+                "JB_GITHUB_API_URL": github_stub.api_url,
+                "JB_GITHUB_WEB_HOST": "github.local",
+                "JB_GITHUB_ALLOW_INSECURE_LOOPBACK": "true",
+            }
+            scm_worker = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "jb_orchestrator.scm.worker_main",
+                    "--once",
+                    "--workspace-scope",
+                    scm_fixture.workspace_scope,
+                    "--lease-seconds",
+                    "30",
+                    "--operation-timeout",
+                    "20",
+                ],
+                cwd=project_root,
+                env=scm_environment,
+                capture_output=True,
+                timeout=timeout_seconds,
+                check=False,
+            )
+            if scm_worker.returncode != 0:
+                output = (scm_worker.stdout + scm_worker.stderr).decode(errors="replace")
+                raise SystemSmokeError(
+                    f"SCM worker failed with exit code {scm_worker.returncode}\n{output}"
+                )
+            publications = _request(
+                api,
+                "GET",
+                f"/v1/external-executions/{external_execution_id}/scm-publications",
+                headers={"Authorization": f"Bearer {jarvis_token}"},
+            )
+            if not isinstance(publications, list) or len(publications) != 1:
+                raise SystemSmokeError("SCM publication was not durably listed")
+            completed_publication = cast(dict[str, Any], publications[0])
+            if completed_publication.get("status") != "succeeded":
+                raise SystemSmokeError(
+                    "SCM publication did not succeed: "
+                    f"{completed_publication.get('failure_reason', 'unknown failure')}"
+                )
+            result = completed_publication.get("result")
+            if not isinstance(result, dict) or not github_stub.created:
+                raise SystemSmokeError("GitHub pull request was not created by the SCM worker")
+            review_url = str(result.get("review_url", ""))
+            if review_url != "https://github.local/system-smoke/repository/pull/53":
+                raise SystemSmokeError("SCM publication returned an unexpected review URL")
+
             second = _request(
                 jarvis,
                 "POST",
@@ -447,7 +596,13 @@ def run_system_smoke(
                 },
             )
             _poll_execution(jarvis, second_id, "cancelled", timeout_seconds=timeout_seconds)
-            return SystemSmokeResult(str(project["id"]), first_id, second_id)
+            return SystemSmokeResult(
+                str(project["id"]),
+                first_id,
+                second_id,
+                str(publication["id"]),
+                review_url,
+            )
         except SystemSmokeError:
             raise
         except Exception as exc:
@@ -457,3 +612,4 @@ def run_system_smoke(
                 client.close()
             for process in reversed(processes):
                 process.stop()
+            github_stub.__exit__(None, None, None)

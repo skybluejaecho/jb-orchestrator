@@ -213,6 +213,8 @@ def test_system_smoke_reports_process_boundary_result(monkeypatch: MonkeyPatch) 
             project_id=project_id,
             completed_execution_id="00000000-0000-0000-0000-000000000002",
             cancelled_execution_id="00000000-0000-0000-0000-000000000003",
+            publication_id="00000000-0000-0000-0000-000000000004",
+            review_url="https://github.local/system-smoke/repository/pull/53",
         )
 
     monkeypatch.setattr("jb_orchestrator.cli.main.run_system_smoke", fake_smoke)
@@ -222,6 +224,15 @@ def test_system_smoke_reports_process_boundary_result(monkeypatch: MonkeyPatch) 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["status"] == "ready"
-    assert payload["components"] == ["postgresql", "control-plane", "worker", "jarvis"]
+    assert payload["components"] == [
+        "postgresql",
+        "control-plane",
+        "worker",
+        "scm-worker",
+        "github-publisher",
+        "jarvis",
+    ]
     assert payload["executions"]["approved"]["status"] == "succeeded"
     assert payload["executions"]["cancelled"]["status"] == "cancelled"
+    assert payload["scm_publication"]["status"] == "succeeded"
+    assert payload["scm_publication"]["provider"] == "github"
