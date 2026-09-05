@@ -427,6 +427,15 @@ ORCH-050 adds a durable SCM publication ledger:
   maintenance permissions
 - project event streams include publication lifecycle changes without storing SCM credentials
 
+ORCH-051 executes durable publications through installed adapters:
+
+- jb-scm-worker serves one opaque workspace scope and discovers provider entry points at startup
+- claimed work is routed only when both its provider key and workspace scope match the worker
+- the runtime reloads trusted worktree state before passing its path to the publisher
+- provider execution is bounded by a timeout shorter than the database claim lease
+- provider, repository, and branch identifiers must match before success is recorded
+- adapter errors, timeouts, state drift, and mismatched results become durable failure records
+
 ## Prerequisites
 
 - Python 3.12
@@ -466,6 +475,7 @@ uv run jb-api
 uv run jb doctor
 uv run jb skill digest skills/my-skill
 uv run jb-worker --list-executors
+uv run jb-scm-worker --list-publishers
 uv run jb-mcp
 # After installing at least one executor adapter:
 uv run jb-worker --once
@@ -539,6 +549,20 @@ The factory returns an object implementing the async `TaskExecutor.execute(claim
 Its entry-point name must match the workflow node's `executor_key`.
 For model-routed tasks, the executor returns provider-reported input and output token usage in
 `TaskResult.usage`; configured project budgets require this usage for actual settlement.
+
+SCM publisher packages use a separate entry-point group:
+
+    [project.entry-points."jb_orchestrator.scm_publishers"]
+    github = "jb_github_publisher:create_publisher"
+
+After installing a publisher, run one worker for the opaque scope emitted by the managed worktree
+host. The operation timeout must remain shorter than the lease:
+
+    uv run jb-scm-worker --workspace-scope <workspace-scope> --lease-seconds 300 --operation-timeout 240
+
+The adapter receives repository and branch data plus the trusted current worktree path. It reads
+credentials only from its own environment or secret store. The core worker never merges reviews,
+deletes remote branches, or releases local worktrees.
 
 Skill registration stores immutable metadata; workers fetch and verify the files only when a
 referencing task is claimed. Local sources must be below `JB_SKILL_LOCAL_ROOT`. Remote Git and
