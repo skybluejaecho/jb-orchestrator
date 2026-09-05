@@ -454,6 +454,14 @@ ORCH-053 extends the process-level system smoke through the complete SCM publica
 - the worker discovers the real GitHub adapter entry point and writes the provider result back
 - insecure HTTP remains disabled except for an explicit loopback fixture in `JB_ENVIRONMENT=test`
 
+ORCH-054 exposes the durable SCM publication flow in the local Jarvis dashboard:
+
+- terminal managed worktrees can request a GitHub pull request without exposing API credentials
+- target branch, pull-request title, and body remain explicit operator inputs
+- pending, claimed, succeeded, and failed records are rendered from the Control Plane ledger
+- completed review URLs become links only after Jarvis validates their HTTPS scheme
+- project SSE events refresh publication state without making the browser predict completion
+
 ## Prerequisites
 
 - Python 3.12
