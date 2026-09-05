@@ -6,8 +6,9 @@ Workflow 상태를 Control Plane API에서 읽고 프로젝트 SSE stream으로 
 ## Local setup
 
 Jarvis는 프로젝트 상태를 조회하고 사용자의 요청을 제출하며 명시적인 승인 결정을
-처리하고 실행을 취소하므로 `project.read`, `request.dispatch`, `workflow.approve`,
-`run.cancel`, `all_projects` 범위를 가진 전용 서비스 계정을 사용한다.
+처리하고 실행을 취소하며 작업공간 검토 명령을 등록하므로 `project.read`,
+`request.dispatch`, `workflow.approve`, `run.cancel`, `workspace.manage`, `all_projects` 범위를
+가진 전용 서비스 계정을 사용한다.
 
 ```powershell
 uv run jb auth issue `
@@ -17,6 +18,7 @@ uv run jb auth issue `
   --permission request.dispatch `
   --permission workflow.approve `
   --permission run.cancel `
+  --permission workspace.manage `
   --all-projects
 
 Copy-Item apps/jarvis/.env.example apps/jarvis/.env.local
@@ -41,6 +43,10 @@ Control Plane으로 요청을 proxy한다. 요청 작성 화면은 프로젝트 
 표시 값은 OpenClaw 자체 메모리를 추측한 것이 아니라 Worker가 DB에 기록한 실행 매핑이다.
 격리된 Git worktree가 할당된 실행은 생성된 branch, base ref와 로컬 path도 함께 표시한다.
 안전한 cleanup이 완료되면 DB의 release 시각을 반영해 해당 worktree가 정리됐음을 표시한다.
+범위가 등록된 worktree는 프로젝트 기본 브랜치를 기준으로 검사를 요청하고, 외부 실행이
+종료된 뒤 전체 외부 실행 UUID를 정확히 입력해야 정리를 요청할 수 있다. 실제 Git 작업은
+동일한 scope의 `jb-openclaw workspace worker`가 수행하며 Jarvis는 작업 상태를 낙관적으로
+변경하지 않는다.
 승인 대기 노드는 승인 또는 반려를 한 번 더 확인한 뒤 처리한다. 진행 중인 실행을 취소하려면
 화면에 표시된 실행 식별 문구를 정확하게 입력해야 한다. Jarvis는 로컬 실행만 지원하며 외부
 네트워크 공개나 Sites 배포는 별도 사용자 인증 계층을 추가하기 전에는 허용하지 않는다.
