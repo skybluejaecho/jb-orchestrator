@@ -228,6 +228,7 @@ def test_system_smoke_reports_process_boundary_result(monkeypatch: MonkeyPatch) 
         "postgresql",
         "control-plane",
         "worker",
+        "worker-presence",
         "scm-worker",
         "github-publisher",
         "jarvis",
