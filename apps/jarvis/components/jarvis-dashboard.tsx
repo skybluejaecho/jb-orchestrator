@@ -39,6 +39,7 @@ import {
   type DispatchResult,
 } from '@/components/request-composer';
 import { ExecutionInspector } from '@/components/execution-inspector';
+import { WorkerPresencePanel } from '@/components/worker-presence';
 
 type ConnectionState = 'connecting' | 'live' | 'degraded';
 
@@ -632,6 +633,8 @@ export function JarvisDashboard() {
               </CardContent>
             </Card>
           </div>
+
+          <WorkerPresencePanel revision={eventRevision} />
 
           {selectedExecutionId && (
             <ExecutionInspector
