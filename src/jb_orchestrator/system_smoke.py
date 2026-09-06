@@ -50,6 +50,7 @@ class SystemSmokeResult:
                 "postgresql",
                 "control-plane",
                 "worker",
+                "worker-presence",
                 "scm-worker",
                 "github-publisher",
                 "jarvis",
@@ -659,6 +660,18 @@ def run_system_smoke(
                 raise SystemSmokeError("initial SCM provider failure was not recorded")
             if "lease_token" in latest_attempt or "lease_token" in initial_attempt:
                 raise SystemSmokeError("SCM attempt API exposed an internal lease token")
+            worker_instances = _request(jarvis, "GET", "/api/workers")
+            if not isinstance(worker_instances, list):
+                raise SystemSmokeError("Worker presence ledger was not listed through Jarvis")
+            worker_kinds = {
+                str(instance.get("kind"))
+                for instance in worker_instances
+                if instance.get("observed_status") == "stopped"
+            }
+            if not {"execution", "scm"}.issubset(worker_kinds):
+                raise SystemSmokeError(
+                    "execution and SCM worker process lifetimes were not recorded"
+                )
 
             second = _request(
                 jarvis,
