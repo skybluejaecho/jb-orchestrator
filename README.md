@@ -507,6 +507,15 @@ ORCH-059 adds a durable, per-attempt SCM publication ledger:
 - Jarvis loads the attempt timeline on demand instead of reconstructing history from browser state
 - the system smoke proves an initial provider failure followed by a successful manual recovery
 
+ORCH-060 adds durable process presence for every worker type:
+
+- each process start creates an immutable worker instance identity beside its human-readable ID
+- execution, OpenClaw workspace, and SCM workers publish capabilities and optional workspace scope
+- idle workers heartbeat independently from active task leases
+- graceful exits become stopped while missed heartbeats are derived as stale without rewriting history
+- the Control Plane lists recent worker instances and Jarvis renders online, stale, and stopped status
+- the system smoke verifies execution and SCM worker lifetimes through the authenticated Jarvis proxy
+
 ## Prerequisites
 
 - Python 3.12
