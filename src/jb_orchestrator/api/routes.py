@@ -1,5 +1,6 @@
 """Control-plane REST routes."""
 
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -50,7 +51,10 @@ from jb_orchestrator.api.schemas import (
     UsageRecordResponse,
     UserRequestCreate,
     UserRequestResponse,
+    WorkerCapabilityCoverageResponse,
     WorkerPresenceResponse,
+    WorkerReadinessAlertResponse,
+    WorkerReadinessIssueResponse,
     WorkflowApprovalResolve,
     WorkflowDefinitionCreate,
     WorkflowDefinitionResponse,
@@ -104,6 +108,11 @@ from jb_orchestrator.phase_packs import (
     PhasePackReference,
 )
 from jb_orchestrator.skills import SkillDefinition, SkillReference
+from jb_orchestrator.worker_presence import (
+    ProjectWorkerReadiness,
+    WorkerReadinessAlertStatus,
+    WorkerReadinessIssueReason,
+)
 from jb_orchestrator.workflows import (
     ArtifactCondition,
     EdgeDefinition,
@@ -185,7 +194,83 @@ async def inspect_project_worker_readiness(
         project_id,
         stale_after_seconds=get_settings().worker_presence_stale_after_seconds,
     )
-    return ProjectWorkerReadinessResponse.model_validate(report)
+    return _worker_readiness_response(report)
+
+
+@router.post(
+    "/projects/{project_id}/worker-readiness/evaluate",
+    response_model=ProjectWorkerReadinessResponse,
+)
+async def evaluate_project_worker_readiness(
+    project_id: UUID,
+    service: WorkerReadinessServiceDependency,
+) -> ProjectWorkerReadinessResponse:
+    settings = get_settings()
+    report = await service.evaluate_project(
+        project_id,
+        stale_after_seconds=settings.worker_presence_stale_after_seconds,
+    )
+    return _worker_readiness_response(report)
+
+
+def _worker_readiness_response(
+    report: ProjectWorkerReadiness,
+) -> ProjectWorkerReadinessResponse:
+    critical_after = get_settings().worker_readiness_alert_critical_after_seconds
+    alerts = []
+    for alert in report.alerts:
+        detected_at = _as_utc(alert.first_detected_at)
+        finished_at = _as_utc(alert.resolved_at or report.checked_at)
+        age_seconds = max(
+            0,
+            int((finished_at - detected_at).total_seconds()),
+        )
+        severity = (
+            "resolved"
+            if alert.status is WorkerReadinessAlertStatus.RESOLVED
+            else "critical"
+            if age_seconds >= critical_after
+            else "warning"
+        )
+        action = (
+            "none"
+            if alert.status is WorkerReadinessAlertStatus.RESOLVED
+            else "start_capable_worker"
+            if alert.reason is WorkerReadinessIssueReason.NO_CAPABLE_WORKER
+            else "restart_capable_worker"
+        )
+        alerts.append(
+            WorkerReadinessAlertResponse(
+                id=alert.id,
+                workflow_execution_id=alert.workflow_execution_id,
+                run_id=alert.run_id,
+                node_key=alert.node_key,
+                executor_key=alert.executor_key,
+                ready_since=alert.ready_since,
+                reason=alert.reason,
+                status=alert.status,
+                severity=severity,
+                age_seconds=age_seconds,
+                recommended_action=action,
+                first_detected_at=alert.first_detected_at,
+                last_observed_at=alert.last_observed_at,
+                resolved_at=alert.resolved_at,
+            )
+        )
+    return ProjectWorkerReadinessResponse(
+        project_id=report.project_id,
+        checked_at=report.checked_at,
+        online_execution_workers=report.online_execution_workers,
+        coverage=tuple(
+            WorkerCapabilityCoverageResponse.model_validate(value) for value in report.coverage
+        ),
+        issues=tuple(WorkerReadinessIssueResponse.model_validate(value) for value in report.issues),
+        alerts=tuple(alerts),
+    )
+
+
+def _as_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
 def workflow_definition_response(

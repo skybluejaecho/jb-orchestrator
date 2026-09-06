@@ -1,8 +1,27 @@
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from jb_orchestrator.application import WorkerPresenceService
+from jb_orchestrator.application import (
+    CreateUserRequest,
+    OrchestrationService,
+    RegisterProject,
+    WorkerPresenceService,
+    WorkerReadinessService,
+    WorkflowService,
+)
 from jb_orchestrator.infrastructure.database import Base, SqlAlchemyUnitOfWork
-from jb_orchestrator.worker_presence import WorkerKind, WorkerLifecycleStatus
+from jb_orchestrator.worker_presence import (
+    WorkerKind,
+    WorkerLifecycleStatus,
+    WorkerReadinessAlertStatus,
+)
+from jb_orchestrator.workflows import (
+    EdgeDefinition,
+    NodeDefinition,
+    NodeKind,
+    NodeOutcome,
+    WorkflowDefinition,
+    WorkflowStatus,
+)
 
 
 async def test_worker_presence_round_trips_through_database() -> None:
@@ -27,4 +46,51 @@ async def test_worker_presence_round_trips_through_database() -> None:
     assert view.worker.id == worker.id
     assert view.worker.status is WorkerLifecycleStatus.STOPPED
     assert view.worker.capabilities == ("github",)
+    await engine.dispose()
+
+
+async def test_worker_readiness_alert_round_trips_through_database() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    factory = lambda: SqlAlchemyUnitOfWork(session_factory)  # noqa: E731
+    orchestration = OrchestrationService(factory)
+    project = await orchestration.register_project(
+        RegisterProject(
+            key="worker-alerts",
+            name="Worker Alerts",
+            repository_url="https://example.com/worker-alerts.git",
+        )
+    )
+    created = await orchestration.create_request(
+        CreateUserRequest(project_id=project.id, prompt="Run an unavailable executor")
+    )
+    workflow = WorkflowService(factory)
+    await workflow.register_definition(
+        WorkflowDefinition(
+            key="unavailable",
+            version=1,
+            entry_node="work",
+            nodes=(
+                NodeDefinition(key="work", kind=NodeKind.TASK, executor_key="specialized"),
+                NodeDefinition(
+                    key="done",
+                    kind=NodeKind.TERMINAL,
+                    terminal_status=WorkflowStatus.SUCCEEDED,
+                ),
+            ),
+            edges=(EdgeDefinition(source="work", outcome=NodeOutcome.SUCCESS, target="done"),),
+        )
+    )
+    await workflow.start(created.run.id, "unavailable", 1)
+
+    report = await WorkerReadinessService(factory).evaluate_project(project.id)
+
+    assert len(report.alerts) == 1
+    assert report.alerts[0].status is WorkerReadinessAlertStatus.ACTIVE
+    async with factory() as unit_of_work:
+        [stored] = await unit_of_work.worker_readiness_alerts.list_by_project(project.id)
+    assert stored.id == report.alerts[0].id
+    assert stored.executor_key == "specialized"
     await engine.dispose()

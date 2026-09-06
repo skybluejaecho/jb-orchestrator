@@ -96,6 +96,12 @@ def test_workflow_recommendation_requires_dispatch_permission() -> None:
     assert required_permission("POST", path) is ApiPermission.REQUEST_DISPATCH
 
 
+def test_worker_readiness_evaluation_uses_project_read_permission() -> None:
+    path = "/v1/projects/00000000-0000-0000-0000-000000000000/worker-readiness/evaluate"
+
+    assert required_permission("POST", path) is ApiPermission.PROJECT_READ
+
+
 def test_scm_publications_have_a_dedicated_write_permission() -> None:
     execution_id = "00000000-0000-0000-0000-000000000000"
     path = f"/v1/external-executions/{execution_id}/scm-publications"

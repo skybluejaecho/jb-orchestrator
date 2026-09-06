@@ -42,6 +42,9 @@ from jb_orchestrator.infrastructure.database.skill_repositories import SqlAlchem
 from jb_orchestrator.infrastructure.database.worker_presence_repositories import (
     SqlAlchemyWorkerInstanceRepository,
 )
+from jb_orchestrator.infrastructure.database.worker_readiness_alert_repositories import (
+    SqlAlchemyWorkerReadinessAlertRepository,
+)
 from jb_orchestrator.infrastructure.database.workflow_binding_repositories import (
     SqlAlchemyProjectWorkflowBindingRepository,
 )
@@ -74,6 +77,7 @@ class SqlAlchemyUnitOfWork:
     scm_publications: SqlAlchemyScmPublicationRepository
     scm_publication_attempts: SqlAlchemyScmPublicationAttemptRepository
     worker_instances: SqlAlchemyWorkerInstanceRepository
+    worker_readiness_alerts: SqlAlchemyWorkerReadinessAlertRepository
     workflow_definitions: SqlAlchemyWorkflowDefinitionRepository
     workflow_executions: SqlAlchemyWorkflowExecutionRepository
     project_workflow_bindings: SqlAlchemyProjectWorkflowBindingRepository
@@ -102,6 +106,7 @@ class SqlAlchemyUnitOfWork:
         self.scm_publications = SqlAlchemyScmPublicationRepository(self._session)
         self.scm_publication_attempts = SqlAlchemyScmPublicationAttemptRepository(self._session)
         self.worker_instances = SqlAlchemyWorkerInstanceRepository(self._session)
+        self.worker_readiness_alerts = SqlAlchemyWorkerReadinessAlertRepository(self._session)
         self.workflow_definitions = SqlAlchemyWorkflowDefinitionRepository(self._session)
         self.workflow_executions = SqlAlchemyWorkflowExecutionRepository(self._session)
         self.project_workflow_bindings = SqlAlchemyProjectWorkflowBindingRepository(self._session)

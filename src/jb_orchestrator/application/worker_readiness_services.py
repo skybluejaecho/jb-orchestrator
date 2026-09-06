@@ -6,12 +6,15 @@ from uuid import UUID
 
 from jb_orchestrator.application.exceptions import ResourceNotFound
 from jb_orchestrator.application.unit_of_work import UnitOfWork
+from jb_orchestrator.domain import DomainEvent
 from jb_orchestrator.worker_presence import (
     ProjectWorkerReadiness,
     WorkerCapabilityCoverage,
     WorkerInstance,
     WorkerKind,
     WorkerObservedStatus,
+    WorkerReadinessAlert,
+    WorkerReadinessAlertStatus,
     WorkerReadinessIssue,
     WorkerReadinessIssueReason,
 )
@@ -39,6 +42,9 @@ class WorkerReadinessService:
                 limit=500,
             )
             workers = await unit_of_work.worker_instances.list(limit=1000)
+            alerts = await unit_of_work.worker_readiness_alerts.list_by_project(
+                project_id, limit=500
+            )
 
         current_workers = self._latest_execution_workers(workers)
         ready_nodes = [
@@ -86,6 +92,99 @@ class WorkerReadinessService:
             online_execution_workers=online_count,
             coverage=coverage,
             issues=issues,
+            alerts=tuple(alerts),
+        )
+
+    async def evaluate_project(
+        self,
+        project_id: UUID,
+        *,
+        stale_after_seconds: float = 90.0,
+        at: datetime | None = None,
+    ) -> ProjectWorkerReadiness:
+        checked_at = at or datetime.now(UTC)
+        report = await self.inspect_project(
+            project_id,
+            stale_after_seconds=stale_after_seconds,
+            at=checked_at,
+        )
+        current_occurrences = {
+            (issue.workflow_execution_id, issue.node_key, issue.ready_since)
+            for issue in report.issues
+        }
+        async with self._unit_of_work_factory() as unit_of_work:
+            for issue in report.issues:
+                alert = await unit_of_work.worker_readiness_alerts.get_occurrence(
+                    workflow_execution_id=issue.workflow_execution_id,
+                    node_key=issue.node_key,
+                    ready_since=issue.ready_since,
+                    for_update=True,
+                )
+                if alert is None:
+                    alert = WorkerReadinessAlert(
+                        project_id=project_id,
+                        workflow_execution_id=issue.workflow_execution_id,
+                        run_id=issue.run_id,
+                        node_key=issue.node_key,
+                        executor_key=issue.executor_key,
+                        ready_since=issue.ready_since,
+                        reason=issue.reason,
+                        first_detected_at=checked_at,
+                        last_observed_at=checked_at,
+                    )
+                    await unit_of_work.worker_readiness_alerts.add(alert)
+                    await self._append_alert_event(unit_of_work, alert, "worker.readiness_alerted")
+                else:
+                    reason_changed = alert.observe(issue.reason, at=checked_at)
+                    await unit_of_work.worker_readiness_alerts.save(alert)
+                    if reason_changed:
+                        await self._append_alert_event(
+                            unit_of_work, alert, "worker.readiness_alert_reason_changed"
+                        )
+
+            active_alerts = await unit_of_work.worker_readiness_alerts.list_by_project(
+                project_id,
+                status=WorkerReadinessAlertStatus.ACTIVE,
+                limit=500,
+            )
+            for alert in active_alerts:
+                occurrence = (
+                    alert.workflow_execution_id,
+                    alert.node_key,
+                    alert.ready_since,
+                )
+                if occurrence in current_occurrences:
+                    continue
+                alert.resolve(at=checked_at)
+                await unit_of_work.worker_readiness_alerts.save(alert)
+                await self._append_alert_event(unit_of_work, alert, "worker.readiness_resolved")
+            await unit_of_work.commit()
+
+        return await self.inspect_project(
+            project_id,
+            stale_after_seconds=stale_after_seconds,
+            at=checked_at,
+        )
+
+    @staticmethod
+    async def _append_alert_event(
+        unit_of_work: UnitOfWork, alert: WorkerReadinessAlert, event_type: str
+    ) -> None:
+        await unit_of_work.events.append(
+            DomainEvent(
+                aggregate_type="project",
+                aggregate_id=alert.project_id,
+                event_type=event_type,
+                payload={
+                    "alert_id": str(alert.id),
+                    "workflow_execution_id": str(alert.workflow_execution_id),
+                    "run_id": str(alert.run_id),
+                    "node_key": alert.node_key,
+                    "executor_key": alert.executor_key,
+                    "reason": alert.reason.value,
+                    "status": alert.status.value,
+                },
+            )
         )
 
     @staticmethod

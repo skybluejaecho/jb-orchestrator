@@ -7,6 +7,7 @@ from jb_orchestrator.application import WorkerPresenceService, WorkerReadinessSe
 from jb_orchestrator.domain import Project, Run, UserRequest
 from jb_orchestrator.worker_presence import (
     WorkerKind,
+    WorkerReadinessAlertStatus,
     WorkerReadinessIssueReason,
 )
 from jb_orchestrator.workflows import (
@@ -120,3 +121,84 @@ async def test_readiness_api_reports_covered_ready_task() -> None:
     assert payload["online_execution_workers"] == 1
     assert payload["issues"] == []
     assert payload["coverage"][0]["online_worker_ids"] == ["worker-openclaw"]
+
+
+async def test_evaluation_deduplicates_and_resolves_durable_alerts() -> None:
+    store = MemoryStore()
+    project = Project(
+        key="alert-project",
+        name="Alert Project",
+        repository_url="https://github.com/example/alerts.git",
+    )
+    store.projects[project.id] = project
+    execution = ready_execution(store, project, "openclaw")
+    now = datetime.now(UTC)
+    execution.nodes["work"].updated_at = now - timedelta(minutes=2)
+    service = WorkerReadinessService(lambda: MemoryUnitOfWork(store))
+
+    first = await service.evaluate_project(project.id, at=now)
+    second = await service.evaluate_project(project.id, at=now + timedelta(seconds=30))
+
+    assert len(first.alerts) == 1
+    assert len(second.alerts) == 1
+    alert = second.alerts[0]
+    assert alert.id == first.alerts[0].id
+    assert alert.first_detected_at == now
+    assert alert.last_observed_at == now + timedelta(seconds=30)
+    assert [event.event_type for event in store.events] == ["worker.readiness_alerted"]
+
+    presence = WorkerPresenceService(lambda: MemoryUnitOfWork(store))
+    stopped = await presence.register(
+        worker_id="worker-openclaw-stopped",
+        kind=WorkerKind.EXECUTION,
+        hostname="host-a",
+        process_id=41,
+        capabilities=("openclaw",),
+    )
+    await presence.stop(stopped.id, at=now + timedelta(seconds=40))
+    changed = await service.evaluate_project(project.id, at=now + timedelta(seconds=45))
+
+    assert changed.alerts[0].id == alert.id
+    assert changed.alerts[0].reason is WorkerReadinessIssueReason.CAPABLE_WORKERS_OFFLINE
+
+    await presence.register(
+        worker_id="worker-openclaw",
+        kind=WorkerKind.EXECUTION,
+        hostname="host-a",
+        process_id=42,
+        capabilities=("openclaw",),
+    )
+    resolved = await service.evaluate_project(project.id, at=now + timedelta(seconds=60))
+
+    assert resolved.issues == ()
+    assert resolved.alerts[0].status is WorkerReadinessAlertStatus.RESOLVED
+    assert resolved.alerts[0].resolved_at == now + timedelta(seconds=60)
+    assert [event.event_type for event in store.events] == [
+        "worker.readiness_alerted",
+        "worker.readiness_alert_reason_changed",
+        "worker.readiness_resolved",
+    ]
+
+
+async def test_evaluation_api_returns_alert_severity_and_recovery_action() -> None:
+    store = MemoryStore()
+    project = Project(
+        key="alert-api-project",
+        name="Alert API",
+        repository_url="https://github.com/example/alert-api.git",
+    )
+    store.projects[project.id] = project
+    execution = ready_execution(store, project, "specialized")
+    now = datetime.now(UTC)
+    execution.nodes["work"].updated_at = now - timedelta(minutes=10)
+    service = WorkerReadinessService(lambda: MemoryUnitOfWork(store))
+    app = create_app(worker_readiness_service=service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(f"/v1/projects/{project.id}/worker-readiness/evaluate")
+
+    assert response.status_code == 200
+    [alert] = response.json()["alerts"]
+    assert alert["status"] == "active"
+    assert alert["severity"] == "warning"
+    assert alert["recommended_action"] == "start_capable_worker"
