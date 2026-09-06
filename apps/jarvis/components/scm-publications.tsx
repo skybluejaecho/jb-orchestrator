@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   ExternalLink,
   GitPullRequestArrow,
+  History,
   LoaderCircle,
   RotateCcw,
   Send,
@@ -39,6 +40,18 @@ type ScmPublication = {
   automatic_retry_limit: number;
   next_attempt_at: string | null;
   created_at: string;
+};
+
+type ScmPublicationAttempt = {
+  id: string;
+  attempt_number: number;
+  trigger: 'initial' | 'manual' | 'automatic' | 'lease_recovery';
+  worker_id: string;
+  status: 'claimed' | 'succeeded' | 'failed';
+  failure_reason: string | null;
+  failure_code: ScmPublication['failure_code'];
+  started_at: string;
+  finished_at: string | null;
 };
 
 type Problem = { detail?: string };
@@ -85,6 +98,19 @@ function failureLabel(publication: ScmPublication): string | null {
   return '수동 확인 필요';
 }
 
+function attemptTriggerLabel(trigger: ScmPublicationAttempt['trigger']) {
+  if (trigger === 'manual') return '수동 재시도';
+  if (trigger === 'automatic') return '자동 재시도';
+  if (trigger === 'lease_recovery') return '임대 만료 회수';
+  return '최초 시도';
+}
+
+function attemptStatusLabel(status: ScmPublicationAttempt['status']) {
+  if (status === 'succeeded') return '성공';
+  if (status === 'failed') return '실패';
+  return '진행 중';
+}
+
 export function ScmPublications({
   externalExecutionId,
   externalStatus,
@@ -113,6 +139,15 @@ export function ScmPublications({
   const [submitting, setSubmitting] = useState(false);
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [cancellingRetryId, setCancellingRetryId] = useState<string | null>(
+    null,
+  );
+  const [expandedAttemptId, setExpandedAttemptId] = useState<string | null>(
+    null,
+  );
+  const [attemptsByPublication, setAttemptsByPublication] = useState<
+    Record<string, ScmPublicationAttempt[]>
+  >({});
+  const [loadingAttemptsId, setLoadingAttemptsId] = useState<string | null>(
     null,
   );
   const [error, setError] = useState<string | null>(null);
@@ -218,6 +253,36 @@ export function ScmPublications({
       );
     } finally {
       setCancellingRetryId(null);
+    }
+  };
+
+  const toggleAttempts = async (publicationId: string) => {
+    if (expandedAttemptId === publicationId) {
+      setExpandedAttemptId(null);
+      return;
+    }
+    setExpandedAttemptId(publicationId);
+    setLoadingAttemptsId(publicationId);
+    setError(null);
+    try {
+      const attempts = await readJson<ScmPublicationAttempt[]>(
+        await fetch(
+          `/api/scm-publications/attempts?publicationId=${encodeURIComponent(publicationId)}`,
+        ),
+      );
+      setAttemptsByPublication((current) => ({
+        ...current,
+        [publicationId]: attempts,
+      }));
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : '게시 시도 이력을 불러오지 못했습니다.',
+      );
+      setExpandedAttemptId(null);
+    } finally {
+      setLoadingAttemptsId(null);
     }
   };
 
@@ -465,6 +530,72 @@ export function ScmPublications({
                     Pull Request 열기
                     <ExternalLink aria-hidden="true" className="size-3" />
                   </a>
+                )}
+                {publication.attempt_count > 0 && (
+                  <div className="mt-2 border-t border-white/7 pt-2">
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="ghost"
+                      disabled={loadingAttemptsId === publication.id}
+                      onClick={() => void toggleAttempts(publication.id)}
+                    >
+                      {loadingAttemptsId === publication.id ? (
+                        <LoaderCircle
+                          aria-hidden="true"
+                          className="animate-spin"
+                        />
+                      ) : (
+                        <History aria-hidden="true" />
+                      )}
+                      {expandedAttemptId === publication.id
+                        ? '시도 이력 닫기'
+                        : '시도 이력'}
+                    </Button>
+                    {expandedAttemptId === publication.id &&
+                      attemptsByPublication[publication.id] && (
+                        <ol className="mt-2 space-y-2 border-l border-cyan-300/15 pl-3">
+                          {attemptsByPublication[publication.id].map(
+                            (attempt) => (
+                              <li key={attempt.id} className="space-y-0.5">
+                                <div className="flex flex-wrap gap-2 text-white/55">
+                                  <span className="font-mono">
+                                    #{attempt.attempt_number}
+                                  </span>
+                                  <span>
+                                    {attemptTriggerLabel(attempt.trigger)}
+                                  </span>
+                                  <Badge
+                                    variant="outline"
+                                    className={statusClass(attempt.status)}
+                                  >
+                                    {attemptStatusLabel(attempt.status)}
+                                  </Badge>
+                                  <span className="font-mono text-white/30">
+                                    {attempt.worker_id}
+                                  </span>
+                                </div>
+                                <p className="text-white/30">
+                                  {new Date(attempt.started_at).toLocaleString(
+                                    'ko-KR',
+                                  )}
+                                  {attempt.finished_at &&
+                                    ` → ${new Date(attempt.finished_at).toLocaleString('ko-KR')}`}
+                                </p>
+                                {attempt.failure_reason && (
+                                  <p className="text-red-100/75">
+                                    {attempt.failure_code
+                                      ? `[${attempt.failure_code}] `
+                                      : ''}
+                                    {attempt.failure_reason}
+                                  </p>
+                                )}
+                              </li>
+                            ),
+                          )}
+                        </ol>
+                      )}
+                  </div>
                 )}
               </div>
             );
