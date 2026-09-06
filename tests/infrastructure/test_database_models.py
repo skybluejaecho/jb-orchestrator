@@ -38,6 +38,7 @@ def test_metadata_creates_initial_domain_schema() -> None:
         "workflow_definitions",
         "workflow_executions",
         "workspace_operations",
+        "worker_instances",
     }
     assert {index["name"] for index in inspector.get_indexes("runs")} >= {
         "ix_runs_request_id",
@@ -59,6 +60,11 @@ def test_metadata_creates_initial_domain_schema() -> None:
     assert {index["name"] for index in inspector.get_indexes("scm_publications")} >= {
         "ix_scm_publications_claim",
         "ix_scm_publications_external_execution_id",
+    }
+    assert {index["name"] for index in inspector.get_indexes("worker_instances")} >= {
+        "ix_worker_instances_kind_seen",
+        "ix_worker_instances_status_seen",
+        "ix_worker_instances_worker_id",
     }
     assert {index["name"] for index in inspector.get_indexes("scm_publication_attempts")} >= {
         "ix_scm_publication_attempts_publication_id"

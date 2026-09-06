@@ -39,6 +39,7 @@ from jb_orchestrator.scm import (
     ScmPublicationStatus,
 )
 from jb_orchestrator.skills import SkillSourceKind
+from jb_orchestrator.worker_presence import WorkerKind, WorkerLifecycleStatus
 from jb_orchestrator.workflows.models import NodeExecutionStatus, NodeOutcome, WorkflowStatus
 from jb_orchestrator.workspace_operations import WorkspaceOperationKind, WorkspaceOperationStatus
 
@@ -602,6 +603,32 @@ class ScmPublicationAttemptRecord(Base):
     failure_retryable: Mapped[bool | None] = mapped_column(Boolean)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class WorkerInstanceRecord(Base):
+    """One process lifetime for an execution, workspace, or SCM worker."""
+
+    __tablename__ = "worker_instances"
+    __table_args__ = (
+        Index("ix_worker_instances_status_seen", "status", "last_seen_at"),
+        Index("ix_worker_instances_kind_seen", "kind", "last_seen_at"),
+        CheckConstraint("process_id > 0", name="process_id_positive"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    worker_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    kind: Mapped[WorkerKind] = mapped_column(string_enum(WorkerKind, "worker_kind"), nullable=False)
+    hostname: Mapped[str] = mapped_column(String(255), nullable=False)
+    process_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    capabilities: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    workspace_scope: Mapped[str | None] = mapped_column(String(128))
+    metadata_json: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, nullable=False)
+    status: Mapped[WorkerLifecycleStatus] = mapped_column(
+        string_enum(WorkerLifecycleStatus, "worker_lifecycle_status"), nullable=False
+    )
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class WorkflowDefinitionRecord(Base):

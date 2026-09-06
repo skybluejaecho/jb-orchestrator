@@ -18,6 +18,7 @@ from jb_orchestrator.scm import (
     ScmPublicationStatus,
 )
 from jb_orchestrator.skills import SkillSourceKind
+from jb_orchestrator.worker_presence import WorkerKind, WorkerObservedStatus
 from jb_orchestrator.workflows import (
     NodeExecutionStatus,
     NodeKind,
@@ -326,6 +327,21 @@ class ScmPublicationAttemptResponse(BaseModel):
     failure_retryable: bool | None
     started_at: datetime
     finished_at: datetime | None
+
+
+class WorkerPresenceResponse(BaseModel):
+    id: UUID
+    worker_id: str
+    kind: WorkerKind
+    hostname: str
+    process_id: int
+    capabilities: tuple[str, ...]
+    workspace_scope: str | None
+    metadata: dict[str, Any]
+    observed_status: WorkerObservedStatus
+    started_at: datetime
+    last_seen_at: datetime
+    stopped_at: datetime | None
 
 
 class SkillReferencePayload(BaseModel):

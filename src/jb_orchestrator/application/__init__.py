@@ -22,6 +22,10 @@ from jb_orchestrator.application.security_services import IssuedServiceAccount, 
 from jb_orchestrator.application.services import CreatedRequest, OrchestrationService
 from jb_orchestrator.application.skill_services import SkillCatalogService
 from jb_orchestrator.application.task_dispatch import TaskDispatchService
+from jb_orchestrator.application.worker_presence_services import (
+    WorkerPresenceService,
+    WorkerPresenceView,
+)
 from jb_orchestrator.application.workflow_services import WorkflowService
 from jb_orchestrator.application.workspace_operation_services import WorkspaceOperationService
 
@@ -46,6 +50,8 @@ __all__ = [
     "SecurityService",
     "SkillCatalogService",
     "TaskDispatchService",
+    "WorkerPresenceService",
+    "WorkerPresenceView",
     "WorkflowComposition",
     "WorkflowService",
     "WorkspaceOperationService",

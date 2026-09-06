@@ -35,6 +35,7 @@ from jb_orchestrator.scm import (
 )
 from jb_orchestrator.security import ServiceAccount
 from jb_orchestrator.skills import SkillDefinition
+from jb_orchestrator.worker_presence import WorkerInstance
 from jb_orchestrator.workflows import (
     NodeExecutionStatus,
     ProjectWorkflowBinding,
@@ -74,6 +75,7 @@ class MemoryStore:
     scm_publication_attempts: dict[tuple[UUID, int], ScmPublicationAttempt] = field(
         default_factory=dict
     )
+    worker_instances: dict[UUID, WorkerInstance] = field(default_factory=dict)
     service_accounts: dict[UUID, ServiceAccount] = field(default_factory=dict)
 
 
@@ -423,6 +425,27 @@ class MemoryScmPublicationAttemptRepository:
         self._store.scm_publication_attempts[(attempt.publication_id, attempt.attempt_number)] = (
             attempt
         )
+
+
+class MemoryWorkerInstanceRepository:
+    def __init__(self, store: MemoryStore) -> None:
+        self._store = store
+
+    async def add(self, worker: WorkerInstance) -> None:
+        self._store.worker_instances[worker.id] = worker
+
+    async def get(self, instance_id: UUID, *, for_update: bool = False) -> WorkerInstance | None:
+        return self._store.worker_instances.get(instance_id)
+
+    async def list(self, *, limit: int = 100) -> list[WorkerInstance]:
+        return sorted(
+            self._store.worker_instances.values(),
+            key=lambda value: (value.last_seen_at, value.id),
+            reverse=True,
+        )[:limit]
+
+    async def save(self, worker: WorkerInstance) -> None:
+        self._store.worker_instances[worker.id] = worker
 
 
 class MemoryEventRepository:
@@ -848,6 +871,7 @@ class MemoryUnitOfWork:
         self.workspace_operations = MemoryWorkspaceOperationRepository(store)
         self.scm_publications = MemoryScmPublicationRepository(store)
         self.scm_publication_attempts = MemoryScmPublicationAttemptRepository(store)
+        self.worker_instances = MemoryWorkerInstanceRepository(store)
         self.workflow_definitions = MemoryWorkflowDefinitionRepository(store)
         self.workflow_executions = MemoryWorkflowExecutionRepository(store)
         self.project_workflow_bindings = MemoryProjectWorkflowBindingRepository(store)
