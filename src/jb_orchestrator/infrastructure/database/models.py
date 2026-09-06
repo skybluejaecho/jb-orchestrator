@@ -522,6 +522,10 @@ class ScmPublicationRecord(Base):
             "status",
             "created_at",
         ),
+        CheckConstraint(
+            "automatic_retry_limit BETWEEN 0 AND 10",
+            name="automatic_retry_limit",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
@@ -550,6 +554,8 @@ class ScmPublicationRecord(Base):
     )
     failure_retryable: Mapped[bool | None] = mapped_column(Boolean)
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    automatic_retry_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

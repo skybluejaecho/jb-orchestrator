@@ -368,6 +368,13 @@ class MemoryScmPublicationRepository:
                     and publication.lease_expires_at is not None
                     and publication.lease_expires_at <= now
                 )
+                or (
+                    publication.status is ScmPublicationStatus.FAILED
+                    and publication.failure_retryable is True
+                    and publication.next_attempt_at is not None
+                    and publication.next_attempt_at <= now
+                    and publication.attempt_count <= publication.automatic_retry_limit
+                )
             )
         ]
         if not candidates:

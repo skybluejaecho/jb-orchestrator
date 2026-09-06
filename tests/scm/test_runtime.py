@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 from jb_orchestrator.application import ExternalExecutionService, ScmPublicationService
 from jb_orchestrator.scm import (
     ScmPublicationFailureCode,
@@ -32,8 +34,21 @@ class RecordingPublisher:
         )
 
 
+class RetryablePublisher(RecordingPublisher):
+    async def publish_review(self, request: ScmPublicationRequest) -> ScmPublicationResult:
+        raise ScmPublisherFailure(
+            "provider temporarily unavailable",
+            code=ScmPublicationFailureCode.PROVIDER_UNAVAILABLE,
+            retryable=True,
+        )
+
+
 async def queued_publication(
-    store: MemoryStore, publisher: RecordingPublisher
+    store: MemoryStore,
+    publisher: RecordingPublisher,
+    *,
+    automatic_retry_limit: int = 0,
+    automatic_retry_base_delay_seconds: float = 30.0,
 ) -> tuple[ScmPublicationRuntime, ScmPublicationService]:
     execution = await managed_execution(store)
     uow = lambda: MemoryUnitOfWork(store)  # noqa: E731
@@ -55,6 +70,8 @@ async def queued_publication(
         ScmPublisherRegistry({"github": publisher}),
         lease_seconds=30,
         operation_timeout_seconds=10,
+        automatic_retry_limit=automatic_retry_limit,
+        automatic_retry_base_delay_seconds=automatic_retry_base_delay_seconds,
     )
     return runtime, publications
 
@@ -101,16 +118,13 @@ async def test_runtime_records_adapter_failure() -> None:
 
 
 async def test_runtime_preserves_typed_retryable_adapter_failure() -> None:
-    class RetryablePublisher(RecordingPublisher):
-        async def publish_review(self, request: ScmPublicationRequest) -> ScmPublicationResult:
-            raise ScmPublisherFailure(
-                "provider temporarily unavailable",
-                code=ScmPublicationFailureCode.PROVIDER_UNAVAILABLE,
-                retryable=True,
-            )
-
     store = MemoryStore()
-    runtime, publications = await queued_publication(store, RetryablePublisher())
+    runtime, publications = await queued_publication(
+        store,
+        RetryablePublisher(),
+        automatic_retry_limit=2,
+        automatic_retry_base_delay_seconds=10,
+    )
 
     assert await runtime.run_once()
 
@@ -119,6 +133,35 @@ async def test_runtime_preserves_typed_retryable_adapter_failure() -> None:
     )
     assert failed.failure_code is ScmPublicationFailureCode.PROVIDER_UNAVAILABLE
     assert failed.failure_retryable is True
+    assert failed.automatic_retry_limit == 2
+    assert failed.next_attempt_at is not None
+    assert store.events[-1].event_type == "scm_publication.retry_scheduled"
+
+
+async def test_runtime_stops_automatic_retry_after_configured_limit() -> None:
+    store = MemoryStore()
+    runtime, publications = await queued_publication(
+        store,
+        RetryablePublisher(),
+        automatic_retry_limit=1,
+        automatic_retry_base_delay_seconds=10,
+    )
+
+    assert await runtime.run_once()
+    [scheduled] = await publications.list_for_execution(
+        next(iter(store.external_executions.values())).id
+    )
+    scheduled.next_attempt_at = datetime.now(UTC) - timedelta(seconds=1)
+
+    assert await runtime.run_once()
+    [exhausted] = await publications.list_for_execution(
+        next(iter(store.external_executions.values())).id
+    )
+    assert exhausted.attempt_count == 2
+    assert exhausted.failure_retryable is True
+    assert exhausted.next_attempt_at is None
+    assert store.events[-1].event_type == "scm_publication.failed"
+    assert not await runtime.run_once()
 
 
 async def test_runtime_rejects_mismatched_provider_result() -> None:

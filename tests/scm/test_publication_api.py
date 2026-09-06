@@ -39,6 +39,8 @@ async def test_publication_request_list_and_replay() -> None:
     assert first.json()["id"] == repeated.json()["id"]
     assert first.json()["repository"] == "https://github.com/example/project.git"
     assert first.json()["source_branch"] == "feature/review"
+    assert first.json()["automatic_retry_limit"] == 0
+    assert first.json()["next_attempt_at"] is None
     assert len(listed.json()) == 1
     assert invalid.status_code == 422
 

@@ -337,6 +337,12 @@ def _run_scm_worker(
             "30",
             "--operation-timeout",
             "20",
+            "--automatic-retry-limit",
+            "1",
+            "--automatic-retry-base-delay",
+            "0.1",
+            "--automatic-retry-max-delay",
+            "0.1",
         ],
         cwd=project_root,
         env=dict(environment),
@@ -582,14 +588,11 @@ def run_system_smoke(
                 raise SystemSmokeError("transient SCM provider failure was not classified")
             if failed_publication.get("failure_retryable") is not True:
                 raise SystemSmokeError("transient SCM provider failure was not marked retryable")
-            retried_publication = _request(
-                jarvis,
-                "POST",
-                "/api/scm-publications/retry",
-                payload={"publicationId": publication["id"]},
-            )
-            if retried_publication.get("status") != "pending":
-                raise SystemSmokeError("failed SCM publication was not queued for retry")
+            if failed_publication.get("automatic_retry_limit") != 1:
+                raise SystemSmokeError("SCM automatic retry limit was not persisted")
+            if not failed_publication.get("next_attempt_at"):
+                raise SystemSmokeError("SCM automatic retry was not durably scheduled")
+            time.sleep(0.2)
             _run_scm_worker(
                 project_root,
                 scm_environment,

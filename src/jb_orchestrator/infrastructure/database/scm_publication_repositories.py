@@ -34,6 +34,8 @@ def scm_publication_from_record(record: ScmPublicationRecord) -> ScmPublication:
         failure_code=record.failure_code,
         failure_retryable=record.failure_retryable,
         attempt_count=record.attempt_count,
+        automatic_retry_limit=record.automatic_retry_limit,
+        next_attempt_at=record.next_attempt_at,
         created_at=record.created_at,
         updated_at=record.updated_at,
         completed_at=record.completed_at,
@@ -109,6 +111,16 @@ class SqlAlchemyScmPublicationRepository:
                         (ScmPublicationRecord.status == ScmPublicationStatus.CLAIMED)
                         & (ScmPublicationRecord.lease_expires_at <= now)
                     ),
+                    (
+                        (ScmPublicationRecord.status == ScmPublicationStatus.FAILED)
+                        & (ScmPublicationRecord.failure_retryable.is_(True))
+                        & (ScmPublicationRecord.next_attempt_at.is_not(None))
+                        & (ScmPublicationRecord.next_attempt_at <= now)
+                        & (
+                            ScmPublicationRecord.attempt_count
+                            <= ScmPublicationRecord.automatic_retry_limit
+                        )
+                    ),
                 ),
             )
             .order_by(ScmPublicationRecord.created_at, ScmPublicationRecord.id)
@@ -153,6 +165,8 @@ class SqlAlchemyScmPublicationRepository:
             "failure_code": publication.failure_code,
             "failure_retryable": publication.failure_retryable,
             "attempt_count": publication.attempt_count,
+            "automatic_retry_limit": publication.automatic_retry_limit,
+            "next_attempt_at": publication.next_attempt_at,
             "created_at": publication.created_at,
             "updated_at": publication.updated_at,
             "completed_at": publication.completed_at,
