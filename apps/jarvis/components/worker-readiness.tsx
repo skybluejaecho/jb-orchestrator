@@ -32,6 +32,21 @@ type WorkerReadiness = {
   online_execution_workers: number;
   coverage: CapabilityCoverage[];
   issues: ReadinessIssue[];
+  alerts: ReadinessAlert[];
+};
+
+type ReadinessAlert = ReadinessIssue & {
+  id: string;
+  status: 'active' | 'resolved';
+  severity: 'warning' | 'critical' | 'resolved';
+  age_seconds: number;
+  recommended_action:
+    | 'start_capable_worker'
+    | 'restart_capable_worker'
+    | 'none';
+  first_detected_at: string;
+  last_observed_at: string;
+  resolved_at: string | null;
 };
 
 type Problem = { detail?: string };
@@ -50,6 +65,19 @@ function issueLabel(reason: ReadinessIssue['reason']) {
     : '이 executor를 지원하는 Worker가 없습니다.';
 }
 
+function actionLabel(action: ReadinessAlert['recommended_action']) {
+  if (action === 'none') return '추가 조치가 필요하지 않습니다.';
+  return action === 'restart_capable_worker'
+    ? '해당 capability의 Worker 프로세스와 연결 설정을 확인한 뒤 다시 시작하세요.'
+    : '이 executor capability를 제공하는 실행 Worker를 설치하거나 시작하세요.';
+}
+
+function elapsedLabel(seconds: number) {
+  if (seconds < 60) return `${seconds}초`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}분`;
+  return `${Math.floor(seconds / 3600)}시간`;
+}
+
 export function WorkerReadinessPanel({
   projectId,
   revision,
@@ -59,6 +87,7 @@ export function WorkerReadinessPanel({
 }) {
   const [report, setReport] = useState<WorkerReadiness | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const alerts = report?.alerts ?? [];
 
   const load = useCallback(async () => {
     try {
@@ -94,7 +123,10 @@ export function WorkerReadinessPanel({
         </div>
         <CardDescription>
           online 실행 Worker {report?.online_execution_workers ?? '—'} · 배정
-          문제 {report?.issues.length ?? '—'}
+          경보{' '}
+          {report
+            ? alerts.filter((alert) => alert.status === 'active').length
+            : '—'}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -150,32 +182,63 @@ export function WorkerReadinessPanel({
             </div>
           </div>
         ))}
-        {report?.issues.map((issue) => (
-          <div
-            key={`${issue.workflow_execution_id}:${issue.node_key}`}
-            className="rounded-lg border border-red-300/15 bg-red-300/5 p-3"
-          >
-            <div className="flex flex-wrap items-center gap-2">
-              <AlertTriangle
-                aria-hidden="true"
-                className="size-4 text-red-200"
-              />
-              <span className="font-medium text-red-50">{issue.node_key}</span>
-              <span className="font-mono text-xs text-white/40">
-                {issue.executor_key}
-              </span>
-              <span className="ml-auto font-mono text-xs text-white/25">
-                {issue.workflow_execution_id.slice(0, 8)}
-              </span>
+        {alerts
+          .filter((alert) => alert.status === 'active')
+          .map((alert) => (
+            <div
+              key={alert.id}
+              className={`rounded-lg border p-3 ${
+                alert.severity === 'critical'
+                  ? 'border-red-300/25 bg-red-300/8'
+                  : 'border-amber-300/20 bg-amber-300/6'
+              }`}
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <AlertTriangle
+                  aria-hidden="true"
+                  className="size-4 text-red-200"
+                />
+                <span className="font-medium text-red-50">
+                  {alert.node_key}
+                </span>
+                <span className="font-mono text-xs text-white/40">
+                  {alert.executor_key}
+                </span>
+                <Badge
+                  variant="outline"
+                  className="border-red-300/20 text-red-100"
+                >
+                  {alert.severity === 'critical' ? '긴급' : '주의'} ·{' '}
+                  {elapsedLabel(alert.age_seconds)}
+                </Badge>
+                <span className="ml-auto font-mono text-xs text-white/25">
+                  {alert.workflow_execution_id.slice(0, 8)}
+                </span>
+              </div>
+              <p className="mt-1.5 text-sm text-red-100/75">
+                {issueLabel(alert.reason)}
+              </p>
+              <p className="mt-1 text-xs text-white/45">
+                {actionLabel(alert.recommended_action)}
+              </p>
+              <p className="mt-1 text-xs text-white/30">
+                최초 감지{' '}
+                {new Date(alert.first_detected_at).toLocaleString('ko-KR')}
+              </p>
             </div>
-            <p className="mt-1.5 text-sm text-red-100/75">
-              {issueLabel(issue.reason)}
-            </p>
-            <p className="mt-1 text-xs text-white/30">
-              READY 이후 {new Date(issue.ready_since).toLocaleString('ko-KR')}
-            </p>
-          </div>
-        ))}
+          ))}
+        {alerts
+          .filter((alert) => alert.status === 'resolved')
+          .slice(0, 3)
+          .map((alert) => (
+            <div
+              key={alert.id}
+              className="rounded-lg border border-emerald-300/12 bg-emerald-300/4 p-3 text-sm text-emerald-100/65"
+            >
+              <CircleCheck aria-hidden="true" className="mr-2 inline size-4" />
+              {alert.node_key} · {alert.executor_key} 배정 경보 해소
+            </div>
+          ))}
       </CardContent>
     </Card>
   );
