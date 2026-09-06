@@ -592,7 +592,25 @@ def run_system_smoke(
                 raise SystemSmokeError("SCM automatic retry limit was not persisted")
             if not failed_publication.get("next_attempt_at"):
                 raise SystemSmokeError("SCM automatic retry was not durably scheduled")
-            time.sleep(0.2)
+            cancelled_retry = _request(
+                jarvis,
+                "POST",
+                "/api/scm-publications/automatic-retry/cancel",
+                payload={"publicationId": publication["id"]},
+            )
+            if (
+                cancelled_retry.get("status") != "failed"
+                or cancelled_retry.get("next_attempt_at") is not None
+            ):
+                raise SystemSmokeError("SCM automatic retry schedule was not cancelled")
+            immediate_retry = _request(
+                jarvis,
+                "POST",
+                "/api/scm-publications/retry",
+                payload={"publicationId": publication["id"]},
+            )
+            if immediate_retry.get("status") != "pending":
+                raise SystemSmokeError("SCM publication was not queued for immediate retry")
             _run_scm_worker(
                 project_root,
                 scm_environment,
