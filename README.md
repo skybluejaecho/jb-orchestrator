@@ -498,6 +498,15 @@ ORCH-058 adds explicit operator controls for scheduled SCM publication retries:
 - project-scoped `scm.publish` authorization protects both cancellation and immediate retry
 - Jarvis exposes `예약 취소` and `지금 재시도` and refreshes peers from durable events
 
+ORCH-059 adds a durable, per-attempt SCM publication ledger:
+
+- every worker claim creates an atomic attempt record beside the publication state transition
+- initial, manual, automatic, and expired-lease recovery claims remain distinguishable
+- each attempt retains its worker, timing, terminal result, and provider-neutral failure evidence
+- the read API returns newest attempts first without exposing internal lease tokens
+- Jarvis loads the attempt timeline on demand instead of reconstructing history from browser state
+- the system smoke proves an initial provider failure followed by a successful manual recovery
+
 ## Prerequisites
 
 - Python 3.12

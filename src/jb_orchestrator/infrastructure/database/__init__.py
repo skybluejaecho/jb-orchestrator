@@ -30,6 +30,7 @@ from jb_orchestrator.infrastructure.database.models import (
     ProjectWorkflowBindingRecord,
     RequestDispatchReceiptRecord,
     RunRecord,
+    ScmPublicationAttemptRecord,
     ScmPublicationRecord,
     ServiceAccountRecord,
     SkillDefinitionRecord,
@@ -50,6 +51,7 @@ from jb_orchestrator.infrastructure.database.repositories import (
     SqlAlchemyUserRequestRepository,
 )
 from jb_orchestrator.infrastructure.database.scm_publication_repositories import (
+    SqlAlchemyScmPublicationAttemptRepository,
     SqlAlchemyScmPublicationRepository,
 )
 from jb_orchestrator.infrastructure.database.security_repositories import (
@@ -82,6 +84,7 @@ __all__ = [
     "ProjectWorkflowBindingRecord",
     "RequestDispatchReceiptRecord",
     "RunRecord",
+    "ScmPublicationAttemptRecord",
     "ScmPublicationRecord",
     "ServiceAccountRecord",
     "SkillDefinitionRecord",
@@ -95,6 +98,7 @@ __all__ = [
     "SqlAlchemyProjectWorkflowBindingRepository",
     "SqlAlchemyRequestDispatchReceiptRepository",
     "SqlAlchemyRunRepository",
+    "SqlAlchemyScmPublicationAttemptRepository",
     "SqlAlchemyScmPublicationRepository",
     "SqlAlchemyServiceAccountRepository",
     "SqlAlchemySkillRepository",

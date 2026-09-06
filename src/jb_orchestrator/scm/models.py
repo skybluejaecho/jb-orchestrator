@@ -29,6 +29,19 @@ class ScmPublicationFailureCode(StrEnum):
     UNEXPECTED = "unexpected"
 
 
+class ScmPublicationAttemptStatus(StrEnum):
+    CLAIMED = "claimed"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class ScmPublicationAttemptTrigger(StrEnum):
+    INITIAL = "initial"
+    MANUAL = "manual"
+    AUTOMATIC = "automatic"
+    LEASE_RECOVERY = "lease_recovery"
+
+
 class ScmPublisherFailure(RuntimeError):
     """Typed adapter failure that can safely cross the publisher boundary."""
 
@@ -100,8 +113,11 @@ class ScmPublication:
     def is_terminal(self) -> bool:
         return self.status in {ScmPublicationStatus.SUCCEEDED, ScmPublicationStatus.FAILED}
 
-    def claim(self, worker_id: str, *, lease_seconds: int, at: datetime | None = None) -> None:
+    def claim(
+        self, worker_id: str, *, lease_seconds: int, at: datetime | None = None
+    ) -> ScmPublicationAttemptTrigger:
         changed_at = at or datetime.now(UTC)
+        trigger = self.claim_trigger(at=changed_at)
         scheduled_retry = (
             self.status is ScmPublicationStatus.FAILED
             and self.failure_retryable is True
@@ -125,6 +141,21 @@ class ScmPublication:
             self.completed_at = None
             self.next_attempt_at = None
         self.updated_at = changed_at
+        return trigger
+
+    def claim_trigger(self, *, at: datetime | None = None) -> ScmPublicationAttemptTrigger:
+        changed_at = at or datetime.now(UTC)
+        if (
+            self.status is ScmPublicationStatus.CLAIMED
+            and self.lease_expires_at is not None
+            and self._as_utc(self.lease_expires_at) <= self._as_utc(changed_at)
+        ):
+            return ScmPublicationAttemptTrigger.LEASE_RECOVERY
+        if self.status is ScmPublicationStatus.FAILED:
+            return ScmPublicationAttemptTrigger.AUTOMATIC
+        if self.attempt_count > 0:
+            return ScmPublicationAttemptTrigger.MANUAL
+        return ScmPublicationAttemptTrigger.INITIAL
 
     def retry(self, *, at: datetime | None = None) -> None:
         if self.status is not ScmPublicationStatus.FAILED:
@@ -212,6 +243,70 @@ class ScmPublication:
     @staticmethod
     def _as_utc(value: datetime) -> datetime:
         return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+@dataclass(frozen=True, slots=True)
+class ScmPublicationClaim:
+    publication: ScmPublication
+    trigger: ScmPublicationAttemptTrigger
+
+
+@dataclass(slots=True, kw_only=True)
+class ScmPublicationAttempt:
+    publication_id: UUID
+    attempt_number: int
+    trigger: ScmPublicationAttemptTrigger
+    worker_id: str
+    lease_token: UUID
+    id: UUID = field(default_factory=uuid4)
+    status: ScmPublicationAttemptStatus = ScmPublicationAttemptStatus.CLAIMED
+    result: dict[str, Any] | None = None
+    failure_reason: str | None = None
+    failure_code: ScmPublicationFailureCode | None = None
+    failure_retryable: bool | None = None
+    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    finished_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        self.worker_id = self.worker_id.strip()
+        if not self.worker_id:
+            raise DomainValidationError("SCM publication attempt worker_id must not be empty")
+        if self.attempt_number < 1:
+            raise DomainValidationError("SCM publication attempt_number must be positive")
+
+    def succeed(
+        self, lease_token: UUID, result: dict[str, Any], *, at: datetime | None = None
+    ) -> None:
+        self._require_claim(lease_token)
+        self.status = ScmPublicationAttemptStatus.SUCCEEDED
+        self.result = result
+        self.finished_at = at or datetime.now(UTC)
+
+    def fail(
+        self,
+        lease_token: UUID,
+        reason: str,
+        *,
+        code: ScmPublicationFailureCode,
+        retryable: bool,
+        at: datetime | None = None,
+    ) -> None:
+        self._require_claim(lease_token)
+        normalized = reason.strip()
+        if not normalized:
+            raise DomainValidationError("SCM publication attempt failure reason must not be empty")
+        self.status = ScmPublicationAttemptStatus.FAILED
+        self.failure_reason = normalized
+        self.failure_code = code
+        self.failure_retryable = retryable
+        self.finished_at = at or datetime.now(UTC)
+
+    def _require_claim(self, lease_token: UUID) -> None:
+        if (
+            self.status is not ScmPublicationAttemptStatus.CLAIMED
+            or self.lease_token != lease_token
+        ):
+            raise InvalidStateTransition("SCM publication attempt lease is not owned")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

@@ -8,8 +8,16 @@ from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from jb_orchestrator.infrastructure.database.models import ScmPublicationRecord
-from jb_orchestrator.scm import ScmPublication, ScmPublicationStatus
+from jb_orchestrator.infrastructure.database.models import (
+    ScmPublicationAttemptRecord,
+    ScmPublicationRecord,
+)
+from jb_orchestrator.scm import (
+    ScmPublication,
+    ScmPublicationAttempt,
+    ScmPublicationClaim,
+    ScmPublicationStatus,
+)
 
 
 def scm_publication_from_record(record: ScmPublicationRecord) -> ScmPublication:
@@ -98,7 +106,7 @@ class SqlAlchemyScmPublicationRepository:
 
     async def claim_next(
         self, *, worker_id: str, provider_key: str, workspace_scope: str, lease_seconds: int
-    ) -> ScmPublication | None:
+    ) -> ScmPublicationClaim | None:
         now = datetime.now(UTC)
         statement = (
             select(ScmPublicationRecord)
@@ -132,9 +140,9 @@ class SqlAlchemyScmPublicationRepository:
         if record is None:
             return None
         publication = scm_publication_from_record(record)
-        publication.claim(worker_id, lease_seconds=lease_seconds, at=now)
+        trigger = publication.claim(worker_id, lease_seconds=lease_seconds, at=now)
         self._update(record, publication)
-        return publication
+        return ScmPublicationClaim(publication=publication, trigger=trigger)
 
     async def save(self, publication: ScmPublication) -> None:
         record = await self._session.get(ScmPublicationRecord, publication.id)
@@ -177,3 +185,80 @@ class SqlAlchemyScmPublicationRepository:
         for key, value in cls._values(publication).items():
             if key != "id":
                 setattr(record, key, value)
+
+
+def scm_publication_attempt_from_record(
+    record: ScmPublicationAttemptRecord,
+) -> ScmPublicationAttempt:
+    return ScmPublicationAttempt(
+        id=record.id,
+        publication_id=record.publication_id,
+        attempt_number=record.attempt_number,
+        trigger=record.trigger,
+        worker_id=record.worker_id,
+        lease_token=record.lease_token,
+        status=record.status,
+        result=record.result,
+        failure_reason=record.failure_reason,
+        failure_code=record.failure_code,
+        failure_retryable=record.failure_retryable,
+        started_at=record.started_at,
+        finished_at=record.finished_at,
+    )
+
+
+class SqlAlchemyScmPublicationAttemptRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, attempt: ScmPublicationAttempt) -> None:
+        self._session.add(ScmPublicationAttemptRecord(**self._values(attempt)))
+
+    async def get(
+        self, publication_id: UUID, attempt_number: int, *, for_update: bool = False
+    ) -> ScmPublicationAttempt | None:
+        statement = select(ScmPublicationAttemptRecord).where(
+            ScmPublicationAttemptRecord.publication_id == publication_id,
+            ScmPublicationAttemptRecord.attempt_number == attempt_number,
+        )
+        if for_update:
+            statement = statement.with_for_update().execution_options(populate_existing=True)
+        record = await self._session.scalar(statement)
+        return scm_publication_attempt_from_record(record) if record is not None else None
+
+    async def list_for_publication(
+        self, publication_id: UUID, *, limit: int = 100
+    ) -> list[ScmPublicationAttempt]:
+        records = await self._session.scalars(
+            select(ScmPublicationAttemptRecord)
+            .where(ScmPublicationAttemptRecord.publication_id == publication_id)
+            .order_by(ScmPublicationAttemptRecord.attempt_number.desc())
+            .limit(limit)
+        )
+        return [scm_publication_attempt_from_record(record) for record in records]
+
+    async def save(self, attempt: ScmPublicationAttempt) -> None:
+        record = await self._session.get(ScmPublicationAttemptRecord, attempt.id)
+        if record is None:
+            raise LookupError(f"SCM publication attempt not found: {attempt.id}")
+        for key, value in self._values(attempt).items():
+            if key != "id":
+                setattr(record, key, value)
+
+    @staticmethod
+    def _values(attempt: ScmPublicationAttempt) -> dict[str, object]:
+        return {
+            "id": attempt.id,
+            "publication_id": attempt.publication_id,
+            "attempt_number": attempt.attempt_number,
+            "trigger": attempt.trigger,
+            "worker_id": attempt.worker_id,
+            "lease_token": attempt.lease_token,
+            "status": attempt.status,
+            "result": attempt.result,
+            "failure_reason": attempt.failure_reason,
+            "failure_code": attempt.failure_code,
+            "failure_retryable": attempt.failure_retryable,
+            "started_at": attempt.started_at,
+            "finished_at": attempt.finished_at,
+        }

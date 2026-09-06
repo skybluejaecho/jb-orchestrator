@@ -32,7 +32,12 @@ from jb_orchestrator.domain.runs import RunStatus
 from jb_orchestrator.external_executions import ExternalExecutionStatus
 from jb_orchestrator.infrastructure.database.base import Base
 from jb_orchestrator.model_routing import ModelTier
-from jb_orchestrator.scm import ScmPublicationFailureCode, ScmPublicationStatus
+from jb_orchestrator.scm import (
+    ScmPublicationAttemptStatus,
+    ScmPublicationAttemptTrigger,
+    ScmPublicationFailureCode,
+    ScmPublicationStatus,
+)
 from jb_orchestrator.skills import SkillSourceKind
 from jb_orchestrator.workflows.models import NodeExecutionStatus, NodeOutcome, WorkflowStatus
 from jb_orchestrator.workspace_operations import WorkspaceOperationKind, WorkspaceOperationStatus
@@ -559,6 +564,44 @@ class ScmPublicationRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ScmPublicationAttemptRecord(Base):
+    """One durable worker claim and its terminal publication outcome."""
+
+    __tablename__ = "scm_publication_attempts"
+    __table_args__ = (
+        UniqueConstraint(
+            "publication_id",
+            "attempt_number",
+            name="uq_scm_publication_attempts_number",
+        ),
+        CheckConstraint("attempt_number > 0", name="attempt_number_positive"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    publication_id: Mapped[UUID] = mapped_column(
+        ForeignKey("scm_publications.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    trigger: Mapped[ScmPublicationAttemptTrigger] = mapped_column(
+        string_enum(ScmPublicationAttemptTrigger, "scm_publication_attempt_trigger"),
+        nullable=False,
+    )
+    worker_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    lease_token: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    status: Mapped[ScmPublicationAttemptStatus] = mapped_column(
+        string_enum(ScmPublicationAttemptStatus, "scm_publication_attempt_status"),
+        nullable=False,
+    )
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    failure_reason: Mapped[str | None] = mapped_column(Text)
+    failure_code: Mapped[ScmPublicationFailureCode | None] = mapped_column(
+        string_enum(ScmPublicationFailureCode, "scm_publication_attempt_failure_code")
+    )
+    failure_retryable: Mapped[bool | None] = mapped_column(Boolean)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class WorkflowDefinitionRecord(Base):

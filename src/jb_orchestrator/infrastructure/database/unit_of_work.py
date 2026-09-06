@@ -32,6 +32,7 @@ from jb_orchestrator.infrastructure.database.repositories import (
     SqlAlchemyUserRequestRepository,
 )
 from jb_orchestrator.infrastructure.database.scm_publication_repositories import (
+    SqlAlchemyScmPublicationAttemptRepository,
     SqlAlchemyScmPublicationRepository,
 )
 from jb_orchestrator.infrastructure.database.security_repositories import (
@@ -68,6 +69,7 @@ class SqlAlchemyUnitOfWork:
     external_executions: SqlAlchemyExternalExecutionRepository
     workspace_operations: SqlAlchemyWorkspaceOperationRepository
     scm_publications: SqlAlchemyScmPublicationRepository
+    scm_publication_attempts: SqlAlchemyScmPublicationAttemptRepository
     workflow_definitions: SqlAlchemyWorkflowDefinitionRepository
     workflow_executions: SqlAlchemyWorkflowExecutionRepository
     project_workflow_bindings: SqlAlchemyProjectWorkflowBindingRepository
@@ -94,6 +96,7 @@ class SqlAlchemyUnitOfWork:
         self.external_executions = SqlAlchemyExternalExecutionRepository(self._session)
         self.workspace_operations = SqlAlchemyWorkspaceOperationRepository(self._session)
         self.scm_publications = SqlAlchemyScmPublicationRepository(self._session)
+        self.scm_publication_attempts = SqlAlchemyScmPublicationAttemptRepository(self._session)
         self.workflow_definitions = SqlAlchemyWorkflowDefinitionRepository(self._session)
         self.workflow_executions = SqlAlchemyWorkflowExecutionRepository(self._session)
         self.project_workflow_bindings = SqlAlchemyProjectWorkflowBindingRepository(self._session)

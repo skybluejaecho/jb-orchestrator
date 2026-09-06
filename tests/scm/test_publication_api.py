@@ -89,6 +89,7 @@ async def test_failed_publication_can_be_retried_through_api() -> None:
         )
         retried = await client.post(f"/v1/scm-publications/{publication.id}/retry")
         repeated = await client.post(f"/v1/scm-publications/{publication.id}/retry")
+        attempts = await client.get(f"/v1/scm-publications/{publication.id}/attempts")
 
     assert retried.status_code == 202
     assert cancelled.status_code == 202
@@ -101,3 +102,9 @@ async def test_failed_publication_can_be_retried_through_api() -> None:
     assert retried.json()["status"] == "pending"
     assert retried.json()["attempt_count"] == 1
     assert repeated.status_code == 200
+    assert attempts.status_code == 200
+    assert attempts.json()[0]["attempt_number"] == 1
+    assert attempts.json()[0]["trigger"] == "initial"
+    assert attempts.json()[0]["status"] == "failed"
+    assert attempts.json()[0]["worker_id"] == "publisher-a"
+    assert "lease_token" not in attempts.json()[0]

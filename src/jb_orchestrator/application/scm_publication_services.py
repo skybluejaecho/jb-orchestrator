@@ -1,7 +1,7 @@
 """Application service for durable SCM publication requests."""
 
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -11,6 +11,8 @@ from jb_orchestrator.domain import DomainEvent, DomainValidationError, Project
 from jb_orchestrator.external_executions import ExternalExecution
 from jb_orchestrator.scm import (
     ScmPublication,
+    ScmPublicationAttempt,
+    ScmPublicationAttemptTrigger,
     ScmPublicationFailureCode,
     ScmPublicationStatus,
 )
@@ -96,6 +98,17 @@ class ScmPublicationService:
                 external_execution_id, limit=limit
             )
 
+    async def list_attempts(
+        self, publication_id: UUID, *, limit: int = 100
+    ) -> list[ScmPublicationAttempt]:
+        async with self._unit_of_work_factory() as unit_of_work:
+            publication = await unit_of_work.scm_publications.get(publication_id)
+            if publication is None:
+                raise ResourceNotFound(f"SCM publication not found: {publication_id}")
+            return await unit_of_work.scm_publication_attempts.list_for_publication(
+                publication_id, limit=limit
+            )
+
     async def retry(
         self, publication_id: UUID, *, requested_by: str
     ) -> tuple[ScmPublication, bool]:
@@ -164,16 +177,35 @@ class ScmPublicationService:
         lease_seconds: int = 300,
     ) -> ScmPublication | None:
         async with self._unit_of_work_factory() as unit_of_work:
-            publication = await unit_of_work.scm_publications.claim_next(
+            claim = await unit_of_work.scm_publications.claim_next(
                 worker_id=worker_id,
                 provider_key=provider_key,
                 workspace_scope=workspace_scope,
                 lease_seconds=lease_seconds,
             )
-            if publication is None:
+            if claim is None:
                 return None
+            publication = claim.publication
+            if publication.lease_token is None:  # pragma: no cover - domain invariant
+                raise RuntimeError("claimed SCM publication has no lease token")
+            await unit_of_work.scm_publication_attempts.add(
+                ScmPublicationAttempt(
+                    publication_id=publication.id,
+                    attempt_number=publication.attempt_count,
+                    trigger=claim.trigger,
+                    worker_id=publication.worker_id or worker_id,
+                    lease_token=publication.lease_token,
+                    started_at=publication.updated_at,
+                )
+            )
             execution = await self._execution(unit_of_work, publication.external_execution_id)
-            await self._event(unit_of_work, publication, execution, "scm_publication.claimed")
+            await self._event(
+                unit_of_work,
+                publication,
+                execution,
+                "scm_publication.claimed",
+                attempt_trigger=claim.trigger,
+            )
             await unit_of_work.commit()
             return publication
 
@@ -219,8 +251,25 @@ class ScmPublicationService:
             publication = await unit_of_work.scm_publications.get(publication_id, for_update=True)
             if publication is None:
                 raise ResourceNotFound(f"SCM publication not found: {publication_id}")
+            attempt = await unit_of_work.scm_publication_attempts.get(
+                publication.id, publication.attempt_count, for_update=True
+            )
+            if attempt is None:
+                if publication.worker_id is None:
+                    raise ResourceConflict("claimed SCM publication has no worker")
+                attempt = ScmPublicationAttempt(
+                    publication_id=publication.id,
+                    attempt_number=publication.attempt_count,
+                    trigger=ScmPublicationAttemptTrigger.LEASE_RECOVERY,
+                    worker_id=publication.worker_id,
+                    lease_token=lease_token,
+                    started_at=publication.updated_at,
+                )
+                await unit_of_work.scm_publication_attempts.add(attempt)
+            finished_at = datetime.now(UTC)
             if failure_reason is None:
-                publication.succeed(lease_token, result or {})
+                publication.succeed(lease_token, result or {}, at=finished_at)
+                attempt.succeed(lease_token, result or {}, at=finished_at)
                 event_type = "scm_publication.succeeded"
             else:
                 publication.fail(
@@ -230,9 +279,18 @@ class ScmPublicationService:
                     retryable=failure_retryable,
                     automatic_retry_limit=automatic_retry_limit,
                     next_attempt_at=next_attempt_at,
+                    at=finished_at,
+                )
+                attempt.fail(
+                    lease_token,
+                    failure_reason,
+                    code=failure_code or ScmPublicationFailureCode.UNEXPECTED,
+                    retryable=failure_retryable,
+                    at=finished_at,
                 )
                 event_type = "scm_publication.failed"
             await unit_of_work.scm_publications.save(publication)
+            await unit_of_work.scm_publication_attempts.save(attempt)
             execution = await self._execution(unit_of_work, publication.external_execution_id)
             await self._event(unit_of_work, publication, execution, event_type)
             if publication.next_attempt_at is not None:
@@ -272,6 +330,7 @@ class ScmPublicationService:
         execution: ExternalExecution,
         event_type: str,
         actor: str | None = None,
+        attempt_trigger: ScmPublicationAttemptTrigger | None = None,
     ) -> None:
         payload = {
             "external_execution_id": str(execution.id),
@@ -296,6 +355,8 @@ class ScmPublicationService:
         }
         if actor is not None:
             payload["actor"] = actor
+        if attempt_trigger is not None:
+            payload["attempt_trigger"] = attempt_trigger.value
         await unit_of_work.events.append(
             DomainEvent(
                 aggregate_type="scm_publication",

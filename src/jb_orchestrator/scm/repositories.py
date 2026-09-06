@@ -3,7 +3,11 @@
 from typing import Protocol
 from uuid import UUID
 
-from jb_orchestrator.scm.models import ScmPublication
+from jb_orchestrator.scm.models import (
+    ScmPublication,
+    ScmPublicationAttempt,
+    ScmPublicationClaim,
+)
 
 
 class ScmPublicationRepository(Protocol):
@@ -23,6 +27,20 @@ class ScmPublicationRepository(Protocol):
 
     async def claim_next(
         self, *, worker_id: str, provider_key: str, workspace_scope: str, lease_seconds: int
-    ) -> ScmPublication | None: ...
+    ) -> ScmPublicationClaim | None: ...
 
     async def save(self, publication: ScmPublication) -> None: ...
+
+
+class ScmPublicationAttemptRepository(Protocol):
+    async def add(self, attempt: ScmPublicationAttempt) -> None: ...
+
+    async def get(
+        self, publication_id: UUID, attempt_number: int, *, for_update: bool = False
+    ) -> ScmPublicationAttempt | None: ...
+
+    async def list_for_publication(
+        self, publication_id: UUID, *, limit: int = 100
+    ) -> list[ScmPublicationAttempt]: ...
+
+    async def save(self, attempt: ScmPublicationAttempt) -> None: ...
