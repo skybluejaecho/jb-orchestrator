@@ -636,6 +636,29 @@ def run_system_smoke(
                 raise SystemSmokeError("SCM publication returned an unexpected review URL")
             if completed_publication.get("attempt_count") != 2:
                 raise SystemSmokeError("SCM publication retry attempt was not counted")
+            attempts = _request(
+                jarvis,
+                "GET",
+                f"/api/scm-publications/attempts?publicationId={publication['id']}",
+            )
+            if not isinstance(attempts, list) or len(attempts) != 2:
+                raise SystemSmokeError("SCM publication attempt ledger was not durably listed")
+            latest_attempt, initial_attempt = attempts
+            if (
+                latest_attempt.get("attempt_number") != 2
+                or latest_attempt.get("trigger") != "manual"
+                or latest_attempt.get("status") != "succeeded"
+            ):
+                raise SystemSmokeError("manual SCM recovery attempt was not recorded")
+            if (
+                initial_attempt.get("attempt_number") != 1
+                or initial_attempt.get("trigger") != "initial"
+                or initial_attempt.get("status") != "failed"
+                or initial_attempt.get("failure_code") != "provider_unavailable"
+            ):
+                raise SystemSmokeError("initial SCM provider failure was not recorded")
+            if "lease_token" in latest_attempt or "lease_token" in initial_attempt:
+                raise SystemSmokeError("SCM attempt API exposed an internal lease token")
 
             second = _request(
                 jarvis,
