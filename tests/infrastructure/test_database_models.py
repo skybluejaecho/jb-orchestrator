@@ -29,6 +29,7 @@ def test_metadata_creates_initial_domain_schema() -> None:
         "request_dispatch_receipts",
         "runs",
         "scm_publications",
+        "scm_publication_attempts",
         "service_accounts",
         "skill_definitions",
         "task_artifacts",
@@ -58,6 +59,9 @@ def test_metadata_creates_initial_domain_schema() -> None:
     assert {index["name"] for index in inspector.get_indexes("scm_publications")} >= {
         "ix_scm_publications_claim",
         "ix_scm_publications_external_execution_id",
+    }
+    assert {index["name"] for index in inspector.get_indexes("scm_publication_attempts")} >= {
+        "ix_scm_publication_attempts_publication_id"
     }
 
 

@@ -27,7 +27,12 @@ from jb_orchestrator.domain import (
 from jb_orchestrator.external_executions import ExternalExecution, ExternalExecutionStatus
 from jb_orchestrator.model_routing import ModelProfile
 from jb_orchestrator.phase_packs import PhasePackDefinition
-from jb_orchestrator.scm import ScmPublication, ScmPublicationStatus
+from jb_orchestrator.scm import (
+    ScmPublication,
+    ScmPublicationAttempt,
+    ScmPublicationClaim,
+    ScmPublicationStatus,
+)
 from jb_orchestrator.security import ServiceAccount
 from jb_orchestrator.skills import SkillDefinition
 from jb_orchestrator.workflows import (
@@ -66,6 +71,9 @@ class MemoryStore:
     external_executions: dict[str, ExternalExecution] = field(default_factory=dict)
     workspace_operations: dict[UUID, WorkspaceOperation] = field(default_factory=dict)
     scm_publications: dict[UUID, ScmPublication] = field(default_factory=dict)
+    scm_publication_attempts: dict[tuple[UUID, int], ScmPublicationAttempt] = field(
+        default_factory=dict
+    )
     service_accounts: dict[UUID, ServiceAccount] = field(default_factory=dict)
 
 
@@ -354,7 +362,7 @@ class MemoryScmPublicationRepository:
 
     async def claim_next(
         self, *, worker_id: str, provider_key: str, workspace_scope: str, lease_seconds: int
-    ) -> ScmPublication | None:
+    ) -> ScmPublicationClaim | None:
         now = datetime.now().astimezone()
         candidates = [
             publication
@@ -380,11 +388,41 @@ class MemoryScmPublicationRepository:
         if not candidates:
             return None
         publication = min(candidates, key=lambda value: (value.created_at, value.id))
-        publication.claim(worker_id, lease_seconds=lease_seconds, at=now)
-        return publication
+        trigger = publication.claim(worker_id, lease_seconds=lease_seconds, at=now)
+        return ScmPublicationClaim(publication=publication, trigger=trigger)
 
     async def save(self, publication: ScmPublication) -> None:
         self._store.scm_publications[publication.id] = publication
+
+
+class MemoryScmPublicationAttemptRepository:
+    def __init__(self, store: MemoryStore) -> None:
+        self._store = store
+
+    async def add(self, attempt: ScmPublicationAttempt) -> None:
+        self._store.scm_publication_attempts[(attempt.publication_id, attempt.attempt_number)] = (
+            attempt
+        )
+
+    async def get(
+        self, publication_id: UUID, attempt_number: int, *, for_update: bool = False
+    ) -> ScmPublicationAttempt | None:
+        return self._store.scm_publication_attempts.get((publication_id, attempt_number))
+
+    async def list_for_publication(
+        self, publication_id: UUID, *, limit: int = 100
+    ) -> list[ScmPublicationAttempt]:
+        matches = [
+            attempt
+            for (stored_publication_id, _), attempt in self._store.scm_publication_attempts.items()
+            if stored_publication_id == publication_id
+        ]
+        return sorted(matches, key=lambda value: value.attempt_number, reverse=True)[:limit]
+
+    async def save(self, attempt: ScmPublicationAttempt) -> None:
+        self._store.scm_publication_attempts[(attempt.publication_id, attempt.attempt_number)] = (
+            attempt
+        )
 
 
 class MemoryEventRepository:
@@ -809,6 +847,7 @@ class MemoryUnitOfWork:
         self.external_executions = MemoryExternalExecutionRepository(store)
         self.workspace_operations = MemoryWorkspaceOperationRepository(store)
         self.scm_publications = MemoryScmPublicationRepository(store)
+        self.scm_publication_attempts = MemoryScmPublicationAttemptRepository(store)
         self.workflow_definitions = MemoryWorkflowDefinitionRepository(store)
         self.workflow_executions = MemoryWorkflowExecutionRepository(store)
         self.project_workflow_bindings = MemoryProjectWorkflowBindingRepository(store)

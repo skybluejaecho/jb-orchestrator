@@ -12,7 +12,11 @@ from jb_orchestrator.application import (
 )
 from jb_orchestrator.external_executions import ExternalExecutionStatus
 from jb_orchestrator.infrastructure.database import Base, SqlAlchemyUnitOfWork
-from jb_orchestrator.scm import ScmPublicationFailureCode, ScmPublicationStatus
+from jb_orchestrator.scm import (
+    ScmPublicationAttemptTrigger,
+    ScmPublicationFailureCode,
+    ScmPublicationStatus,
+)
 from jb_orchestrator.worker import TaskClaim
 
 
@@ -140,4 +144,9 @@ async def test_scm_publication_round_trips_and_claims_by_provider_and_scope() ->
     assert reclaimed is not None
     assert reclaimed.id == scheduled.id
     assert reclaimed.attempt_count == 2
+    attempts = await publications.list_attempts(scheduled.id)
+    assert [attempt.trigger for attempt in attempts] == [
+        ScmPublicationAttemptTrigger.AUTOMATIC,
+        ScmPublicationAttemptTrigger.INITIAL,
+    ]
     await engine.dispose()

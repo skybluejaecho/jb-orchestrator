@@ -38,6 +38,7 @@ from jb_orchestrator.api.schemas import (
     ProjectWorkflowBindingResponse,
     ProjectWorkflowOptionsResponse,
     RunResponse,
+    ScmPublicationAttemptResponse,
     ScmPublicationCreate,
     ScmPublicationResponse,
     SkillCreate,
@@ -844,6 +845,21 @@ async def list_scm_publications(
     return [
         ScmPublicationResponse.model_validate(publication)
         for publication in await service.list_for_execution(execution_id, limit=limit)
+    ]
+
+
+@router.get(
+    "/scm-publications/{publication_id}/attempts",
+    response_model=list[ScmPublicationAttemptResponse],
+)
+async def list_scm_publication_attempts(
+    publication_id: UUID,
+    service: ScmPublicationServiceDependency,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[ScmPublicationAttemptResponse]:
+    return [
+        ScmPublicationAttemptResponse.model_validate(attempt)
+        for attempt in await service.list_attempts(publication_id, limit=limit)
     ]
 
 

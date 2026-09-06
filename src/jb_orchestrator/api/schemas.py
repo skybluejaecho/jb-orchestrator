@@ -11,7 +11,12 @@ from jb_orchestrator.budgets import UsageKind
 from jb_orchestrator.domain import ProjectStatus, RequestStatus, RunStatus
 from jb_orchestrator.external_executions import ExternalExecutionStatus
 from jb_orchestrator.model_routing import ModelTier, RequirementLevel
-from jb_orchestrator.scm import ScmPublicationFailureCode, ScmPublicationStatus
+from jb_orchestrator.scm import (
+    ScmPublicationAttemptStatus,
+    ScmPublicationAttemptTrigger,
+    ScmPublicationFailureCode,
+    ScmPublicationStatus,
+)
 from jb_orchestrator.skills import SkillSourceKind
 from jb_orchestrator.workflows import (
     NodeExecutionStatus,
@@ -304,6 +309,23 @@ class ScmPublicationResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None
+
+
+class ScmPublicationAttemptResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    publication_id: UUID
+    attempt_number: int
+    trigger: ScmPublicationAttemptTrigger
+    worker_id: str
+    status: ScmPublicationAttemptStatus
+    result: dict[str, Any] | None
+    failure_reason: str | None
+    failure_code: ScmPublicationFailureCode | None
+    failure_retryable: bool | None
+    started_at: datetime
+    finished_at: datetime | None
 
 
 class SkillReferencePayload(BaseModel):

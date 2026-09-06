@@ -7,7 +7,12 @@ from jb_orchestrator.application import ExternalExecutionService, ScmPublication
 from jb_orchestrator.application.exceptions import ResourceConflict
 from jb_orchestrator.domain import Project, Run, UserRequest
 from jb_orchestrator.external_executions import ExternalExecutionStatus
-from jb_orchestrator.scm import ScmPublicationFailureCode, ScmPublicationStatus
+from jb_orchestrator.scm import (
+    ScmPublicationAttemptStatus,
+    ScmPublicationAttemptTrigger,
+    ScmPublicationFailureCode,
+    ScmPublicationStatus,
+)
 from jb_orchestrator.worker import TaskClaim
 from tests.support import MemoryStore, MemoryUnitOfWork
 
@@ -115,6 +120,12 @@ async def test_request_derives_repository_and_source_branch_then_routes_claim() 
     )
 
     assert completed.status is ScmPublicationStatus.SUCCEEDED
+    [attempt] = await service.list_attempts(claimed.id)
+    assert attempt.attempt_number == 1
+    assert attempt.trigger is ScmPublicationAttemptTrigger.INITIAL
+    assert attempt.status is ScmPublicationAttemptStatus.SUCCEEDED
+    assert attempt.worker_id == "publisher-a"
+    assert attempt.finished_at == completed.completed_at
     assert [event.event_type for event in store.events[-3:]] == [
         "scm_publication.requested",
         "scm_publication.claimed",
@@ -220,6 +231,28 @@ async def test_failed_publication_retry_preserves_record_and_attempt_history() -
     assert repeated.id == requested.id
     assert store.events[-1].event_type == "scm_publication.retried"
     assert store.events[-1].payload["actor"] == "jarvis"
+
+    reclaimed = await service.claim_next(
+        worker_id="publisher-b",
+        provider_key="github",
+        workspace_scope="git-worktree:scope-a",
+    )
+    assert reclaimed is not None and reclaimed.lease_token is not None
+    await service.succeed(
+        reclaimed.id,
+        reclaimed.lease_token,
+        {"review_url": "https://github.com/example/project/pull/2", "review_id": "2"},
+    )
+
+    attempts = await service.list_attempts(requested.id)
+    assert [attempt.attempt_number for attempt in attempts] == [2, 1]
+    assert [attempt.trigger for attempt in attempts] == [
+        ScmPublicationAttemptTrigger.MANUAL,
+        ScmPublicationAttemptTrigger.INITIAL,
+    ]
+    assert attempts[0].status is ScmPublicationAttemptStatus.SUCCEEDED
+    assert attempts[1].status is ScmPublicationAttemptStatus.FAILED
+    assert attempts[1].failure_code is ScmPublicationFailureCode.PROVIDER_UNAVAILABLE
 
 
 async def test_scheduled_automatic_retry_can_be_cancelled_idempotently() -> None:

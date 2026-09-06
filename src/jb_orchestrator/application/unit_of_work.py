@@ -19,7 +19,7 @@ from jb_orchestrator.domain.repositories import (
 from jb_orchestrator.external_executions import ExternalExecutionRepository
 from jb_orchestrator.model_routing.repositories import ModelProfileRepository
 from jb_orchestrator.phase_packs import PhasePackRepository
-from jb_orchestrator.scm import ScmPublicationRepository
+from jb_orchestrator.scm import ScmPublicationAttemptRepository, ScmPublicationRepository
 from jb_orchestrator.security import ServiceAccountRepository
 from jb_orchestrator.skills.repositories import SkillRepository
 from jb_orchestrator.workflows.bindings import ProjectWorkflowBindingRepository
@@ -77,6 +77,9 @@ class UnitOfWork(Protocol):
 
     @property
     def scm_publications(self) -> ScmPublicationRepository: ...
+
+    @property
+    def scm_publication_attempts(self) -> ScmPublicationAttemptRepository: ...
 
     @property
     def workflow_definitions(self) -> WorkflowDefinitionRepository: ...
