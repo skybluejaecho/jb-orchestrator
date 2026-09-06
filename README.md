@@ -489,6 +489,15 @@ ORCH-057 adds opt-in, bounded automatic recovery for transient SCM publication f
 - exhausted or permanent failures remain terminal instead of polling indefinitely
 - Jarvis renders the durable schedule while the system smoke proves recovery without browser action
 
+ORCH-058 adds explicit operator controls for scheduled SCM publication retries:
+
+- scheduled retries can be cancelled without removing the failure reason or attempt history
+- repeated cancellation is idempotent while active or completed publications reject the command
+- the existing manual retry command converts a scheduled failure into immediately claimable work
+- cancellation and worker claim serialize through the same locked publication record
+- project-scoped `scm.publish` authorization protects both cancellation and immediate retry
+- Jarvis exposes `예약 취소` and `지금 재시도` and refreshes peers from durable events
+
 ## Prerequisites
 
 - Python 3.12

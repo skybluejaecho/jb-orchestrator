@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -218,4 +219,51 @@ async def test_failed_publication_retry_preserves_record_and_attempt_history() -
     assert repeated_replayed
     assert repeated.id == requested.id
     assert store.events[-1].event_type == "scm_publication.retried"
+    assert store.events[-1].payload["actor"] == "jarvis"
+
+
+async def test_scheduled_automatic_retry_can_be_cancelled_idempotently() -> None:
+    store = MemoryStore()
+    execution = await managed_execution(store)
+    service = ScmPublicationService(lambda: MemoryUnitOfWork(store))
+    publication, _ = await service.request(
+        execution.id,
+        provider_key="github",
+        target_branch="develop",
+        title="Review feature",
+        body="",
+        idempotency_key="publish-cancel-schedule",
+        requested_by="jarvis",
+    )
+    claimed = await service.claim_next(
+        worker_id="publisher-a",
+        provider_key="github",
+        workspace_scope="git-worktree:scope-a",
+    )
+    assert claimed is not None and claimed.lease_token is not None
+    await service.fail(
+        claimed.id,
+        claimed.lease_token,
+        "temporary outage",
+        code=ScmPublicationFailureCode.PROVIDER_UNAVAILABLE,
+        retryable=True,
+        automatic_retry_limit=2,
+        next_attempt_at=datetime.now(UTC) + timedelta(minutes=1),
+    )
+
+    cancelled, replayed = await service.cancel_automatic_retry(
+        publication.id, requested_by="jarvis"
+    )
+    repeated, repeated_replayed = await service.cancel_automatic_retry(
+        publication.id, requested_by="jarvis"
+    )
+
+    assert not replayed
+    assert repeated_replayed
+    assert repeated.id == cancelled.id
+    assert cancelled.status is ScmPublicationStatus.FAILED
+    assert cancelled.failure_reason == "temporary outage"
+    assert cancelled.next_attempt_at is None
+    assert cancelled.automatic_retry_limit == 0
+    assert store.events[-1].event_type == "scm_publication.automatic_retry_cancelled"
     assert store.events[-1].payload["actor"] == "jarvis"

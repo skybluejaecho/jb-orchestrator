@@ -112,6 +112,9 @@ export function ScmPublications({
   const [body, setBody] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [cancellingRetryId, setCancellingRetryId] = useState<string | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -191,6 +194,30 @@ export function ScmPublications({
       );
     } finally {
       setRetryingId(null);
+    }
+  };
+
+  const cancelAutomaticRetry = async (publicationId: string) => {
+    setCancellingRetryId(publicationId);
+    setError(null);
+    try {
+      await readJson(
+        await fetch('/api/scm-publications/automatic-retry/cancel', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ publicationId }),
+        }),
+      );
+      await load();
+      await onChanged();
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : '자동 재시도 예약을 취소하지 못했습니다.',
+      );
+    } finally {
+      setCancellingRetryId(null);
     }
   };
 
@@ -366,24 +393,52 @@ export function ScmPublications({
                     </Badge>
                   )}
                   {publication.status === 'failed' && canPublish && (
-                    <Button
-                      type="button"
-                      size="xs"
-                      variant="outline"
-                      className="ml-auto"
-                      disabled={retryingId !== null}
-                      onClick={() => void retry(publication.id)}
-                    >
-                      {retryingId === publication.id ? (
-                        <LoaderCircle
-                          aria-hidden="true"
-                          className="animate-spin"
-                        />
-                      ) : (
-                        <RotateCcw aria-hidden="true" />
+                    <div className="ml-auto flex items-center gap-1.5">
+                      {publication.next_attempt_at && (
+                        <Button
+                          type="button"
+                          size="xs"
+                          variant="ghost"
+                          disabled={
+                            retryingId !== null || cancellingRetryId !== null
+                          }
+                          onClick={() =>
+                            void cancelAutomaticRetry(publication.id)
+                          }
+                        >
+                          {cancellingRetryId === publication.id ? (
+                            <LoaderCircle
+                              aria-hidden="true"
+                              className="animate-spin"
+                            />
+                          ) : (
+                            <X aria-hidden="true" />
+                          )}
+                          예약 취소
+                        </Button>
                       )}
-                      다시 시도
-                    </Button>
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant="outline"
+                        disabled={
+                          retryingId !== null || cancellingRetryId !== null
+                        }
+                        onClick={() => void retry(publication.id)}
+                      >
+                        {retryingId === publication.id ? (
+                          <LoaderCircle
+                            aria-hidden="true"
+                            className="animate-spin"
+                          />
+                        ) : (
+                          <RotateCcw aria-hidden="true" />
+                        )}
+                        {publication.next_attempt_at
+                          ? '지금 재시도'
+                          : '다시 시도'}
+                      </Button>
+                    </div>
                   )}
                 </div>
                 {publication.failure_reason && (

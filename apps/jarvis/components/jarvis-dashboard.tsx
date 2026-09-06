@@ -110,6 +110,8 @@ const eventTypes = [
   'scm_publication.succeeded',
   'scm_publication.failed',
   'scm_publication.retried',
+  'scm_publication.retry_scheduled',
+  'scm_publication.automatic_retry_cancelled',
   'budget.configured',
   'budget.limit_changed',
   'budget.reserved',

@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 from httpx import ASGITransport, AsyncClient
 
 from jb_orchestrator.api.main import create_app
@@ -70,6 +72,8 @@ async def test_failed_publication_can_be_retried_through_api() -> None:
         "temporary failure",
         code=ScmPublicationFailureCode.PROVIDER_UNAVAILABLE,
         retryable=True,
+        automatic_retry_limit=2,
+        next_attempt_at=datetime.now(UTC) + timedelta(minutes=1),
     )
     app = create_app(scm_publication_service=publications)
 
@@ -77,10 +81,21 @@ async def test_failed_publication_can_be_retried_through_api() -> None:
         [failed_payload] = (
             await client.get(f"/v1/external-executions/{execution.id}/scm-publications")
         ).json()
+        cancelled = await client.post(
+            f"/v1/scm-publications/{publication.id}/automatic-retry/cancel"
+        )
+        repeated_cancel = await client.post(
+            f"/v1/scm-publications/{publication.id}/automatic-retry/cancel"
+        )
         retried = await client.post(f"/v1/scm-publications/{publication.id}/retry")
         repeated = await client.post(f"/v1/scm-publications/{publication.id}/retry")
 
     assert retried.status_code == 202
+    assert cancelled.status_code == 202
+    assert cancelled.json()["status"] == "failed"
+    assert cancelled.json()["next_attempt_at"] is None
+    assert cancelled.json()["failure_reason"] == "temporary failure"
+    assert repeated_cancel.status_code == 200
     assert failed_payload["failure_code"] == "provider_unavailable"
     assert failed_payload["failure_retryable"] is True
     assert retried.json()["status"] == "pending"

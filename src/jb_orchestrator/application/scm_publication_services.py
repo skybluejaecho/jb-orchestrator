@@ -127,6 +127,34 @@ class ScmPublicationService:
             await unit_of_work.commit()
             return publication, False
 
+    async def cancel_automatic_retry(
+        self, publication_id: UUID, *, requested_by: str
+    ) -> tuple[ScmPublication, bool]:
+        async with self._unit_of_work_factory() as unit_of_work:
+            publication = await unit_of_work.scm_publications.get(publication_id, for_update=True)
+            if publication is None:
+                raise ResourceNotFound(f"SCM publication not found: {publication_id}")
+            execution = await self._execution(unit_of_work, publication.external_execution_id)
+            if publication.status in {
+                ScmPublicationStatus.PENDING,
+                ScmPublicationStatus.CLAIMED,
+            }:
+                raise ResourceConflict("active SCM publication has no automatic retry to cancel")
+            if publication.status is ScmPublicationStatus.SUCCEEDED:
+                raise ResourceConflict("succeeded SCM publication has no automatic retry to cancel")
+            if not publication.cancel_automatic_retry():
+                return publication, True
+            await unit_of_work.scm_publications.save(publication)
+            await self._event(
+                unit_of_work,
+                publication,
+                execution,
+                "scm_publication.automatic_retry_cancelled",
+                actor=requested_by.strip() or "anonymous",
+            )
+            await unit_of_work.commit()
+            return publication, False
+
     async def claim_next(
         self,
         *,
