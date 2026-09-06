@@ -74,6 +74,24 @@ type WorkflowOptions = {
   available_skills: WorkflowOption['skills'];
 };
 
+type WorkflowRecommendation = {
+  id: string;
+  policy_version: string;
+  confidence: 'high' | 'medium' | 'low';
+  requires_confirmation: boolean;
+  recommended: WorkflowRecommendationCandidate | null;
+  candidates: WorkflowRecommendationCandidate[];
+};
+
+type WorkflowRecommendationCandidate = {
+  definition_key: string;
+  definition_version: number;
+  score: number;
+  matched_terms: string[];
+  matched_intents: string[];
+  is_default: boolean;
+};
+
 const DEFAULT_WORKFLOW = '__project_default__';
 
 export type DispatchResult = {
@@ -117,6 +135,11 @@ export function RequestComposer({
     null,
   );
   const [workflowValue, setWorkflowValue] = useState(DEFAULT_WORKFLOW);
+  const [recommendation, setRecommendation] = useState<{
+    contextKey: string;
+    value: WorkflowRecommendation;
+  } | null>(null);
+  const [recommending, setRecommending] = useState(false);
   const [workflowErrorProjectId, setWorkflowErrorProjectId] = useState<
     string | null
   >(null);
@@ -153,6 +176,13 @@ export function RequestComposer({
       ? skillAddonSelection.byNode
       : {};
   const availableSkills = currentWorkflowOptions?.available_skills ?? [];
+  const recommendationContextKey = project
+    ? `${project.id}:${prompt.trim()}`
+    : null;
+  const currentRecommendation =
+    recommendation?.contextKey === recommendationContextKey
+      ? recommendation.value
+      : null;
 
   const clearError = () => {
     setError(null);
@@ -172,6 +202,41 @@ export function RequestComposer({
       };
     });
     clearError();
+  };
+
+  const requestRecommendation = async () => {
+    if (!project || !prompt.trim() || recommending) return;
+    setRecommending(true);
+    setError(null);
+    try {
+      const response = await fetch('/api/workflow-recommendations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: project.id, prompt: prompt.trim() }),
+      });
+      if (!response.ok) {
+        const problem = (await response.json().catch(() => ({}))) as Problem;
+        throw new Error(problem.detail ?? '워크플로를 추천하지 못했습니다.');
+      }
+      const value = (await response.json()) as WorkflowRecommendation;
+      setRecommendation({
+        contextKey: `${project.id}:${prompt.trim()}`,
+        value,
+      });
+      if (!value.requires_confirmation && value.recommended) {
+        setWorkflowValue(
+          `${value.recommended.definition_key}@${value.recommended.definition_version}`,
+        );
+      }
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : '워크플로를 추천하지 못했습니다.',
+      );
+    } finally {
+      setRecommending(false);
+    }
   };
 
   useEffect(() => {
@@ -210,6 +275,7 @@ export function RequestComposer({
             definitionVersion: selectedWorkflow.version,
           }
         : null,
+      recommendationId: currentRecommendation?.id ?? null,
       skillAddons: Object.entries(selectedSkillAddons)
         .sort(([left], [right]) => left.localeCompare(right))
         .flatMap(([nodeKey, skillIds]) => {
@@ -242,6 +308,7 @@ export function RequestComposer({
       setTitle('');
       setPrompt('');
       setSkillAddonSelection(null);
+      setRecommendation(null);
       onDispatched(result);
     } catch (reason) {
       setError(
@@ -297,6 +364,7 @@ export function RequestComposer({
               value={workflowValue}
               onChange={(event) => {
                 setWorkflowValue(event.target.value);
+                setRecommendation(null);
                 clearError();
               }}
               disabled={!project}
@@ -352,6 +420,14 @@ export function RequestComposer({
               placeholder="완료할 작업, 제약 조건과 기대 결과를 적어주세요."
               className="min-h-20 resize-y border-white/10 bg-black/15 text-white placeholder:text-white/25"
             />
+            <button
+              type="button"
+              disabled={!project || !prompt.trim() || recommending}
+              onClick={() => void requestRecommendation()}
+              className="text-xs text-cyan-100/65 transition hover:text-cyan-100 disabled:cursor-not-allowed disabled:text-white/25"
+            >
+              {recommending ? '추천 분석 중…' : '요청에 맞는 워크플로 추천'}
+            </button>
           </div>
 
           <Button
@@ -382,6 +458,57 @@ export function RequestComposer({
           >
             {error}
           </p>
+        )}
+        {currentRecommendation && (
+          <section
+            aria-label="워크플로 추천 결과"
+            className="mt-4 rounded-xl border border-cyan-300/12 bg-cyan-300/5 p-4"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-medium text-cyan-50">
+                추천 결과 · 신뢰도 {currentRecommendation.confidence}
+              </p>
+              <p className="text-xs text-white/35">
+                {currentRecommendation.policy_version}
+              </p>
+            </div>
+            {currentRecommendation.requires_confirmation && (
+              <p className="mt-1 text-xs text-amber-100/70">
+                추천 근거가 충분하지 않습니다. 실행할 워크플로를 확인해 주세요.
+              </p>
+            )}
+            <div className="mt-3 flex flex-wrap gap-2">
+              {currentRecommendation.candidates.map((candidate, index) => {
+                const value = `${candidate.definition_key}@${candidate.definition_version}`;
+                return (
+                  <button
+                    type="button"
+                    key={value}
+                    onClick={() => {
+                      setWorkflowValue(value);
+                      clearError();
+                    }}
+                    className={`rounded-lg border px-3 py-2 text-left text-xs transition ${
+                      workflowValue === value
+                        ? 'border-cyan-200/40 bg-cyan-200/12 text-cyan-50'
+                        : 'border-white/10 bg-black/15 text-white/60 hover:border-white/20'
+                    }`}
+                  >
+                    <span className="font-medium">
+                      {index === 0 ? '추천 · ' : ''}
+                      {value}
+                    </span>
+                    <span className="ml-2 text-white/35">
+                      점수 {candidate.score}
+                      {candidate.matched_intents.length > 0
+                        ? ` · ${candidate.matched_intents.join(', ')}`
+                        : ''}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
         )}
         {displayedWorkflow && (
           <section

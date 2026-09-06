@@ -10,6 +10,7 @@ const input: DispatchInput = {
   title: '작업 제목',
   prompt: '구현 요청',
   workflow: null,
+  recommendationId: null,
   skillAddons: [],
 };
 
@@ -24,6 +25,7 @@ const changedInputs: Array<[DispatchInput, string]> = [
     },
     'workflow',
   ],
+  [{ ...input, recommendationId: 'recommendation-1' }, 'recommendation'],
   [
     {
       ...input,

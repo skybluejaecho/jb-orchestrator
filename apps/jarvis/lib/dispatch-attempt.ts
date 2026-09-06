@@ -6,6 +6,7 @@ export type DispatchInput = {
     definitionKey: string;
     definitionVersion: number;
   } | null;
+  recommendationId: string | null;
   skillAddons: {
     nodeKey: string;
     skills: { key: string; version: number }[];
@@ -28,6 +29,7 @@ export function prepareDispatchAttempt(
     input.prompt,
     input.workflow?.definitionKey ?? null,
     input.workflow?.definitionVersion ?? null,
+    input.recommendationId,
     input.skillAddons,
   ]);
   if (current?.fingerprint === fingerprint) return current;
