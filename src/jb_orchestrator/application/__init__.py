@@ -14,6 +14,7 @@ from jb_orchestrator.application.project_observation_services import ProjectObse
 from jb_orchestrator.application.request_dispatch_services import (
     DispatchedRequest,
     ProjectWorkflowOptions,
+    RecordedWorkflowRecommendation,
     RequestDispatchService,
     WorkflowComposition,
 )
@@ -45,6 +46,7 @@ __all__ = [
     "PhasePackCatalogService",
     "ProjectObservationService",
     "ProjectWorkflowOptions",
+    "RecordedWorkflowRecommendation",
     "RegisterProject",
     "RequestDispatchService",
     "ScmPublicationService",

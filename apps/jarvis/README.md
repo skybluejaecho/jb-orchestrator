@@ -40,6 +40,9 @@ Control Plane으로 요청을 proxy한다. 요청 작성 화면은 프로젝트 
 프로젝트 기본값 자체는 변경되지 않는다. 선택한 Workflow의 노드, Phase Pack, Skill source는
 제출 전에 읽기 전용 구성 미리보기로 표시된다. 등록된 최신 Skill은 task 노드마다 선택적으로
 추가할 수 있으며 해당 요청의 Snapshot에만 고정된다. 요청 제출은 `jarvis` ingress와 멱등성 key를 사용한다.
+요청 내용을 입력하면 등록된 Workflow 구성에서 결정적으로 계산한 추천 후보와 신뢰도를 조회할 수
+있다. 높은 신뢰도는 첫 후보를 선택하고, 근거가 부족한 추천은 사용자가 정확한 Workflow 버전을
+확인해야 한다. 추천 ID와 실제 선택은 Control Plane이 다시 검증하고 DB 이벤트에 기록한다.
 실행을 선택하면 노드 상태와 산출물뿐 아니라 Control Plane의 외부 실행 원장도 함께 조회한다.
 외부 런타임 영역에는 노드별 executor, agent ID, session key, run ID와 현재 상태가 표시된다.
 표시 값은 OpenClaw 자체 메모리를 추측한 것이 아니라 Worker가 DB에 기록한 실행 매핑이다.

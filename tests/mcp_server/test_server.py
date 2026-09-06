@@ -25,6 +25,11 @@ class StubControlPlaneClient:
     async def list_workflow_options(self, project_id: UUID) -> dict[str, Any]:
         return {"project_id": str(project_id), "default": None, "workflows": []}
 
+    async def recommend_workflow(
+        self, project_id: UUID, *, prompt: str, limit: int = 3
+    ) -> dict[str, Any]:
+        return {"project_id": str(project_id), "prompt": prompt, "limit": limit}
+
     async def dispatch_request(self, project_id: UUID, **kwargs: Any) -> dict[str, Any]:
         return {"project_id": str(project_id), **kwargs}
 
@@ -57,6 +62,7 @@ async def test_server_exposes_bounded_tools_with_safety_annotations() -> None:
         "list_project_requests",
         "list_project_workflows",
         "list_workflow_options",
+        "recommend_workflow",
         "dispatch_request",
         "get_request",
         "get_run",

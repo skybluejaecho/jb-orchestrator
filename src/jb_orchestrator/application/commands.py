@@ -41,4 +41,5 @@ class DispatchProjectRequest:
     title: str | None = None
     definition_key: str | None = None
     definition_version: int | None = None
+    recommendation_id: UUID | None = None
     skill_addons: tuple[NodeSkillAddon, ...] = ()

@@ -59,6 +59,9 @@ from jb_orchestrator.api.schemas import (
     WorkflowNodePayload,
     WorkflowOptionResponse,
     WorkflowPhasePackSummaryResponse,
+    WorkflowRecommendationCandidateResponse,
+    WorkflowRecommendationCreate,
+    WorkflowRecommendationResponse,
     WorkflowRequestContextResponse,
     WorkflowSkillSummaryResponse,
     WorkflowStart,
@@ -426,6 +429,32 @@ async def list_project_workflow_options(
     )
 
 
+@router.post(
+    "/projects/{project_id}/workflow-recommendations",
+    response_model=WorkflowRecommendationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def recommend_project_workflow(
+    project_id: UUID,
+    payload: WorkflowRecommendationCreate,
+    service: RequestDispatchServiceDependency,
+) -> WorkflowRecommendationResponse:
+    recorded = await service.recommend_workflows(project_id, payload.prompt, limit=payload.limit)
+    recommendation = recorded.recommendation
+    candidates = tuple(
+        WorkflowRecommendationCandidateResponse.model_validate(candidate, from_attributes=True)
+        for candidate in recommendation.candidates
+    )
+    return WorkflowRecommendationResponse(
+        id=recorded.id,
+        policy_version=recommendation.policy_version,
+        confidence=recommendation.confidence.value,
+        requires_confirmation=recommendation.requires_confirmation,
+        recommended=candidates[0] if candidates else None,
+        candidates=candidates,
+    )
+
+
 def _workflow_option_response(composition: WorkflowComposition) -> WorkflowOptionResponse:
     definition = composition.definition
     return WorkflowOptionResponse(
@@ -493,6 +522,7 @@ async def dispatch_project_request(
             definition_version=(
                 payload.workflow.definition_version if payload.workflow is not None else None
             ),
+            recommendation_id=payload.recommendation_id,
             skill_addons=tuple(
                 NodeSkillAddon(
                     node_key=addon.node_key,

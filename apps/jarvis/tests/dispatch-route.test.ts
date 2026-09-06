@@ -96,6 +96,7 @@ describe('POST /api/dispatch', () => {
             definitionKey: 'planning-only',
             definitionVersion: 2,
           },
+          recommendationId: '00000000-0000-0000-0000-000000000062',
         },
         'jarvis-selected-1',
       ),
@@ -109,6 +110,9 @@ describe('POST /api/dispatch', () => {
       definition_key: 'planning-only',
       definition_version: 2,
     });
+    expect(JSON.parse(init.body).recommendation_id).toBe(
+      '00000000-0000-0000-0000-000000000062',
+    );
   });
 
   it('불완전한 워크플로 선택은 upstream 전에 거부한다', async () => {

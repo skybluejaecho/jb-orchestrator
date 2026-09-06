@@ -525,6 +525,15 @@ ORCH-061 adds project-scoped worker readiness diagnostics:
 - project-scoped read authorization protects the diagnostic API
 - Jarvis explains blocked assignments and refreshes from both project events and bounded polling
 
+ORCH-062 adds deterministic, request-scoped Workflow recommendations:
+
+- prompt terms and stable intent categories are matched against complete Workflow compositions
+- exact-version candidates include scores, matched evidence, and project-default context
+- policy version and prompt digest are persisted with every recommendation as a project event
+- high-confidence recommendations may select directly while ambiguous results require confirmation
+- dispatch validates the recommendation project, prompt, and selected candidate before execution
+- Jarvis presents ranked candidates without becoming the source of truth for selection policy
+
 ## Prerequisites
 
 - Python 3.12

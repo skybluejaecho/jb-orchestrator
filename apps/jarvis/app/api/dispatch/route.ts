@@ -5,6 +5,7 @@ type DispatchPayload = {
   title?: unknown;
   prompt?: unknown;
   workflow?: unknown;
+  recommendationId?: unknown;
   skillAddons?: unknown;
 };
 
@@ -102,6 +103,10 @@ export async function POST(request: Request) {
   const idempotencyKey = request.headers.get('idempotency-key')?.trim() ?? '';
   const workflow = workflowSelection(payload.workflow);
   const addons = skillAddons(payload.skillAddons);
+  const recommendationId =
+    typeof payload.recommendationId === 'string'
+      ? payload.recommendationId.trim()
+      : '';
 
   if (!projectId || !prompt || !idempotencyKey) {
     return Response.json(
@@ -150,6 +155,7 @@ export async function POST(request: Request) {
                 definition_version: workflow.definitionVersion,
               }
             : null,
+          ...(recommendationId ? { recommendation_id: recommendationId } : {}),
           skill_addons: addons.map((addon) => ({
             node_key: addon.nodeKey,
             skills: addon.skills,

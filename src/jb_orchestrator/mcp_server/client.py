@@ -72,6 +72,18 @@ class ControlPlaneClient:
             await self._request("GET", f"/v1/projects/{project_id}/workflow-options"),
         )
 
+    async def recommend_workflow(
+        self, project_id: UUID, *, prompt: str, limit: int = 3
+    ) -> JsonObject:
+        return cast(
+            JsonObject,
+            await self._request(
+                "POST",
+                f"/v1/projects/{project_id}/workflow-recommendations",
+                payload={"prompt": prompt, "limit": limit},
+            ),
+        )
+
     async def dispatch_request(
         self,
         project_id: UUID,
@@ -84,6 +96,7 @@ class ControlPlaneClient:
         conversation_id: str | None = None,
         definition_key: str | None = None,
         definition_version: int | None = None,
+        recommendation_id: UUID | None = None,
         skill_addons: list[dict[str, Any]] | None = None,
     ) -> JsonObject:
         if (definition_key is None) != (definition_version is None):
@@ -116,6 +129,11 @@ class ControlPlaneClient:
                         else None
                     ),
                     "skill_addons": skill_addons or [],
+                    **(
+                        {"recommendation_id": str(recommendation_id)}
+                        if recommendation_id is not None
+                        else {}
+                    ),
                 },
                 headers=headers,
             ),

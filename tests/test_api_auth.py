@@ -90,6 +90,12 @@ def test_workspace_commands_have_a_dedicated_write_permission() -> None:
     assert required_permission("POST", path) is ApiPermission.WORKSPACE_MANAGE
 
 
+def test_workflow_recommendation_requires_dispatch_permission() -> None:
+    path = "/v1/projects/00000000-0000-0000-0000-000000000000/workflow-recommendations"
+
+    assert required_permission("POST", path) is ApiPermission.REQUEST_DISPATCH
+
+
 def test_scm_publications_have_a_dedicated_write_permission() -> None:
     execution_id = "00000000-0000-0000-0000-000000000000"
     path = f"/v1/external-executions/{execution_id}/scm-publications"

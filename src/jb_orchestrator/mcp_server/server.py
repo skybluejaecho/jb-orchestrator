@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from jb_orchestrator.mcp_server.client import ControlPlaneClient
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False)
+RECOMMEND = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False)
 DISPATCH = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True)
 APPROVAL = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True)
 CANCELLATION = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True)
@@ -37,8 +38,9 @@ def create_server(client: ControlPlaneClient | None = None) -> FastMCP[None]:
         "jb-orchestrator",
         instructions=(
             "Use these tools to dispatch and observe jb-orchestrator workflows. "
-            "Call list_workflow_options before choosing a request override; omit both "
-            "definition fields to use the project default. "
+            "Call recommend_workflow when the user has not selected a workflow. Confirm a "
+            "candidate when requires_confirmation is true, then pass its recommendation_id "
+            "to dispatch_request. Omit both definition fields to use the project default. "
             "Use available_skills and task node keys to add exact request-scoped Skills; "
             "do not add Skills unless they help the user's stated task. "
             "Reuse the same idempotency key when retrying a dispatch. Ask the user before "
@@ -78,6 +80,16 @@ def create_server(client: ControlPlaneClient | None = None) -> FastMCP[None]:
 
         return await control_plane.list_workflow_options(project_id)
 
+    @server.tool(annotations=RECOMMEND)
+    async def recommend_workflow(
+        project_id: UUID,
+        prompt: Annotated[str, Field(min_length=1)],
+        limit: Annotated[int, Field(ge=1, le=10)] = 3,
+    ) -> dict[str, Any]:
+        """Rank exact Workflow candidates; ask the user when confirmation is required."""
+
+        return await control_plane.recommend_workflow(project_id, prompt=prompt, limit=limit)
+
     @server.tool(annotations=DISPATCH)
     async def dispatch_request(
         project_id: UUID,
@@ -92,6 +104,7 @@ def create_server(client: ControlPlaneClient | None = None) -> FastMCP[None]:
             Field(pattern=r"^[a-z0-9][a-z0-9._-]*$", max_length=128),
         ] = None,
         definition_version: Annotated[int | None, Field(ge=1)] = None,
+        recommendation_id: UUID | None = None,
         skill_addons: Annotated[list[NodeSkillAddonInput] | None, Field(max_length=64)] = None,
     ) -> dict[str, Any]:
         """Start a workflow with optional exact task-node Skill add-ons; reuse key on retry."""
@@ -106,6 +119,7 @@ def create_server(client: ControlPlaneClient | None = None) -> FastMCP[None]:
             conversation_id=conversation_id,
             definition_key=definition_key,
             definition_version=definition_version,
+            recommendation_id=recommendation_id,
             skill_addons=(
                 [addon.model_dump(mode="json") for addon in skill_addons]
                 if skill_addons is not None
