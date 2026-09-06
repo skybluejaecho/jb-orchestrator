@@ -534,6 +534,15 @@ ORCH-062 adds deterministic, request-scoped Workflow recommendations:
 - dispatch validates the recommendation project, prompt, and selected candidate before execution
 - Jarvis presents ranked candidates without becoming the source of truth for selection policy
 
+ORCH-063 adds durable Worker readiness alerts:
+
+- each unassignable READY-node occurrence opens at most one durable alert
+- repeated evaluations update the same alert while preserving its first detection time
+- recovered assignments resolve alerts without deleting their history
+- project events record alert creation, reason changes, and resolution for SSE consumers
+- configurable duration thresholds distinguish warning from critical conditions
+- Jarvis shows persisted severity, elapsed time, and capability-specific recovery guidance
+
 ## Prerequisites
 
 - Python 3.12
