@@ -65,6 +65,28 @@ async def test_dispatch_rejects_partial_workflow_override_before_network() -> No
         )
 
 
+async def test_recommend_workflow_uses_project_scoped_control_plane_endpoint() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["request"] = request
+        return httpx.Response(201, json={"confidence": "high"})
+
+    project_id = uuid4()
+    client = ControlPlaneClient(
+        base_url="http://control.test",
+        token="secret",
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await client.recommend_workflow(project_id, prompt="Plan it", limit=2)
+
+    request: httpx.Request = captured["request"]
+    assert request.url.path == f"/v1/projects/{project_id}/workflow-recommendations"
+    assert request.read().decode() == '{"prompt":"Plan it","limit":2}'
+    assert result == {"confidence": "high"}
+
+
 async def test_missing_token_fails_before_network_request() -> None:
     client = ControlPlaneClient(base_url="http://control.test", token=None)
 
