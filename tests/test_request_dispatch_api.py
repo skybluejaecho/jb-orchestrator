@@ -193,3 +193,47 @@ async def test_dispatch_api_requires_idempotency_key() -> None:
         )
 
     assert response.status_code == 422
+
+
+async def test_workflow_recommendation_api_returns_durable_exact_candidates() -> None:
+    store = MemoryStore()
+    factory = lambda: MemoryUnitOfWork(store)  # noqa: E731
+    app = create_app(
+        service=OrchestrationService(factory),
+        workflow_service=WorkflowService(factory),
+        request_dispatch_service=RequestDispatchService(factory),
+    )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        project = await client.post(
+            "/v1/projects",
+            json={
+                "key": "recommend-api",
+                "name": "Recommend API",
+                "repository_url": "https://example.com/recommend-api.git",
+            },
+        )
+        await client.post(
+            "/v1/workflows",
+            json={
+                "key": "planning-only",
+                "version": 1,
+                "entry_node": "plan",
+                "nodes": [
+                    {"key": "plan", "kind": "task", "instructions": "기획 계획 요구사항 분석"},
+                    {"key": "done", "kind": "terminal", "terminal_status": "succeeded"},
+                ],
+                "edges": [{"source": "plan", "outcome": "success", "target": "done"}],
+            },
+        )
+        response = await client.post(
+            f"/v1/projects/{project.json()['id']}/workflow-recommendations",
+            json={"prompt": "요구사항을 분석하고 기획 계획을 세워줘"},
+        )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["policy_version"] == "workflow-keyword-v1"
+    assert payload["confidence"] == "high"
+    assert payload["requires_confirmation"] is False
+    assert payload["recommended"]["definition_key"] == "planning-only"
+    assert store.events[-1].id == UUID(payload["id"])

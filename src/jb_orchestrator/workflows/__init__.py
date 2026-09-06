@@ -19,8 +19,17 @@ from jb_orchestrator.workflows.models import (
     WorkflowStatus,
     WorkflowTaskCandidate,
 )
+from jb_orchestrator.workflows.recommendations import (
+    POLICY_VERSION,
+    RecommendationConfidence,
+    WorkflowRecommendation,
+    WorkflowRecommendationCandidate,
+    WorkflowRecommendationInput,
+    recommend_workflows,
+)
 
 __all__ = [
+    "POLICY_VERSION",
     "ArtifactCondition",
     "EdgeDefinition",
     "NodeDefinition",
@@ -30,13 +39,18 @@ __all__ = [
     "NodeKind",
     "NodeOutcome",
     "ProjectWorkflowBinding",
+    "RecommendationConfidence",
     "WorkflowDefinition",
     "WorkflowDefinitionError",
     "WorkflowEngine",
     "WorkflowExecution",
     "WorkflowExecutionError",
+    "WorkflowRecommendation",
+    "WorkflowRecommendationCandidate",
+    "WorkflowRecommendationInput",
     "WorkflowRequestContext",
     "WorkflowSnapshot",
     "WorkflowStatus",
     "WorkflowTaskCandidate",
+    "recommend_workflows",
 ]

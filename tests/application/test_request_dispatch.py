@@ -1,3 +1,5 @@
+from uuid import UUID
+
 import pytest
 
 from jb_orchestrator.application import (
@@ -46,6 +48,7 @@ def dispatch_command(
     definition_key: str | None = None,
     definition_version: int | None = None,
     skill_addons: tuple[NodeSkillAddon, ...] = (),
+    recommendation_id: UUID | None = None,
 ) -> DispatchProjectRequest:
     return DispatchProjectRequest(
         project_id=project.id,
@@ -55,8 +58,102 @@ def dispatch_command(
         origin=RequestOrigin(ingress_key=ingress_key, external_request_id=key),
         definition_key=definition_key,
         definition_version=definition_version,
+        recommendation_id=recommendation_id,
         skill_addons=skill_addons,
     )
+
+
+async def test_recommendation_is_durable_and_can_select_a_high_confidence_workflow() -> None:
+    store = MemoryStore()
+    project = Project(
+        key="recommend-project",
+        name="Recommend Project",
+        repository_url="https://example.com/recommend.git",
+    )
+    planning = WorkflowDefinition(
+        key="planning-only",
+        version=1,
+        entry_node="plan",
+        nodes=(
+            NodeDefinition(key="plan", kind=NodeKind.TASK, instructions="기획 요구사항 분석"),
+            NodeDefinition(
+                key="done", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.SUCCEEDED
+            ),
+        ),
+        edges=(EdgeDefinition(source="plan", outcome=NodeOutcome.SUCCESS, target="done"),),
+    )
+    verification = WorkflowDefinition(
+        key="security-review",
+        version=1,
+        entry_node="verify",
+        nodes=(
+            NodeDefinition(
+                key="verify", kind=NodeKind.TASK, instructions="보안 테스트 검증 review"
+            ),
+            NodeDefinition(
+                key="done", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.SUCCEEDED
+            ),
+        ),
+        edges=(EdgeDefinition(source="verify", outcome=NodeOutcome.SUCCESS, target="done"),),
+    )
+    store.projects[project.id] = project
+    store.workflow_definitions[(planning.key, planning.version)] = planning
+    store.workflow_definitions[(verification.key, verification.version)] = verification
+    factory = lambda: MemoryUnitOfWork(store)  # noqa: E731
+    service = RequestDispatchService(factory)
+
+    recorded = await service.recommend_workflows(project.id, "보안 테스트 검증이 필요해")
+    dispatched = await service.dispatch(
+        dispatch_command(
+            project,
+            "보안 테스트 검증이 필요해",
+            "recommended-1",
+            recommendation_id=recorded.id,
+        )
+    )
+
+    assert recorded.recommendation.requires_confirmation is False
+    assert store.events[0].event_type == "project.workflow_recommended"
+    assert dispatched.workflow.snapshot.definition_key == "security-review"
+    assert store.events[-3].payload["workflow_selection"]["source"] == "policy_recommendation"
+    assert store.events[-3].payload["workflow_selection"]["recommendation_id"] == str(recorded.id)
+
+
+async def test_low_confidence_recommendation_requires_an_exact_candidate_confirmation() -> None:
+    store = MemoryStore()
+    project = Project(
+        key="confirm-project",
+        name="Confirm Project",
+        repository_url="https://example.com/confirm.git",
+    )
+    selected = definition(1)
+    store.projects[project.id] = project
+    store.workflow_definitions[(selected.key, selected.version)] = selected
+    service = RequestDispatchService(lambda: MemoryUnitOfWork(store))
+    recorded = await service.recommend_workflows(project.id, "알아서 처리해줘")
+
+    with pytest.raises(ResourceConflict, match="requires confirmation"):
+        await service.dispatch(
+            dispatch_command(
+                project,
+                "알아서 처리해줘",
+                "needs-confirmation",
+                recommendation_id=recorded.id,
+            )
+        )
+
+    dispatched = await service.dispatch(
+        dispatch_command(
+            project,
+            "알아서 처리해줘",
+            "confirmed",
+            definition_key=selected.key,
+            definition_version=selected.version,
+            recommendation_id=recorded.id,
+        )
+    )
+    assert dispatched.workflow.snapshot.definition_key == selected.key
+    assert store.events[-3].payload["workflow_selection"]["source"] == "confirmed_recommendation"
 
 
 async def test_binding_pins_exact_version_and_dispatches_all_state() -> None:

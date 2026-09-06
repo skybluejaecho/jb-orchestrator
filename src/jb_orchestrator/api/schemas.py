@@ -66,6 +66,7 @@ class WorkflowSelectionPayload(BaseModel):
 
 class ProjectRequestDispatchCreate(UserRequestCreate):
     workflow: WorkflowSelectionPayload | None = None
+    recommendation_id: UUID | None = None
     skill_addons: tuple["NodeSkillAddonPayload", ...] = Field(default=(), max_length=64)
 
 
@@ -527,6 +528,29 @@ class ProjectWorkflowOptionsResponse(BaseModel):
     default_workflow: WorkflowOptionResponse | None
     workflows: tuple[WorkflowOptionResponse, ...]
     available_skills: tuple[WorkflowSkillSummaryResponse, ...]
+
+
+class WorkflowRecommendationCreate(BaseModel):
+    prompt: str = Field(min_length=1)
+    limit: int = Field(default=3, ge=1, le=10)
+
+
+class WorkflowRecommendationCandidateResponse(BaseModel):
+    definition_key: str
+    definition_version: int
+    score: int
+    matched_terms: tuple[str, ...]
+    matched_intents: tuple[str, ...]
+    is_default: bool
+
+
+class WorkflowRecommendationResponse(BaseModel):
+    id: UUID
+    policy_version: str
+    confidence: str
+    requires_confirmation: bool
+    recommended: WorkflowRecommendationCandidateResponse | None
+    candidates: tuple[WorkflowRecommendationCandidateResponse, ...]
 
 
 class WorkflowStart(BaseModel):

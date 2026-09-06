@@ -25,6 +25,9 @@ from jb_orchestrator.workflows import (
     ProjectWorkflowBinding,
     WorkflowDefinition,
     WorkflowExecution,
+    WorkflowRecommendation,
+    WorkflowRecommendationInput,
+    recommend_workflows,
 )
 
 
@@ -63,6 +66,14 @@ class WorkflowComposition:
     @property
     def version(self) -> int:
         return self.definition.version
+
+
+@dataclass(frozen=True, slots=True)
+class RecordedWorkflowRecommendation:
+    """A deterministic recommendation persisted as a project event."""
+
+    id: UUID
+    recommendation: WorkflowRecommendation
 
 
 class RequestDispatchService:
@@ -160,6 +171,76 @@ class RequestDispatchService:
             available_skills=available_skills,
         )
 
+    async def recommend_workflows(
+        self, project_id: UUID, prompt: str, *, limit: int = 3
+    ) -> RecordedWorkflowRecommendation:
+        normalized_prompt = prompt.strip()
+        if not normalized_prompt:
+            raise ResourceConflict("workflow recommendation prompt must not be empty")
+        if limit < 1 or limit > 10:
+            raise ResourceConflict("workflow recommendation limit must be between 1 and 10")
+        options = await self.list_workflow_options(project_id)
+        default_reference = (
+            (options.default.definition_key, options.default.definition_version)
+            if options.default is not None
+            else None
+        )
+        inputs = tuple(
+            WorkflowRecommendationInput(
+                key=composition.key,
+                version=composition.version,
+                searchable_text=self._recommendation_text(composition),
+                is_default=(composition.key, composition.version) == default_reference,
+            )
+            for composition in options.workflows
+        )
+        recommendation = recommend_workflows(normalized_prompt, inputs, limit=limit)
+        event = DomainEvent(
+            aggregate_type="project",
+            aggregate_id=project_id,
+            event_type="project.workflow_recommended",
+            payload={
+                "prompt_digest": self._prompt_digest(normalized_prompt),
+                "policy_version": recommendation.policy_version,
+                "confidence": recommendation.confidence.value,
+                "requires_confirmation": recommendation.requires_confirmation,
+                "candidates": [
+                    {
+                        "definition_key": candidate.definition_key,
+                        "definition_version": candidate.definition_version,
+                        "score": candidate.score,
+                        "matched_terms": list(candidate.matched_terms),
+                        "matched_intents": list(candidate.matched_intents),
+                        "is_default": candidate.is_default,
+                    }
+                    for candidate in recommendation.candidates
+                ],
+            },
+        )
+        async with self._unit_of_work_factory() as unit_of_work:
+            await unit_of_work.events.append(event)
+            await unit_of_work.commit()
+        return RecordedWorkflowRecommendation(id=event.id, recommendation=recommendation)
+
+    @staticmethod
+    def _recommendation_text(composition: WorkflowComposition) -> str:
+        return " ".join(
+            (
+                composition.key,
+                *(node.key for node in composition.definition.nodes),
+                *(node.instructions or "" for node in composition.definition.nodes),
+                *(
+                    f"{phase_pack.key} {phase_pack.name} {phase_pack.description}"
+                    for phase_pack in composition.phase_packs
+                ),
+                *(f"{skill.key} {skill.name} {skill.description}" for skill in composition.skills),
+            )
+        )
+
+    @staticmethod
+    def _prompt_digest(prompt: str) -> str:
+        return f"sha256:{sha256(prompt.strip().encode()).hexdigest()}"
+
     @staticmethod
     async def _resolve_composition(
         unit_of_work: UnitOfWork, definition: WorkflowDefinition
@@ -227,6 +308,7 @@ class RequestDispatchService:
                     definition_key,
                     command.definition_version,
                     normalized_addons,
+                    command.recommendation_id,
                 ),
             )
             if not await unit_of_work.request_dispatch_receipts.try_claim(receipt):
@@ -245,16 +327,54 @@ class RequestDispatchService:
                 return await self._replay(unit_of_work, existing)
             if project.status is not ProjectStatus.ACTIVE:
                 raise ResourceConflict(f"project is not active: {command.project_id}")
-            if definition_key is not None and command.definition_version is not None:
+            selection_source: str | None = None
+            if command.recommendation_id is not None:
+                recommendation_event = await unit_of_work.events.get(command.recommendation_id)
+                if (
+                    recommendation_event is None
+                    or recommendation_event.aggregate_type != "project"
+                    or recommendation_event.aggregate_id != command.project_id
+                    or recommendation_event.event_type != "project.workflow_recommended"
+                ):
+                    raise ResourceNotFound(
+                        f"workflow recommendation not found: {command.recommendation_id}"
+                    )
+                if recommendation_event.payload.get("prompt_digest") != self._prompt_digest(
+                    normalized_prompt
+                ):
+                    raise ResourceConflict("workflow recommendation prompt does not match request")
+                candidates = {
+                    (candidate["definition_key"], candidate["definition_version"])
+                    for candidate in recommendation_event.payload.get("candidates", [])
+                }
+                if definition_key is None:
+                    if recommendation_event.payload.get("requires_confirmation", True):
+                        raise ResourceConflict("workflow recommendation requires confirmation")
+                    recommended = recommendation_event.payload.get("candidates", [None])[0]
+                    if recommended is None:
+                        raise ResourceConflict("workflow recommendation has no candidate")
+                    definition_key = recommended["definition_key"]
+                    command_definition_version = recommended["definition_version"]
+                    selection_source = "policy_recommendation"
+                else:
+                    command_definition_version = command.definition_version
+                    if (definition_key, command_definition_version) not in candidates:
+                        raise ResourceConflict(
+                            "selected workflow is not a recommendation candidate"
+                        )
+                    selection_source = "confirmed_recommendation"
+            else:
+                command_definition_version = command.definition_version
+            if definition_key is not None and command_definition_version is not None:
                 definition = await unit_of_work.workflow_definitions.get(
-                    definition_key, command.definition_version
+                    definition_key, command_definition_version
                 )
                 if definition is None:
                     raise ResourceNotFound(
                         "workflow definition not found: "
-                        f"{definition_key}@{command.definition_version}"
+                        f"{definition_key}@{command_definition_version}"
                     )
-                selection_source = "request_override"
+                selection_source = selection_source or "request_override"
             else:
                 binding = await unit_of_work.project_workflow_bindings.get_by_project(
                     command.project_id, for_update=True
@@ -302,6 +422,11 @@ class RequestDispatchService:
                             "source": selection_source,
                             "definition_key": definition.key,
                             "definition_version": definition.version,
+                            **(
+                                {"recommendation_id": str(command.recommendation_id)}
+                                if command.recommendation_id is not None
+                                else {}
+                            ),
                         },
                         "skill_addons": [
                             {
@@ -350,6 +475,7 @@ class RequestDispatchService:
         definition_key: str | None = None,
         definition_version: int | None = None,
         skill_addons: tuple[NodeSkillAddon, ...] = (),
+        recommendation_id: UUID | None = None,
     ) -> str:
         normalized_title = title.strip() if title else None
         payload = json.dumps(
@@ -379,6 +505,9 @@ class RequestDispatchService:
                     }
                     for addon in skill_addons
                 ],
+                "recommendation_id": (
+                    str(recommendation_id) if recommendation_id is not None else None
+                ),
             },
             ensure_ascii=False,
             separators=(",", ":"),
