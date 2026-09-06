@@ -18,7 +18,11 @@ from jb_orchestrator.scm import (
     ScmPublicationStatus,
 )
 from jb_orchestrator.skills import SkillSourceKind
-from jb_orchestrator.worker_presence import WorkerKind, WorkerObservedStatus
+from jb_orchestrator.worker_presence import (
+    WorkerKind,
+    WorkerObservedStatus,
+    WorkerReadinessIssueReason,
+)
 from jb_orchestrator.workflows import (
     NodeExecutionStatus,
     NodeKind,
@@ -342,6 +346,36 @@ class WorkerPresenceResponse(BaseModel):
     started_at: datetime
     last_seen_at: datetime
     stopped_at: datetime | None
+
+
+class WorkerCapabilityCoverageResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    executor_key: str
+    online_worker_ids: tuple[str, ...]
+    stale_worker_ids: tuple[str, ...]
+    stopped_worker_ids: tuple[str, ...]
+
+
+class WorkerReadinessIssueResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    workflow_execution_id: UUID
+    run_id: UUID
+    node_key: str
+    executor_key: str
+    ready_since: datetime
+    reason: WorkerReadinessIssueReason
+
+
+class ProjectWorkerReadinessResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    project_id: UUID
+    checked_at: datetime
+    online_execution_workers: int
+    coverage: tuple[WorkerCapabilityCoverageResponse, ...]
+    issues: tuple[WorkerReadinessIssueResponse, ...]
 
 
 class SkillReferencePayload(BaseModel):

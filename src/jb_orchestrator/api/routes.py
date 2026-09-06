@@ -17,6 +17,7 @@ from jb_orchestrator.api.dependencies import (
     get_scm_publication_service,
     get_skill_catalog_service,
     get_worker_presence_service,
+    get_worker_readiness_service,
     get_workflow_service,
     get_workspace_operation_service,
 )
@@ -35,6 +36,7 @@ from jb_orchestrator.api.schemas import (
     ProjectCreate,
     ProjectRequestDispatchCreate,
     ProjectResponse,
+    ProjectWorkerReadinessResponse,
     ProjectWorkflowBindingConfigure,
     ProjectWorkflowBindingResponse,
     ProjectWorkflowOptionsResponse,
@@ -78,6 +80,7 @@ from jb_orchestrator.application import (
     ScmPublicationService,
     SkillCatalogService,
     WorkerPresenceService,
+    WorkerReadinessService,
     WorkflowComposition,
     WorkflowService,
     WorkspaceOperationService,
@@ -133,6 +136,9 @@ ProjectObservationServiceDependency = Annotated[
 WorkerPresenceServiceDependency = Annotated[
     WorkerPresenceService, Depends(get_worker_presence_service)
 ]
+WorkerReadinessServiceDependency = Annotated[
+    WorkerReadinessService, Depends(get_worker_readiness_service)
+]
 
 
 @router.get("/workers", response_model=list[WorkerPresenceResponse])
@@ -162,6 +168,21 @@ async def list_worker_presence(
         )
         for view in views
     ]
+
+
+@router.get(
+    "/projects/{project_id}/worker-readiness",
+    response_model=ProjectWorkerReadinessResponse,
+)
+async def inspect_project_worker_readiness(
+    project_id: UUID,
+    service: WorkerReadinessServiceDependency,
+) -> ProjectWorkerReadinessResponse:
+    report = await service.inspect_project(
+        project_id,
+        stale_after_seconds=get_settings().worker_presence_stale_after_seconds,
+    )
+    return ProjectWorkerReadinessResponse.model_validate(report)
 
 
 def workflow_definition_response(

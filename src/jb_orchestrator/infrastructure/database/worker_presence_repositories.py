@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jb_orchestrator.infrastructure.database.models import WorkerInstanceRecord
-from jb_orchestrator.worker_presence import WorkerInstance
+from jb_orchestrator.worker_presence import WorkerInstance, WorkerLifecycleStatus
 
 
 def worker_instance_from_record(record: WorkerInstanceRecord) -> WorkerInstance:
@@ -40,11 +40,16 @@ class SqlAlchemyWorkerInstanceRepository:
         record = await self._session.scalar(statement)
         return worker_instance_from_record(record) if record is not None else None
 
-    async def list(self, *, limit: int = 100) -> list[WorkerInstance]:
+    async def list(
+        self, *, status: WorkerLifecycleStatus | None = None, limit: int = 100
+    ) -> list[WorkerInstance]:
+        statement = select(WorkerInstanceRecord)
+        if status is not None:
+            statement = statement.where(WorkerInstanceRecord.status == status)
         records = await self._session.scalars(
-            select(WorkerInstanceRecord)
-            .order_by(WorkerInstanceRecord.last_seen_at.desc(), WorkerInstanceRecord.id.desc())
-            .limit(limit)
+            statement.order_by(
+                WorkerInstanceRecord.last_seen_at.desc(), WorkerInstanceRecord.id.desc()
+            ).limit(limit)
         )
         return [worker_instance_from_record(record) for record in records]
 
