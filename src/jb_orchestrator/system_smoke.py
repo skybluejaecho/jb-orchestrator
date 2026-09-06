@@ -51,6 +51,7 @@ class SystemSmokeResult:
                 "control-plane",
                 "worker",
                 "worker-presence",
+                "worker-readiness",
                 "scm-worker",
                 "github-publisher",
                 "jarvis",
@@ -515,6 +516,19 @@ def run_system_smoke(
                     "prompt": "Complete the deterministic system smoke task.",
                 },
             )
+            unassigned = _request(
+                jarvis,
+                "GET",
+                f"/api/worker-readiness?projectId={project['id']}",
+            )
+            unassigned_issues = unassigned.get("issues")
+            if (
+                not isinstance(unassigned_issues, list)
+                or len(unassigned_issues) != 1
+                or unassigned_issues[0].get("executor_key") != SMOKE_EXECUTOR_KEY
+                or unassigned.get("online_execution_workers") != 0
+            ):
+                raise SystemSmokeError("READY task without an online worker was not diagnosed")
             worker = subprocess.run(
                 [sys.executable, "-m", "jb_orchestrator.worker.main", "--once"],
                 cwd=project_root,
@@ -533,6 +547,13 @@ def run_system_smoke(
             awaiting = _poll_execution(
                 jarvis, first_id, "awaiting_approval", timeout_seconds=timeout_seconds
             )
+            assigned = _request(
+                jarvis,
+                "GET",
+                f"/api/worker-readiness?projectId={project['id']}",
+            )
+            if assigned.get("issues") != []:
+                raise SystemSmokeError("completed task remained in worker readiness diagnostics")
             if not awaiting["artifacts"]:
                 raise SystemSmokeError("worker completed without producing a task artifact")
             _request(

@@ -35,7 +35,7 @@ from jb_orchestrator.scm import (
 )
 from jb_orchestrator.security import ServiceAccount
 from jb_orchestrator.skills import SkillDefinition
-from jb_orchestrator.worker_presence import WorkerInstance
+from jb_orchestrator.worker_presence import WorkerInstance, WorkerLifecycleStatus
 from jb_orchestrator.workflows import (
     NodeExecutionStatus,
     ProjectWorkflowBinding,
@@ -437,9 +437,15 @@ class MemoryWorkerInstanceRepository:
     async def get(self, instance_id: UUID, *, for_update: bool = False) -> WorkerInstance | None:
         return self._store.worker_instances.get(instance_id)
 
-    async def list(self, *, limit: int = 100) -> list[WorkerInstance]:
+    async def list(
+        self, *, status: WorkerLifecycleStatus | None = None, limit: int = 100
+    ) -> list[WorkerInstance]:
         return sorted(
-            self._store.worker_instances.values(),
+            (
+                worker
+                for worker in self._store.worker_instances.values()
+                if status is None or worker.status is status
+            ),
             key=lambda value: (value.last_seen_at, value.id),
             reverse=True,
         )[:limit]

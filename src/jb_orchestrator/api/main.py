@@ -22,6 +22,7 @@ from jb_orchestrator.application.security_services import SecurityService
 from jb_orchestrator.application.services import OrchestrationService
 from jb_orchestrator.application.skill_services import SkillCatalogService
 from jb_orchestrator.application.worker_presence_services import WorkerPresenceService
+from jb_orchestrator.application.worker_readiness_services import WorkerReadinessService
 from jb_orchestrator.application.workflow_services import WorkflowService
 from jb_orchestrator.application.workspace_operation_services import WorkspaceOperationService
 from jb_orchestrator.config import get_settings
@@ -46,6 +47,7 @@ def create_app(
     workspace_operation_service: WorkspaceOperationService | None = None,
     scm_publication_service: ScmPublicationService | None = None,
     worker_presence_service: WorkerPresenceService | None = None,
+    worker_readiness_service: WorkerReadinessService | None = None,
     auth_enabled: bool | None = None,
 ) -> FastAPI:
     """Build the API application."""
@@ -66,6 +68,7 @@ def create_app(
         or workspace_operation_service is None
         or scm_publication_service is None
         or worker_presence_service is None
+        or worker_readiness_service is None
         or (auth_enabled and security_service is None)
     ):
         session_factory = create_session_factory()
@@ -105,6 +108,10 @@ def create_app(
         worker_presence_service = WorkerPresenceService(
             lambda: SqlAlchemyUnitOfWork(session_factory)
         )
+    if worker_readiness_service is None:
+        worker_readiness_service = WorkerReadinessService(
+            lambda: SqlAlchemyUnitOfWork(session_factory)
+        )
     if auth_enabled and security_service is None:
         security_service = SecurityService(lambda: SqlAlchemyUnitOfWork(session_factory))
     app.state.orchestration_service = service
@@ -119,6 +126,7 @@ def create_app(
     app.state.workspace_operation_service = workspace_operation_service
     app.state.scm_publication_service = scm_publication_service
     app.state.worker_presence_service = worker_presence_service
+    app.state.worker_readiness_service = worker_readiness_service
     app.state.security_service = security_service
     app.state.auth_enabled = auth_enabled
 

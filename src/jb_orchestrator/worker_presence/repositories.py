@@ -3,7 +3,7 @@
 from typing import Protocol
 from uuid import UUID
 
-from jb_orchestrator.worker_presence.models import WorkerInstance
+from jb_orchestrator.worker_presence.models import WorkerInstance, WorkerLifecycleStatus
 
 
 class WorkerInstanceRepository(Protocol):
@@ -13,6 +13,8 @@ class WorkerInstanceRepository(Protocol):
         self, instance_id: UUID, *, for_update: bool = False
     ) -> WorkerInstance | None: ...
 
-    async def list(self, *, limit: int = 100) -> list[WorkerInstance]: ...
+    async def list(
+        self, *, status: WorkerLifecycleStatus | None = None, limit: int = 100
+    ) -> list[WorkerInstance]: ...
 
     async def save(self, worker: WorkerInstance) -> None: ...

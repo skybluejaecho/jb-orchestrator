@@ -14,6 +14,7 @@ from jb_orchestrator.application.scm_publication_services import ScmPublicationS
 from jb_orchestrator.application.services import OrchestrationService
 from jb_orchestrator.application.skill_services import SkillCatalogService
 from jb_orchestrator.application.worker_presence_services import WorkerPresenceService
+from jb_orchestrator.application.worker_readiness_services import WorkerReadinessService
 from jb_orchestrator.application.workflow_services import WorkflowService
 from jb_orchestrator.application.workspace_operation_services import WorkspaceOperationService
 
@@ -88,3 +89,9 @@ def get_worker_presence_service(request: Request) -> WorkerPresenceService:
     """Return the durable worker presence service owned by this app instance."""
 
     return cast(WorkerPresenceService, request.app.state.worker_presence_service)
+
+
+def get_worker_readiness_service(request: Request) -> WorkerReadinessService:
+    """Return the project worker-readiness diagnostic service."""
+
+    return cast(WorkerReadinessService, request.app.state.worker_readiness_service)
