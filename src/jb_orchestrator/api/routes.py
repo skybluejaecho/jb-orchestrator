@@ -866,3 +866,24 @@ async def retry_scm_publication(
     if replayed:
         response.status_code = status.HTTP_200_OK
     return ScmPublicationResponse.model_validate(publication)
+
+
+@router.post(
+    "/scm-publications/{publication_id}/automatic-retry/cancel",
+    response_model=ScmPublicationResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def cancel_scm_publication_automatic_retry(
+    publication_id: UUID,
+    request: Request,
+    response: Response,
+    service: ScmPublicationServiceDependency,
+) -> ScmPublicationResponse:
+    principal = getattr(request.state, "principal", None)
+    publication, replayed = await service.cancel_automatic_retry(
+        publication_id,
+        requested_by=principal.account_key if principal is not None else "anonymous",
+    )
+    if replayed:
+        response.status_code = status.HTTP_200_OK
+    return ScmPublicationResponse.model_validate(publication)

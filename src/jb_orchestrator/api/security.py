@@ -63,12 +63,10 @@ def required_permission(method: str, path: str) -> ApiPermission:
         return ApiPermission.REQUEST_DISPATCH
     if "/approvals/" in path or path.endswith("/approve"):
         return ApiPermission.WORKFLOW_APPROVE
+    if path.endswith("/scm-publications") or "/scm-publications/" in path:
+        return ApiPermission.SCM_PUBLISH
     if path.endswith("/cancel"):
         return ApiPermission.RUN_CANCEL
     if path.endswith("/workspace-operations"):
         return ApiPermission.WORKSPACE_MANAGE
-    if path.endswith("/scm-publications") or (
-        "/scm-publications/" in path and path.endswith("/retry")
-    ):
-        return ApiPermission.SCM_PUBLISH
     return ApiPermission.PROJECT_ADMIN

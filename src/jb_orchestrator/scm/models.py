@@ -143,6 +143,19 @@ class ScmPublication:
         self.completed_at = None
         self.updated_at = changed_at
 
+    def cancel_automatic_retry(self, *, at: datetime | None = None) -> bool:
+        if self.status is not ScmPublicationStatus.FAILED:
+            raise InvalidStateTransition(
+                "automatic retry can only be cancelled for failed SCM publication"
+            )
+        if self.next_attempt_at is None:
+            return False
+        changed_at = at or datetime.now(UTC)
+        self.automatic_retry_limit = 0
+        self.next_attempt_at = None
+        self.updated_at = changed_at
+        return True
+
     def succeed(
         self, lease_token: UUID, result: dict[str, Any], *, at: datetime | None = None
     ) -> None:

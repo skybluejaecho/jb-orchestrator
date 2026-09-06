@@ -173,3 +173,39 @@ def test_publication_rejects_effectively_unbounded_automatic_retry_limit() -> No
             requested_by="jarvis",
             automatic_retry_limit=11,
         )
+
+
+def test_scheduled_automatic_retry_can_be_cancelled_without_losing_failure() -> None:
+    now = datetime(2026, 9, 6, tzinfo=UTC)
+    publication = ScmPublication(
+        external_execution_id=uuid4(),
+        provider_key="github",
+        repository="https://github.com/example/project.git",
+        source_branch="feature/review",
+        target_branch="develop",
+        title="Review",
+        body="",
+        workspace_scope="scope-a",
+        idempotency_key="publish-cancel-schedule",
+        requested_by="jarvis",
+    )
+    publication.claim("worker-a", lease_seconds=30, at=now)
+    assert publication.lease_token is not None
+    publication.fail(
+        publication.lease_token,
+        "temporary outage",
+        code=ScmPublicationFailureCode.PROVIDER_UNAVAILABLE,
+        retryable=True,
+        automatic_retry_limit=2,
+        next_attempt_at=now + timedelta(seconds=30),
+        at=now,
+    )
+
+    assert publication.cancel_automatic_retry(at=now + timedelta(seconds=1))
+    assert not publication.cancel_automatic_retry(at=now + timedelta(seconds=2))
+    assert publication.status.value == "failed"
+    assert publication.failure_reason == "temporary outage"
+    assert publication.failure_code is ScmPublicationFailureCode.PROVIDER_UNAVAILABLE
+    assert publication.failure_retryable is True
+    assert publication.automatic_retry_limit == 0
+    assert publication.next_attempt_at is None
