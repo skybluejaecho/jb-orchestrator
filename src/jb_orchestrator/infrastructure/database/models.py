@@ -39,7 +39,12 @@ from jb_orchestrator.scm import (
     ScmPublicationStatus,
 )
 from jb_orchestrator.skills import SkillSourceKind
-from jb_orchestrator.worker_presence import WorkerKind, WorkerLifecycleStatus
+from jb_orchestrator.worker_presence import (
+    WorkerKind,
+    WorkerLifecycleStatus,
+    WorkerReadinessAlertStatus,
+    WorkerReadinessIssueReason,
+)
 from jb_orchestrator.workflows.models import NodeExecutionStatus, NodeOutcome, WorkflowStatus
 from jb_orchestrator.workspace_operations import WorkspaceOperationKind, WorkspaceOperationStatus
 
@@ -629,6 +634,42 @@ class WorkerInstanceRecord(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class WorkerReadinessAlertRecord(Base):
+    """One durable unassignable READY-node occurrence."""
+
+    __tablename__ = "worker_readiness_alerts"
+    __table_args__ = (
+        UniqueConstraint(
+            "workflow_execution_id",
+            "node_key",
+            "ready_since",
+            name="uq_worker_readiness_alert_occurrence",
+        ),
+        Index("ix_worker_readiness_alert_project_status", "project_id", "status"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    workflow_execution_id: Mapped[UUID] = mapped_column(
+        ForeignKey("workflow_executions.id", ondelete="CASCADE"), nullable=False
+    )
+    run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), nullable=False)
+    node_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    executor_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    ready_since: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    reason: Mapped[WorkerReadinessIssueReason] = mapped_column(
+        string_enum(WorkerReadinessIssueReason, "worker_readiness_issue_reason"), nullable=False
+    )
+    status: Mapped[WorkerReadinessAlertStatus] = mapped_column(
+        string_enum(WorkerReadinessAlertStatus, "worker_readiness_alert_status"), nullable=False
+    )
+    first_detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class WorkflowDefinitionRecord(Base):

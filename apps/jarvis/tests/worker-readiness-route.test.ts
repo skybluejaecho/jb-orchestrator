@@ -29,8 +29,9 @@ describe('GET /api/worker-readiness', () => {
     expect(response.status).toBe(200);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe(
-      'http://control-plane.test/v1/projects/project%2F1/worker-readiness',
+      'http://control-plane.test/v1/projects/project%2F1/worker-readiness/evaluate',
     );
+    expect(init?.method).toBe('POST');
     expect(new Headers(init?.headers).get('Authorization')).toBe(
       'Bearer server-token',
     );

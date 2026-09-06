@@ -9,10 +9,15 @@ from jb_orchestrator.worker_presence.models import (
 from jb_orchestrator.worker_presence.readiness import (
     ProjectWorkerReadiness,
     WorkerCapabilityCoverage,
+    WorkerReadinessAlert,
+    WorkerReadinessAlertStatus,
     WorkerReadinessIssue,
     WorkerReadinessIssueReason,
 )
-from jb_orchestrator.worker_presence.repositories import WorkerInstanceRepository
+from jb_orchestrator.worker_presence.repositories import (
+    WorkerInstanceRepository,
+    WorkerReadinessAlertRepository,
+)
 
 __all__ = [
     "ProjectWorkerReadiness",
@@ -22,6 +27,9 @@ __all__ = [
     "WorkerKind",
     "WorkerLifecycleStatus",
     "WorkerObservedStatus",
+    "WorkerReadinessAlert",
+    "WorkerReadinessAlertRepository",
+    "WorkerReadinessAlertStatus",
     "WorkerReadinessIssue",
     "WorkerReadinessIssueReason",
 ]

@@ -59,6 +59,8 @@ async def authorize_request(
 def required_permission(method: str, path: str) -> ApiPermission:
     if method == "GET":
         return ApiPermission.PROJECT_READ
+    if path.endswith("/worker-readiness/evaluate"):
+        return ApiPermission.PROJECT_READ
     if (
         path.endswith("/dispatches")
         or path.endswith("/workflow-recommendations")

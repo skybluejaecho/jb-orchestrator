@@ -35,7 +35,12 @@ from jb_orchestrator.scm import (
 )
 from jb_orchestrator.security import ServiceAccount
 from jb_orchestrator.skills import SkillDefinition
-from jb_orchestrator.worker_presence import WorkerInstance, WorkerLifecycleStatus
+from jb_orchestrator.worker_presence import (
+    WorkerInstance,
+    WorkerLifecycleStatus,
+    WorkerReadinessAlert,
+    WorkerReadinessAlertStatus,
+)
 from jb_orchestrator.workflows import (
     NodeExecutionStatus,
     ProjectWorkflowBinding,
@@ -76,6 +81,7 @@ class MemoryStore:
         default_factory=dict
     )
     worker_instances: dict[UUID, WorkerInstance] = field(default_factory=dict)
+    worker_readiness_alerts: dict[UUID, WorkerReadinessAlert] = field(default_factory=dict)
     service_accounts: dict[UUID, ServiceAccount] = field(default_factory=dict)
 
 
@@ -452,6 +458,53 @@ class MemoryWorkerInstanceRepository:
 
     async def save(self, worker: WorkerInstance) -> None:
         self._store.worker_instances[worker.id] = worker
+
+
+class MemoryWorkerReadinessAlertRepository:
+    def __init__(self, store: MemoryStore) -> None:
+        self._store = store
+
+    async def add(self, alert: WorkerReadinessAlert) -> None:
+        self._store.worker_readiness_alerts[alert.id] = alert
+
+    async def get_occurrence(
+        self,
+        *,
+        workflow_execution_id: UUID,
+        node_key: str,
+        ready_since: datetime,
+        for_update: bool = False,
+    ) -> WorkerReadinessAlert | None:
+        return next(
+            (
+                alert
+                for alert in self._store.worker_readiness_alerts.values()
+                if alert.workflow_execution_id == workflow_execution_id
+                and alert.node_key == node_key
+                and alert.ready_since == ready_since
+            ),
+            None,
+        )
+
+    async def list_by_project(
+        self,
+        project_id: UUID,
+        *,
+        status: WorkerReadinessAlertStatus | None = None,
+        limit: int = 500,
+    ) -> list[WorkerReadinessAlert]:
+        return sorted(
+            (
+                alert
+                for alert in self._store.worker_readiness_alerts.values()
+                if alert.project_id == project_id and (status is None or alert.status is status)
+            ),
+            key=lambda alert: (alert.first_detected_at, alert.id),
+            reverse=True,
+        )[:limit]
+
+    async def save(self, alert: WorkerReadinessAlert) -> None:
+        self._store.worker_readiness_alerts[alert.id] = alert
 
 
 class MemoryEventRepository:
@@ -878,6 +931,7 @@ class MemoryUnitOfWork:
         self.scm_publications = MemoryScmPublicationRepository(store)
         self.scm_publication_attempts = MemoryScmPublicationAttemptRepository(store)
         self.worker_instances = MemoryWorkerInstanceRepository(store)
+        self.worker_readiness_alerts = MemoryWorkerReadinessAlertRepository(store)
         self.workflow_definitions = MemoryWorkflowDefinitionRepository(store)
         self.workflow_executions = MemoryWorkflowExecutionRepository(store)
         self.project_workflow_bindings = MemoryProjectWorkflowBindingRepository(store)

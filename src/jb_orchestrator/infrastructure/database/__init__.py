@@ -38,6 +38,7 @@ from jb_orchestrator.infrastructure.database.models import (
     UsageRecordRecord,
     UserRequestRecord,
     WorkerInstanceRecord,
+    WorkerReadinessAlertRecord,
     WorkflowDefinitionRecord,
     WorkflowExecutionRecord,
     WorkspaceOperationRecord,
@@ -63,6 +64,9 @@ from jb_orchestrator.infrastructure.database.skill_repositories import SqlAlchem
 from jb_orchestrator.infrastructure.database.unit_of_work import SqlAlchemyUnitOfWork
 from jb_orchestrator.infrastructure.database.worker_presence_repositories import (
     SqlAlchemyWorkerInstanceRepository,
+)
+from jb_orchestrator.infrastructure.database.worker_readiness_alert_repositories import (
+    SqlAlchemyWorkerReadinessAlertRepository,
 )
 from jb_orchestrator.infrastructure.database.workflow_binding_repositories import (
     SqlAlchemyProjectWorkflowBindingRepository,
@@ -111,6 +115,7 @@ __all__ = [
     "SqlAlchemyUsageRecordRepository",
     "SqlAlchemyUserRequestRepository",
     "SqlAlchemyWorkerInstanceRepository",
+    "SqlAlchemyWorkerReadinessAlertRepository",
     "SqlAlchemyWorkflowDefinitionRepository",
     "SqlAlchemyWorkflowExecutionRepository",
     "SqlAlchemyWorkspaceOperationRepository",
@@ -118,6 +123,7 @@ __all__ = [
     "UsageRecordRecord",
     "UserRequestRecord",
     "WorkerInstanceRecord",
+    "WorkerReadinessAlertRecord",
     "WorkflowDefinitionRecord",
     "WorkflowExecutionRecord",
     "WorkspaceOperationRecord",
