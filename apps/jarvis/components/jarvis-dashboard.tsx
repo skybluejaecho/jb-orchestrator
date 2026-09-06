@@ -39,6 +39,8 @@ import {
   type DispatchResult,
 } from '@/components/request-composer';
 import { ExecutionInspector } from '@/components/execution-inspector';
+import { WorkerPresencePanel } from '@/components/worker-presence';
+import { WorkerReadinessPanel } from '@/components/worker-readiness';
 
 type ConnectionState = 'connecting' | 'live' | 'degraded';
 
@@ -631,6 +633,16 @@ export function JarvisDashboard() {
                 ))}
               </CardContent>
             </Card>
+          </div>
+
+          <div className="grid gap-5 xl:grid-cols-2">
+            <WorkerPresencePanel revision={eventRevision} />
+            {selectedProjectId && (
+              <WorkerReadinessPanel
+                projectId={selectedProjectId}
+                revision={eventRevision}
+              />
+            )}
           </div>
 
           {selectedExecutionId && (

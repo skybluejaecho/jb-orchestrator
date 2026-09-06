@@ -6,11 +6,17 @@ import socket
 
 import typer
 
-from jb_orchestrator.application import ExternalExecutionService, ScmPublicationService
+from jb_orchestrator.application import (
+    ExternalExecutionService,
+    ScmPublicationService,
+    WorkerPresenceService,
+)
 from jb_orchestrator.config import get_settings
 from jb_orchestrator.infrastructure.database import SqlAlchemyUnitOfWork, create_session_factory
 from jb_orchestrator.scm.registry import ScmPublisherRegistrationError, ScmPublisherRegistry
 from jb_orchestrator.scm.runtime import ScmPublicationRuntime
+from jb_orchestrator.worker_presence import WorkerKind
+from jb_orchestrator.worker_presence.runtime import WorkerPresenceRuntime
 
 app = typer.Typer(add_completion=False, invoke_without_command=True)
 
@@ -70,8 +76,9 @@ def run(
     settings = get_settings()
     session_factory = create_session_factory(settings)
     uow = lambda: SqlAlchemyUnitOfWork(session_factory)  # noqa: E731
+    resolved_worker_id = worker_id or f"{socket.gethostname()}-scm-{os.getpid()}"
     runtime = ScmPublicationRuntime(
-        worker_id or f"{socket.gethostname()}-scm-{os.getpid()}",
+        resolved_worker_id,
         workspace_scope,
         ScmPublicationService(uow),
         ExternalExecutionService(uow),
@@ -83,12 +90,22 @@ def run(
         automatic_retry_base_delay_seconds=automatic_retry_base_delay,
         automatic_retry_max_delay_seconds=automatic_retry_max_delay,
     )
+    presence = WorkerPresenceRuntime(
+        WorkerPresenceService(uow),
+        worker_id=resolved_worker_id,
+        kind=WorkerKind.SCM,
+        hostname=socket.gethostname(),
+        process_id=os.getpid(),
+        capabilities=tuple(registry.supported_keys),
+        workspace_scope=workspace_scope,
+        heartbeat_interval_seconds=settings.worker_heartbeat_interval_seconds,
+    )
     if once:
-        worked = asyncio.run(runtime.run_once())
+        worked = asyncio.run(presence.run(runtime.run_once))
         typer.echo("SCM publication processed." if worked else "No SCM publication found.")
         return
     try:
-        asyncio.run(runtime.run())
+        asyncio.run(presence.run(runtime.run))
     except KeyboardInterrupt:
         typer.echo("SCM publication worker stopped.")
 

@@ -1,9 +1,13 @@
+from collections.abc import Callable, Coroutine
+from typing import Any
+
 import pytest
 from typer.testing import CliRunner
 
 from jb_orchestrator.scm import ScmPublisherRegistry
 from jb_orchestrator.scm.runtime import ScmPublicationRuntime
 from jb_orchestrator.scm.worker_main import app
+from jb_orchestrator.worker_presence.runtime import WorkerPresenceRuntime
 from tests.scm.test_runtime import RecordingPublisher
 
 runner = CliRunner()
@@ -46,8 +50,15 @@ def test_worker_once_uses_discovered_publishers(monkeypatch: pytest.MonkeyPatch)
     async def run_once(runtime: ScmPublicationRuntime) -> bool:
         return False
 
+    async def run_with_presence(
+        runtime: WorkerPresenceRuntime,
+        operation: Callable[[], Coroutine[Any, Any, bool]],
+    ) -> bool:
+        return await operation()
+
     monkeypatch.setattr(ScmPublisherRegistry, "from_entry_points", classmethod(discover))
     monkeypatch.setattr(ScmPublicationRuntime, "run_once", run_once)
+    monkeypatch.setattr(WorkerPresenceRuntime, "run", run_with_presence)
 
     result = runner.invoke(
         app,

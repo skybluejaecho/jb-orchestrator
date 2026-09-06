@@ -68,6 +68,14 @@ Worker를 재시작해도 PostgreSQL 원장이 재시도 시점을 결정한다.
 게시의 `시도 이력`을 펼치면 Control Plane의 시도별 원장을 최신순으로 조회한다. 최초 실행,
 수동·자동 재시도, 임대 만료 회수와 각 Worker·처리 시간·실패 분류를 표시하며 내부 임대 토큰은
 브라우저에 전달하지 않는다.
+Worker 현황판은 실행·Workspace·SCM Worker가 PostgreSQL에 기록한 process heartbeat를 30초마다
+조회한다. 온라인, heartbeat 임계값을 넘긴 응답 지연, 정상 종료를 구분하고 hostname·PID·지원
+capability·workspace scope를 표시한다. 작업 lease 상태와 Worker process 상태는 독립적으로
+해석한다.
+작업 배정 진단은 선택한 프로젝트의 READY 노드가 요구하는 executor와 최신 실행 Worker
+capability를 비교한다. 지원 Worker가 전혀 없는 경우와 등록됐지만 stale 또는 종료된 경우를
+구분하며, 문제가 없는 READY 작업은 처리 가능한 online Worker가 있음을 표시한다. 이 화면은
+관찰 전용이며 Worker를 자동으로 시작하거나 노드 소유권을 변경하지 않는다.
 승인 대기 노드는 승인 또는 반려를 한 번 더 확인한 뒤 처리한다. 진행 중인 실행을 취소하려면
 화면에 표시된 실행 식별 문구를 정확하게 입력해야 한다. Jarvis는 로컬 실행만 지원하며 외부
 네트워크 공개나 Sites 배포는 별도 사용자 인증 계층을 추가하기 전에는 허용하지 않는다.

@@ -6,7 +6,7 @@ import socket
 
 import typer
 
-from jb_orchestrator.application import BudgetService, TaskDispatchService
+from jb_orchestrator.application import BudgetService, TaskDispatchService, WorkerPresenceService
 from jb_orchestrator.config import get_settings
 from jb_orchestrator.infrastructure.database import SqlAlchemyUnitOfWork, create_session_factory
 from jb_orchestrator.skills import SkillSourceKind
@@ -18,6 +18,8 @@ from jb_orchestrator.skills.materialization import (
 )
 from jb_orchestrator.worker.registry import ExecutorRegistrationError, ExecutorRegistry
 from jb_orchestrator.worker.runtime import WorkerRuntime
+from jb_orchestrator.worker_presence import WorkerKind
+from jb_orchestrator.worker_presence.runtime import WorkerPresenceRuntime
 
 app = typer.Typer(add_completion=False, invoke_without_command=True)
 
@@ -58,7 +60,8 @@ def run(
     resolved_worker_id = worker_id or f"{socket.gethostname()}-{os.getpid()}"
     settings = get_settings()
     session_factory = create_session_factory(settings)
-    dispatch = TaskDispatchService(lambda: SqlAlchemyUnitOfWork(session_factory))
+    uow = lambda: SqlAlchemyUnitOfWork(session_factory)  # noqa: E731
+    dispatch = TaskDispatchService(uow)
     runtime = WorkerRuntime(
         resolved_worker_id,
         dispatch,
@@ -77,15 +80,24 @@ def run(
                 ),
             },
         ),
-        budget_service=BudgetService(lambda: SqlAlchemyUnitOfWork(session_factory)),
+        budget_service=BudgetService(uow),
+    )
+    presence = WorkerPresenceRuntime(
+        WorkerPresenceService(uow),
+        worker_id=resolved_worker_id,
+        kind=WorkerKind.EXECUTION,
+        hostname=socket.gethostname(),
+        process_id=os.getpid(),
+        capabilities=tuple(registry.supported_keys),
+        heartbeat_interval_seconds=settings.worker_heartbeat_interval_seconds,
     )
     if once:
-        worked = asyncio.run(runtime.run_once())
+        worked = asyncio.run(presence.run(runtime.run_once))
         typer.echo("Task processed." if worked else "No supported READY task found.")
         return
 
     try:
-        asyncio.run(run_until_stopped(runtime))
+        asyncio.run(presence.run(lambda: run_until_stopped(runtime)))
     except KeyboardInterrupt:
         typer.echo("Worker stopped.")
 

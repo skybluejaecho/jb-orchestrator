@@ -16,6 +16,8 @@ from jb_orchestrator.api.dependencies import (
     get_request_dispatch_service,
     get_scm_publication_service,
     get_skill_catalog_service,
+    get_worker_presence_service,
+    get_worker_readiness_service,
     get_workflow_service,
     get_workspace_operation_service,
 )
@@ -34,6 +36,7 @@ from jb_orchestrator.api.schemas import (
     ProjectCreate,
     ProjectRequestDispatchCreate,
     ProjectResponse,
+    ProjectWorkerReadinessResponse,
     ProjectWorkflowBindingConfigure,
     ProjectWorkflowBindingResponse,
     ProjectWorkflowOptionsResponse,
@@ -47,6 +50,7 @@ from jb_orchestrator.api.schemas import (
     UsageRecordResponse,
     UserRequestCreate,
     UserRequestResponse,
+    WorkerPresenceResponse,
     WorkflowApprovalResolve,
     WorkflowDefinitionCreate,
     WorkflowDefinitionResponse,
@@ -75,6 +79,8 @@ from jb_orchestrator.application import (
     RequestDispatchService,
     ScmPublicationService,
     SkillCatalogService,
+    WorkerPresenceService,
+    WorkerReadinessService,
     WorkflowComposition,
     WorkflowService,
     WorkspaceOperationService,
@@ -127,6 +133,56 @@ ScmPublicationServiceDependency = Annotated[
 ProjectObservationServiceDependency = Annotated[
     ProjectObservationService, Depends(get_project_observation_service)
 ]
+WorkerPresenceServiceDependency = Annotated[
+    WorkerPresenceService, Depends(get_worker_presence_service)
+]
+WorkerReadinessServiceDependency = Annotated[
+    WorkerReadinessService, Depends(get_worker_readiness_service)
+]
+
+
+@router.get("/workers", response_model=list[WorkerPresenceResponse])
+async def list_worker_presence(
+    service: WorkerPresenceServiceDependency,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[WorkerPresenceResponse]:
+    settings = get_settings()
+    views = await service.list(
+        limit=limit,
+        stale_after_seconds=settings.worker_presence_stale_after_seconds,
+    )
+    return [
+        WorkerPresenceResponse(
+            id=view.worker.id,
+            worker_id=view.worker.worker_id,
+            kind=view.worker.kind,
+            hostname=view.worker.hostname,
+            process_id=view.worker.process_id,
+            capabilities=view.worker.capabilities,
+            workspace_scope=view.worker.workspace_scope,
+            metadata=view.worker.metadata,
+            observed_status=view.observed_status,
+            started_at=view.worker.started_at,
+            last_seen_at=view.worker.last_seen_at,
+            stopped_at=view.worker.stopped_at,
+        )
+        for view in views
+    ]
+
+
+@router.get(
+    "/projects/{project_id}/worker-readiness",
+    response_model=ProjectWorkerReadinessResponse,
+)
+async def inspect_project_worker_readiness(
+    project_id: UUID,
+    service: WorkerReadinessServiceDependency,
+) -> ProjectWorkerReadinessResponse:
+    report = await service.inspect_project(
+        project_id,
+        stale_after_seconds=get_settings().worker_presence_stale_after_seconds,
+    )
+    return ProjectWorkerReadinessResponse.model_validate(report)
 
 
 def workflow_definition_response(

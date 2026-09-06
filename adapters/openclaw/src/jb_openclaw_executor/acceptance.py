@@ -27,13 +27,15 @@ from jb_openclaw_executor.workspace import (
     WorkspaceReview,
 )
 from jb_openclaw_executor.workspace_runtime import WorkspaceOperationRuntime
-from jb_orchestrator.application import WorkspaceOperationService
+from jb_orchestrator.application import WorkerPresenceService, WorkspaceOperationService
 from jb_orchestrator.application.exceptions import ApplicationError
 from jb_orchestrator.application.external_execution_services import ExternalExecutionService
 from jb_orchestrator.config import get_settings
 from jb_orchestrator.domain.exceptions import DomainValidationError, InvalidStateTransition
 from jb_orchestrator.external_executions import ExternalExecution
 from jb_orchestrator.infrastructure.database import SqlAlchemyUnitOfWork, create_session_factory
+from jb_orchestrator.worker_presence import WorkerKind
+from jb_orchestrator.worker_presence.runtime import WorkerPresenceRuntime
 
 app = typer.Typer(no_args_is_help=True, help="Diagnose and accept a live OpenClaw Gateway.")
 workspace_app = typer.Typer(no_args_is_help=True, help="Review and release managed worktrees.")
@@ -435,15 +437,27 @@ def run_workspace_worker(
 ) -> None:
     """Process queued commands for the configured local worktree root."""
 
-    runtime = workspace_runtime(
-        worker_id or f"{socket.gethostname()}-workspace", poll_interval=poll_interval
+    resolved_worker_id = worker_id or f"{socket.gethostname()}-workspace-{os.getpid()}"
+    runtime = workspace_runtime(resolved_worker_id, poll_interval=poll_interval)
+    settings = get_settings()
+    manager = workspace_manager_from_settings()
+    session_factory = create_session_factory(settings)
+    presence = WorkerPresenceRuntime(
+        WorkerPresenceService(lambda: SqlAlchemyUnitOfWork(session_factory)),
+        worker_id=resolved_worker_id,
+        kind=WorkerKind.WORKSPACE,
+        hostname=socket.gethostname(),
+        process_id=os.getpid(),
+        capabilities=("inspect", "cleanup"),
+        workspace_scope=manager.scope,
+        heartbeat_interval_seconds=settings.worker_heartbeat_interval_seconds,
     )
     if once:
-        worked = asyncio.run(runtime.run_once())
+        worked = asyncio.run(presence.run(runtime.run_once))
         typer.echo("Workspace operation processed." if worked else "No workspace operation found.")
         return
     try:
-        asyncio.run(runtime.run())
+        asyncio.run(presence.run(runtime.run))
     except KeyboardInterrupt:
         typer.echo("Workspace worker stopped.")
 
