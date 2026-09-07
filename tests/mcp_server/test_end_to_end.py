@@ -8,6 +8,7 @@ from jb_orchestrator.application import (
     OrchestrationService,
     RequestDispatchService,
     SecurityService,
+    WorkerReadinessService,
     WorkflowService,
 )
 from jb_orchestrator.domain import Project
@@ -70,6 +71,7 @@ async def test_mcp_protocol_dispatches_through_authenticated_api() -> None:
         service=OrchestrationService(unit_of_work),
         workflow_service=workflow_service,
         request_dispatch_service=dispatch_service,
+        worker_readiness_service=WorkerReadinessService(unit_of_work),
         security_service=security_service,
         auth_enabled=True,
     )
@@ -87,6 +89,9 @@ async def test_mcp_protocol_dispatches_through_authenticated_api() -> None:
         )
         options_result = await session.call_tool(
             "list_workflow_options", arguments={"project_id": str(project.id)}
+        )
+        readiness_result = await session.call_tool(
+            "get_worker_readiness", arguments={"project_id": str(project.id)}
         )
         dispatched = await session.call_tool(
             "dispatch_request",
@@ -119,6 +124,7 @@ async def test_mcp_protocol_dispatches_through_authenticated_api() -> None:
 
     assert "dispatch_request" in tool_names
     assert "list_workflow_options" in tool_names
+    assert "get_worker_readiness" in tool_names
     assert project_result.isError is False
     project_payload = cast(dict[str, Any], project_result.structuredContent)
     assert project_payload["key"] == "mcp-e2e"
@@ -128,6 +134,10 @@ async def test_mcp_protocol_dispatches_through_authenticated_api() -> None:
         ("delivery", 1),
         ("planning-only", 1),
     }
+    readiness_payload = cast(dict[str, Any], readiness_result.structuredContent)
+    assert readiness_payload["project_id"] == str(project.id)
+    assert readiness_payload["issues"] == []
+    assert readiness_payload["alerts"] == []
     dispatch_payload = cast(dict[str, Any], dispatched.structuredContent)
     replay_payload = cast(dict[str, Any], replayed.structuredContent)
     assert dispatch_payload["replayed"] is False

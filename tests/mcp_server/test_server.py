@@ -25,6 +25,10 @@ class StubControlPlaneClient:
     async def list_workflow_options(self, project_id: UUID) -> dict[str, Any]:
         return {"project_id": str(project_id), "default": None, "workflows": []}
 
+    async def get_worker_readiness(self, project_id: UUID) -> dict[str, Any]:
+        self.calls.append(("get_worker_readiness", project_id))
+        return {"project_id": str(project_id), "issues": [], "alerts": []}
+
     async def recommend_workflow(
         self, project_id: UUID, *, prompt: str, limit: int = 3
     ) -> dict[str, Any]:
@@ -62,6 +66,7 @@ async def test_server_exposes_bounded_tools_with_safety_annotations() -> None:
         "list_project_requests",
         "list_project_workflows",
         "list_workflow_options",
+        "get_worker_readiness",
         "recommend_workflow",
         "dispatch_request",
         "get_request",
@@ -73,6 +78,8 @@ async def test_server_exposes_bounded_tools_with_safety_annotations() -> None:
     }
     assert tools["get_run"].annotations is not None
     assert tools["get_run"].annotations.readOnlyHint is True
+    assert tools["get_worker_readiness"].annotations is not None
+    assert tools["get_worker_readiness"].annotations.readOnlyHint is True
     assert tools["dispatch_request"].annotations is not None
     assert tools["dispatch_request"].annotations.idempotentHint is True
     assert tools["cancel_run"].annotations is not None
@@ -89,6 +96,22 @@ async def test_tool_call_delegates_to_control_plane_client() -> None:
     assert client.calls == [("get_project", project_id)]
     _, structured = cast(tuple[Any, dict[str, Any]], result)
     assert structured["id"] == str(project_id)
+
+
+async def test_worker_readiness_tool_delegates_to_project_scoped_read() -> None:
+    client = StubControlPlaneClient()
+    server = create_server(client)  # type: ignore[arg-type]
+    project_id = uuid4()
+
+    result = await server.call_tool("get_worker_readiness", {"project_id": str(project_id)})
+
+    assert client.calls == [("get_worker_readiness", project_id)]
+    _, structured = cast(tuple[Any, dict[str, Any]], result)
+    assert structured == {
+        "project_id": str(project_id),
+        "issues": [],
+        "alerts": [],
+    }
 
 
 async def test_dispatch_tool_accepts_exact_node_skill_addons() -> None:
