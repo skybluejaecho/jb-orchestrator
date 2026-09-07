@@ -12,10 +12,15 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 
-type WorkerPresence = {
+export type WorkerPresence = {
   id: string;
   worker_id: string;
-  kind: 'execution' | 'workspace' | 'scm';
+  kind:
+    | 'execution'
+    | 'workspace'
+    | 'scm'
+    | 'readiness_monitor'
+    | 'notification';
   hostname: string;
   process_id: number;
   capabilities: string[];
@@ -32,6 +37,8 @@ const kindLabel = {
   execution: '실행 Worker',
   workspace: 'Workspace Worker',
   scm: 'SCM Worker',
+  readiness_monitor: '배정 진단 Worker',
+  notification: '알림 Worker',
 };
 
 const statusLabel = {
@@ -48,7 +55,9 @@ function statusClass(status: WorkerPresence['observed_status']) {
   return 'border-white/10 bg-white/5 text-white/45';
 }
 
-async function readWorkers(response: Response): Promise<WorkerPresence[]> {
+export async function readWorkers(
+  response: Response,
+): Promise<WorkerPresence[]> {
   if (!response.ok) {
     const problem = (await response.json().catch(() => ({}))) as Problem;
     throw new Error(problem.detail ?? 'Worker 현황을 불러오지 못했습니다.');

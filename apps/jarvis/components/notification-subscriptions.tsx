@@ -19,6 +19,8 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { readWorkers, type WorkerPresence } from '@/components/worker-presence';
+import { notificationProviderState } from '@/lib/notification-operations';
 
 const eventOptions = [
   { value: 'worker.readiness_alerted', label: 'Worker 배정 지연' },
@@ -75,6 +77,7 @@ export function NotificationSubscriptions({
   const [creating, setCreating] = useState(false);
   const [workingId, setWorkingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [workers, setWorkers] = useState<WorkerPresence[]>([]);
 
   const load = useCallback(async () => {
     try {
@@ -100,6 +103,20 @@ export function NotificationSubscriptions({
   useEffect(() => {
     queueMicrotask(() => void load());
   }, [load, revision]);
+
+  const loadWorkers = useCallback(async () => {
+    try {
+      setWorkers(await readWorkers(await fetch('/api/workers')));
+    } catch {
+      setWorkers([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    queueMicrotask(() => void loadWorkers());
+    const timer = setInterval(() => void loadWorkers(), 30_000);
+    return () => clearInterval(timer);
+  }, [loadWorkers, revision]);
 
   const create = async () => {
     if (!providerKey.trim() || !destinationRef.trim() || newEvents.length === 0)
@@ -208,6 +225,18 @@ export function NotificationSubscriptions({
             목적지 참조는 Worker 환경에서 실제 URL과 Secret으로 해석되는
             불투명한 키입니다.
           </p>
+          {providerKey.trim() && (
+            <p
+              className={
+                notificationProviderState(workers, providerKey.trim()).available
+                  ? 'text-xs text-emerald-100/70'
+                  : 'text-xs text-amber-100/70'
+              }
+            >
+              {notificationProviderState(workers, providerKey.trim()).label}.
+              구독 등록은 차단하지 않습니다.
+            </p>
+          )}
           <div className="flex flex-wrap gap-3">
             {eventOptions.map((option) => (
               <label
@@ -271,6 +300,23 @@ export function NotificationSubscriptions({
                 </span>
                 <span className="truncate text-sm text-white/70">
                   {subscription.destination_ref}
+                </span>
+                <span
+                  className={
+                    notificationProviderState(
+                      workers,
+                      subscription.provider_key,
+                    ).available
+                      ? 'text-xs text-emerald-100/60'
+                      : 'text-xs text-amber-100/60'
+                  }
+                >
+                  {
+                    notificationProviderState(
+                      workers,
+                      subscription.provider_key,
+                    ).label
+                  }
                 </span>
                 <Button
                   type="button"
