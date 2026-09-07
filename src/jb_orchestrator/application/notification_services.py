@@ -153,6 +153,36 @@ class NotificationService:
             await unit_of_work.commit()
             return delivery, False
 
+    async def cancel_automatic_retry(
+        self, project_id: UUID, delivery_id: UUID, *, requested_by: str
+    ) -> tuple[NotificationDelivery, bool]:
+        async with self._unit_of_work_factory() as unit_of_work:
+            delivery = await self._project_delivery(
+                unit_of_work, project_id, delivery_id, for_update=True
+            )
+            if delivery.status in {
+                NotificationDeliveryStatus.PENDING,
+                NotificationDeliveryStatus.CLAIMED,
+            }:
+                raise ResourceConflict(
+                    "active notification delivery has no automatic retry to cancel"
+                )
+            if delivery.status is NotificationDeliveryStatus.SUCCEEDED:
+                raise ResourceConflict(
+                    "succeeded notification delivery has no automatic retry to cancel"
+                )
+            if not delivery.cancel_automatic_retry():
+                return delivery, True
+            await unit_of_work.notification_deliveries.save(delivery)
+            await self._delivery_event(
+                unit_of_work,
+                delivery,
+                "notification.delivery_automatic_retry_cancelled",
+                actor=requested_by.strip() or "anonymous",
+            )
+            await unit_of_work.commit()
+            return delivery, False
+
     async def claim_next(
         self, *, worker_id: str, provider_key: str, lease_seconds: int = 300
     ) -> NotificationDelivery | None:

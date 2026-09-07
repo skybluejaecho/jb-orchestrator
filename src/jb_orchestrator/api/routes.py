@@ -404,6 +404,29 @@ async def retry_notification_delivery(
     return NotificationDeliveryResponse.model_validate(delivery)
 
 
+@router.post(
+    "/projects/{project_id}/notification-deliveries/{delivery_id}/automatic-retry/cancel",
+    response_model=NotificationDeliveryResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def cancel_notification_delivery_automatic_retry(
+    project_id: UUID,
+    delivery_id: UUID,
+    request: Request,
+    response: Response,
+    service: NotificationServiceDependency,
+) -> NotificationDeliveryResponse:
+    principal = getattr(request.state, "principal", None)
+    delivery, replayed = await service.cancel_automatic_retry(
+        project_id,
+        delivery_id,
+        requested_by=principal.account_key if principal is not None else "anonymous",
+    )
+    if replayed:
+        response.status_code = status.HTTP_200_OK
+    return NotificationDeliveryResponse.model_validate(delivery)
+
+
 def workflow_definition_response(
     definition: WorkflowDefinition,
 ) -> WorkflowDefinitionResponse:
