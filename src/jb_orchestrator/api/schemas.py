@@ -102,7 +102,6 @@ class NotificationDeliveryResponse(BaseModel):
     idempotency_key: str
     status: NotificationDeliveryStatus
     worker_id: str | None
-    lease_token: UUID | None
     lease_expires_at: datetime | None
     result: dict[str, Any] | None
     failure_reason: str | None
