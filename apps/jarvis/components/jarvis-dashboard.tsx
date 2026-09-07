@@ -41,6 +41,7 @@ import {
 import { ExecutionInspector } from '@/components/execution-inspector';
 import { WorkerPresencePanel } from '@/components/worker-presence';
 import { WorkerReadinessPanel } from '@/components/worker-readiness';
+import { NotificationDeliveries } from '@/components/notification-deliveries';
 
 type ConnectionState = 'connecting' | 'live' | 'degraded';
 
@@ -114,6 +115,12 @@ const eventTypes = [
   'scm_publication.retried',
   'scm_publication.retry_scheduled',
   'scm_publication.automatic_retry_cancelled',
+  'notification.delivery_claimed',
+  'notification.delivery_succeeded',
+  'notification.delivery_failed',
+  'notification.delivery_retried',
+  'notification.delivery_retry_scheduled',
+  'notification.delivery_automatic_retry_cancelled',
   'budget.configured',
   'budget.limit_changed',
   'budget.reserved',
@@ -644,6 +651,15 @@ export function JarvisDashboard() {
               />
             )}
           </div>
+
+          {selectedProjectId && (
+            <NotificationDeliveries
+              key={selectedProjectId}
+              projectId={selectedProjectId}
+              revision={eventRevision}
+              onChanged={() => loadOverview(selectedProjectId)}
+            />
+          )}
 
           {selectedExecutionId && (
             <ExecutionInspector

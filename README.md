@@ -636,6 +636,17 @@ ORCH-072 adds an explicit operator control for scheduled notification retries:
 - cancellation is project-scoped, requires `notification.manage`, and is audited with its actor
 - operators can still use the existing retry endpoint to run the same Delivery immediately
 
+ORCH-073 brings notification delivery operations into Jarvis without moving execution ownership:
+
+- the project dashboard reads recent Delivery state and expandable Attempt history from the
+  Control Plane
+- failed Deliveries expose an explicit immediate retry, while scheduled retries also expose a
+  separate cancellation command
+- notification Domain Events refresh the panel; the browser never invents delivery state or runs
+  its own retry timer
+- Jarvis server routes keep the service-account token out of the browser and preserve project scope
+- the Notification Worker remains the only component that claims and sends Delivery records
+
 ## Prerequisites
 
 - Python 3.12
