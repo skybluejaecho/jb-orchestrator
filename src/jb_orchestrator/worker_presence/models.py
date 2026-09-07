@@ -14,6 +14,7 @@ class WorkerKind(StrEnum):
     WORKSPACE = "workspace"
     SCM = "scm"
     READINESS_MONITOR = "readiness_monitor"
+    NOTIFICATION = "notification"
 
 
 class WorkerLifecycleStatus(StrEnum):

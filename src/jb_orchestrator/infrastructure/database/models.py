@@ -32,7 +32,11 @@ from jb_orchestrator.domain.runs import RunStatus
 from jb_orchestrator.external_executions import ExternalExecutionStatus
 from jb_orchestrator.infrastructure.database.base import Base
 from jb_orchestrator.model_routing import ModelTier
-from jb_orchestrator.notifications import NotificationDeliveryStatus, NotificationEventType
+from jb_orchestrator.notifications import (
+    NotificationDeliveryStatus,
+    NotificationEventType,
+    NotificationFailureCode,
+)
 from jb_orchestrator.scm import (
     ScmPublicationAttemptStatus,
     ScmPublicationAttemptTrigger,
@@ -715,6 +719,12 @@ class NotificationDeliveryRecord(Base):
             name="uq_notification_delivery_subscription_event",
         ),
         Index("ix_notification_deliveries_project_status", "project_id", "status"),
+        Index(
+            "ix_notification_deliveries_provider_claim",
+            "provider_key",
+            "status",
+            "created_at",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
@@ -740,8 +750,20 @@ class NotificationDeliveryRecord(Base):
     status: Mapped[NotificationDeliveryStatus] = mapped_column(
         string_enum(NotificationDeliveryStatus, "notification_delivery_status"), nullable=False
     )
+    worker_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    lease_token: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    failure_code: Mapped[NotificationFailureCode | None] = mapped_column(
+        string_enum(NotificationFailureCode, "notification_failure_code"), nullable=True
+    )
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class WorkflowDefinitionRecord(Base):

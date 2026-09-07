@@ -80,7 +80,8 @@ def test_metadata_creates_initial_domain_schema() -> None:
         "ix_notification_subscriptions_project_enabled"
     }
     assert {index["name"] for index in inspector.get_indexes("notification_deliveries")} >= {
-        "ix_notification_deliveries_project_status"
+        "ix_notification_deliveries_project_status",
+        "ix_notification_deliveries_provider_claim",
     }
     assert {index["name"] for index in inspector.get_indexes("scm_publication_attempts")} >= {
         "ix_scm_publication_attempts_publication_id"

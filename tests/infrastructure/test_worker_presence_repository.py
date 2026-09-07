@@ -12,7 +12,7 @@ from jb_orchestrator.application import (
     WorkflowService,
 )
 from jb_orchestrator.infrastructure.database import Base, SqlAlchemyUnitOfWork
-from jb_orchestrator.notifications import NotificationEventType
+from jb_orchestrator.notifications import NotificationDeliveryStatus, NotificationEventType
 from jb_orchestrator.worker_presence import (
     WorkerKind,
     WorkerLifecycleStatus,
@@ -117,4 +117,18 @@ async def test_worker_readiness_alert_round_trips_through_database() -> None:
     assert delivery.subscription_id == subscription.id
     assert delivery.alert_id == stored.id
     assert delivery.event_type is NotificationEventType.WORKER_READINESS_ALERTED
+    claimed = await notification_service.claim_next(
+        worker_id="notification-a",
+        provider_key="webhook",
+        lease_seconds=30,
+    )
+    assert claimed is not None
+    assert claimed.lease_token is not None
+    completed = await notification_service.succeed(
+        claimed.id,
+        claimed.lease_token,
+        {"message_id": "database-message"},
+    )
+    assert completed.status is NotificationDeliveryStatus.SUCCEEDED
+    assert completed.result == {"message_id": "database-message"}
     await engine.dispose()

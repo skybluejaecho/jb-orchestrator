@@ -31,6 +31,14 @@ class NotificationSubscriptionRepository(Protocol):
 class NotificationDeliveryRepository(Protocol):
     async def try_add(self, delivery: NotificationDelivery) -> bool: ...
 
+    async def get(
+        self, delivery_id: UUID, *, for_update: bool = False
+    ) -> NotificationDelivery | None: ...
+
+    async def claim_next(
+        self, *, worker_id: str, provider_key: str, lease_seconds: int
+    ) -> NotificationDelivery | None: ...
+
     async def list_by_project(
         self,
         project_id: UUID,
@@ -38,3 +46,5 @@ class NotificationDeliveryRepository(Protocol):
         status: NotificationDeliveryStatus | None = None,
         limit: int = 100,
     ) -> list[NotificationDelivery]: ...
+
+    async def save(self, delivery: NotificationDelivery) -> None: ...

@@ -580,6 +580,18 @@ ORCH-067 adds durable notification subscriptions and a delivery outbox:
 - disabling a subscription affects future events without deleting already-persisted delivery intents
 - no network delivery occurs until a separately installed Notification Worker and provider are added
 
+ORCH-068 adds the provider-neutral Notification Worker boundary:
+
+- `jb-notification-worker` discovers installed adapters from the
+  `jb_orchestrator.notification_providers` entry-point group
+- PostgreSQL claims are provider-scoped and protected by row locks plus expiring lease tokens
+- an expired claim can be recovered by another process while stale lease holders cannot finish it
+- adapters receive an opaque destination, immutable payload, and stable idempotency key
+- successful output or a stable failure category is persisted as delivery evidence
+- provider calls are bounded by a timeout shorter than the claim lease
+- the Worker registers provider keys as capabilities in the shared process-presence ledger
+- concrete network providers remain independently installable adapters
+
 ## Prerequisites
 
 - Python 3.12
@@ -594,6 +606,7 @@ uv sync --extra dev
 docker compose up -d postgres
 uv run alembic upgrade head
 uv run jb-readiness-monitor
+uv run jb-notification-worker --list-providers
 ```
 
 원격 클라이언트를 연결하려면 먼저 서비스 계정을 발급합니다. Token 원문은 이 명령에서만
