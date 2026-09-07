@@ -17,7 +17,7 @@ from jb_orchestrator.application import (
     TaskDispatchService,
     WorkflowService,
 )
-from jb_orchestrator.domain import DomainEvent, RequestStatus, RunStatus
+from jb_orchestrator.domain import DomainEvent, Project, ProjectStatus, RequestStatus, RunStatus
 from jb_orchestrator.infrastructure.database import Base, EventRecord, SqlAlchemyUnitOfWork
 from jb_orchestrator.model_routing import (
     ModelProfile,
@@ -246,4 +246,47 @@ async def test_event_repository_reads_a_stable_cursor_order() -> None:
     assert cursor.sequence == 1
     assert [event.id for event in events] == [second.id]
     assert events[0].sequence == 3
+    await engine.dispose()
+
+
+async def test_project_repository_reads_the_next_stable_page() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    created_at = datetime(2026, 9, 7, tzinfo=UTC)
+    projects = [
+        Project(
+            id=UUID(int=index),
+            key=f"cursor-project-{index}",
+            name=f"Cursor Project {index}",
+            repository_url=f"https://github.com/example/cursor-{index}.git",
+            created_at=created_at,
+        )
+        for index in range(1, 4)
+    ]
+    archived = Project(
+        id=UUID(int=4),
+        key="cursor-archived",
+        name="Cursor Archived",
+        repository_url="https://github.com/example/cursor-archived.git",
+        status=ProjectStatus.ARCHIVED,
+        created_at=created_at,
+    )
+
+    async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+        for project in [*projects, archived]:
+            await unit_of_work.projects.add(project)
+        await unit_of_work.commit()
+
+    async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+        first_page = await unit_of_work.projects.list(status=ProjectStatus.ACTIVE, limit=2)
+        second_page = await unit_of_work.projects.list(
+            status=ProjectStatus.ACTIVE,
+            after=first_page[-1],
+            limit=2,
+        )
+
+    assert [project.id for project in first_page] == [projects[0].id, projects[1].id]
+    assert [project.id for project in second_page] == [projects[2].id]
     await engine.dispose()

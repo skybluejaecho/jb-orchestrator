@@ -82,6 +82,7 @@ class MemoryStore:
     )
     worker_instances: dict[UUID, WorkerInstance] = field(default_factory=dict)
     worker_readiness_alerts: dict[UUID, WorkerReadinessAlert] = field(default_factory=dict)
+    denied_readiness_evaluation_projects: set[UUID] = field(default_factory=set)
     service_accounts: dict[UUID, ServiceAccount] = field(default_factory=dict)
 
 
@@ -100,13 +101,28 @@ class MemoryProjectRepository:
             (project for project in self._store.projects.values() if project.key == key), None
         )
 
-    async def list(self, *, status: ProjectStatus | None = None, limit: int = 100) -> list[Project]:
+    async def list(
+        self,
+        *,
+        status: ProjectStatus | None = None,
+        after: Project | None = None,
+        limit: int = 100,
+    ) -> list[Project]:
         matches = [
             project
             for project in self._store.projects.values()
             if status is None or project.status is status
         ]
-        return sorted(matches, key=lambda value: (value.created_at, value.id), reverse=True)[:limit]
+        matches = sorted(matches, key=lambda value: value.id)
+        matches.sort(key=lambda value: value.created_at, reverse=True)
+        if after is not None:
+            matches = [
+                project
+                for project in matches
+                if project.created_at < after.created_at
+                or (project.created_at == after.created_at and project.id > after.id)
+            ]
+        return matches[:limit]
 
 
 class MemoryServiceAccountRepository:
@@ -463,6 +479,9 @@ class MemoryWorkerInstanceRepository:
 class MemoryWorkerReadinessAlertRepository:
     def __init__(self, store: MemoryStore) -> None:
         self._store = store
+
+    async def try_acquire_project_evaluation_lock(self, project_id: UUID) -> bool:
+        return project_id not in self._store.denied_readiness_evaluation_projects
 
     async def add(self, alert: WorkerReadinessAlert) -> None:
         self._store.worker_readiness_alerts[alert.id] = alert

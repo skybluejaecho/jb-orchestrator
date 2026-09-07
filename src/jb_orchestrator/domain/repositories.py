@@ -19,7 +19,11 @@ class ProjectRepository(Protocol):
     async def get_by_key(self, key: str) -> Project | None: ...
 
     async def list(
-        self, *, status: ProjectStatus | None = None, limit: int = 100
+        self,
+        *,
+        status: ProjectStatus | None = None,
+        after: Project | None = None,
+        limit: int = 100,
     ) -> list[Project]: ...
 
 
