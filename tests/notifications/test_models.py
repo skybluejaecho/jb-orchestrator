@@ -5,7 +5,10 @@ import pytest
 
 from jb_orchestrator.domain import InvalidStateTransition
 from jb_orchestrator.notifications import (
+    NotificationAttemptStatus,
+    NotificationAttemptTrigger,
     NotificationDelivery,
+    NotificationDeliveryAttempt,
     NotificationDeliveryStatus,
     NotificationEventType,
     NotificationFailureCode,
@@ -68,3 +71,29 @@ def test_failed_delivery_is_terminal() -> None:
     assert item.failure_code is NotificationFailureCode.PROVIDER_UNAVAILABLE
     with pytest.raises(InvalidStateTransition):
         item.claim("worker-2", lease_seconds=30)
+
+    item.retry()
+    assert item.status is NotificationDeliveryStatus.PENDING
+    assert item.attempt_count == 1
+    assert item.failure_code is None
+    assert item.idempotency_key
+
+
+def test_attempt_requires_owned_lease_to_finish() -> None:
+    lease_token = uuid4()
+    attempt = NotificationDeliveryAttempt(
+        delivery_id=uuid4(),
+        attempt_number=1,
+        trigger=NotificationAttemptTrigger.INITIAL,
+        worker_id="worker-1",
+        lease_token=lease_token,
+    )
+    with pytest.raises(InvalidStateTransition):
+        attempt.succeed(uuid4(), {})
+    attempt.fail(
+        lease_token,
+        "lease expired",
+        code=NotificationFailureCode.LEASE_EXPIRED,
+    )
+    assert attempt.status is NotificationAttemptStatus.FAILED
+    assert attempt.finished_at is not None

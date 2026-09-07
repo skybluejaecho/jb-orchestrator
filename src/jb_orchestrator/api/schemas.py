@@ -12,6 +12,8 @@ from jb_orchestrator.domain import ProjectStatus, RequestStatus, RunStatus
 from jb_orchestrator.external_executions import ExternalExecutionStatus
 from jb_orchestrator.model_routing import ModelTier, RequirementLevel
 from jb_orchestrator.notifications import (
+    NotificationAttemptStatus,
+    NotificationAttemptTrigger,
     NotificationDeliveryStatus,
     NotificationEventType,
     NotificationFailureCode,
@@ -110,6 +112,22 @@ class NotificationDeliveryResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None
+
+
+class NotificationDeliveryAttemptResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    delivery_id: UUID
+    attempt_number: int
+    trigger: NotificationAttemptTrigger
+    worker_id: str
+    status: NotificationAttemptStatus
+    result: dict[str, Any] | None
+    failure_reason: str | None
+    failure_code: NotificationFailureCode | None
+    started_at: datetime
+    finished_at: datetime | None
 
 
 class UserRequestCreate(BaseModel):

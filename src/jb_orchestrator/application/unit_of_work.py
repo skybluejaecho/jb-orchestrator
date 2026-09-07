@@ -19,6 +19,7 @@ from jb_orchestrator.domain.repositories import (
 from jb_orchestrator.external_executions import ExternalExecutionRepository
 from jb_orchestrator.model_routing.repositories import ModelProfileRepository
 from jb_orchestrator.notifications import (
+    NotificationDeliveryAttemptRepository,
     NotificationDeliveryRepository,
     NotificationSubscriptionRepository,
 )
@@ -100,6 +101,9 @@ class UnitOfWork(Protocol):
 
     @property
     def notification_deliveries(self) -> NotificationDeliveryRepository: ...
+
+    @property
+    def notification_delivery_attempts(self) -> NotificationDeliveryAttemptRepository: ...
 
     @property
     def workflow_definitions(self) -> WorkflowDefinitionRepository: ...

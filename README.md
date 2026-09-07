@@ -604,6 +604,19 @@ ORCH-069 adds the first installable notification provider:
 - transport, throttling, server, and rejection failures map to stable provider-neutral categories
 - the process smoke proves signed delivery and the Notification Worker presence lifecycle
 
+ORCH-070 adds durable notification attempt evidence and operator-controlled recovery:
+
+- every claim creates an immutable-numbered attempt with its worker, trigger, and timestamps
+- attempt triggers distinguish initial delivery, manual retry, and expired-lease recovery
+- lease recovery closes the abandoned attempt with a stable `lease_expired` failure before claiming
+  a new attempt
+- success and failure evidence is retained per attempt instead of being overwritten on the Delivery
+- failed Deliveries can be returned to `pending` without changing payload or idempotency identity
+- pending or claimed retry requests are idempotent while succeeded Deliveries cannot be retried
+- project-scoped retry requires `notification.manage`; attempt history remains readable to project
+  readers without exposing lease tokens
+- the process smoke proves an initial Webhook failure followed by a successful manual retry
+
 ## Prerequisites
 
 - Python 3.12

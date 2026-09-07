@@ -5,6 +5,8 @@ from uuid import UUID
 
 from jb_orchestrator.notifications.models import (
     NotificationDelivery,
+    NotificationDeliveryAttempt,
+    NotificationDeliveryClaim,
     NotificationDeliveryStatus,
     NotificationSubscription,
 )
@@ -37,7 +39,7 @@ class NotificationDeliveryRepository(Protocol):
 
     async def claim_next(
         self, *, worker_id: str, provider_key: str, lease_seconds: int
-    ) -> NotificationDelivery | None: ...
+    ) -> NotificationDeliveryClaim | None: ...
 
     async def list_by_project(
         self,
@@ -48,3 +50,17 @@ class NotificationDeliveryRepository(Protocol):
     ) -> list[NotificationDelivery]: ...
 
     async def save(self, delivery: NotificationDelivery) -> None: ...
+
+
+class NotificationDeliveryAttemptRepository(Protocol):
+    async def add(self, attempt: NotificationDeliveryAttempt) -> None: ...
+
+    async def get(
+        self, delivery_id: UUID, attempt_number: int, *, for_update: bool = False
+    ) -> NotificationDeliveryAttempt | None: ...
+
+    async def list_for_delivery(
+        self, delivery_id: UUID, *, limit: int = 100
+    ) -> list[NotificationDeliveryAttempt]: ...
+
+    async def save(self, attempt: NotificationDeliveryAttempt) -> None: ...

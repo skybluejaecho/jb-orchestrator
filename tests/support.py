@@ -28,6 +28,8 @@ from jb_orchestrator.external_executions import ExternalExecution, ExternalExecu
 from jb_orchestrator.model_routing import ModelProfile
 from jb_orchestrator.notifications import (
     NotificationDelivery,
+    NotificationDeliveryAttempt,
+    NotificationDeliveryClaim,
     NotificationDeliveryStatus,
     NotificationSubscription,
 )
@@ -90,6 +92,9 @@ class MemoryStore:
     denied_readiness_evaluation_projects: set[UUID] = field(default_factory=set)
     notification_subscriptions: dict[UUID, NotificationSubscription] = field(default_factory=dict)
     notification_deliveries: dict[UUID, NotificationDelivery] = field(default_factory=dict)
+    notification_delivery_attempts: dict[tuple[UUID, int], NotificationDeliveryAttempt] = field(
+        default_factory=dict
+    )
     service_accounts: dict[UUID, ServiceAccount] = field(default_factory=dict)
 
 
@@ -607,7 +612,7 @@ class MemoryNotificationDeliveryRepository:
 
     async def claim_next(
         self, *, worker_id: str, provider_key: str, lease_seconds: int
-    ) -> NotificationDelivery | None:
+    ) -> NotificationDeliveryClaim | None:
         now = datetime.now(UTC)
         candidates = sorted(
             (
@@ -628,8 +633,8 @@ class MemoryNotificationDeliveryRepository:
         if not candidates:
             return None
         delivery = candidates[0]
-        delivery.claim(worker_id, lease_seconds=lease_seconds, at=now)
-        return delivery
+        trigger = delivery.claim(worker_id, lease_seconds=lease_seconds, at=now)
+        return NotificationDeliveryClaim(delivery=delivery, trigger=trigger)
 
     async def list_by_project(
         self,
@@ -651,6 +656,40 @@ class MemoryNotificationDeliveryRepository:
 
     async def save(self, delivery: NotificationDelivery) -> None:
         self._store.notification_deliveries[delivery.id] = delivery
+
+
+class MemoryNotificationDeliveryAttemptRepository:
+    def __init__(self, store: MemoryStore) -> None:
+        self._store = store
+
+    async def add(self, attempt: NotificationDeliveryAttempt) -> None:
+        self._store.notification_delivery_attempts[
+            (attempt.delivery_id, attempt.attempt_number)
+        ] = attempt
+
+    async def get(
+        self, delivery_id: UUID, attempt_number: int, *, for_update: bool = False
+    ) -> NotificationDeliveryAttempt | None:
+        del for_update
+        return self._store.notification_delivery_attempts.get((delivery_id, attempt_number))
+
+    async def list_for_delivery(
+        self, delivery_id: UUID, *, limit: int = 100
+    ) -> list[NotificationDeliveryAttempt]:
+        return sorted(
+            (
+                attempt
+                for (candidate_id, _), attempt in self._store.notification_delivery_attempts.items()
+                if candidate_id == delivery_id
+            ),
+            key=lambda value: value.attempt_number,
+            reverse=True,
+        )[:limit]
+
+    async def save(self, attempt: NotificationDeliveryAttempt) -> None:
+        self._store.notification_delivery_attempts[
+            (attempt.delivery_id, attempt.attempt_number)
+        ] = attempt
 
 
 class MemoryEventRepository:
@@ -1080,6 +1119,7 @@ class MemoryUnitOfWork:
         self.worker_readiness_alerts = MemoryWorkerReadinessAlertRepository(store)
         self.notification_subscriptions = MemoryNotificationSubscriptionRepository(store)
         self.notification_deliveries = MemoryNotificationDeliveryRepository(store)
+        self.notification_delivery_attempts = MemoryNotificationDeliveryAttemptRepository(store)
         self.workflow_definitions = MemoryWorkflowDefinitionRepository(store)
         self.workflow_executions = MemoryWorkflowExecutionRepository(store)
         self.project_workflow_bindings = MemoryProjectWorkflowBindingRepository(store)
