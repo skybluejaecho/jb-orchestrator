@@ -43,6 +43,8 @@ def create_server(client: ControlPlaneClient | None = None) -> FastMCP[None]:
             "to dispatch_request. Omit both definition fields to use the project default. "
             "Use available_skills and task node keys to add exact request-scoped Skills; "
             "do not add Skills unless they help the user's stated task. "
+            "Use get_worker_readiness when READY work is not progressing; report its durable "
+            "alerts and recommended actions without claiming that a Worker was restarted. "
             "Reuse the same idempotency key when retrying a dispatch. Ask the user before "
             "approval or cancellation when their intent is not already explicit."
         ),
@@ -79,6 +81,12 @@ def create_server(client: ControlPlaneClient | None = None) -> FastMCP[None]:
         """List selectable workflows with their nodes, phase packs, skills, and default."""
 
         return await control_plane.list_workflow_options(project_id)
+
+    @server.tool(annotations=READ_ONLY)
+    async def get_worker_readiness(project_id: UUID) -> dict[str, Any]:
+        """Inspect durable READY-task alerts and execution-Worker capability coverage."""
+
+        return await control_plane.get_worker_readiness(project_id)
 
     @server.tool(annotations=RECOMMEND)
     async def recommend_workflow(

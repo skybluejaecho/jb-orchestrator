@@ -552,6 +552,14 @@ ORCH-064 moves Worker readiness evaluation into an observable server-side monito
 - Jarvis reads the resulting ledger without mutating orchestration state
 - the critical transition provides a stable source event for later notification adapters
 
+ORCH-065 gives MCP Control Agents project-scoped Worker readiness parity:
+
+- `get_worker_readiness` exposes the same PostgreSQL-backed diagnostic view used by Jarvis
+- the MCP tool is explicitly read-only and requires only the existing `project.read` permission
+- capability coverage, active and resolved alerts, severity, age, and recovery guidance remain intact
+- OpenClaw instructions use the tool when READY work is not progressing without implying remediation
+- the protocol E2E test proves the authenticated MCP-to-Control-Plane path
+
 ## Prerequisites
 
 - Python 3.12
@@ -650,8 +658,9 @@ OpenClaw 역할 분리와 Control Agent 지시문은 `docs/openclaw-control-agen
 있습니다.
 
 제공 도구는 `get_project`, `list_project_requests`, `list_project_workflows`,
-`list_workflow_options`, `dispatch_request`, `get_request`, `get_run`,
-`get_workflow_execution`, `list_artifacts`, `approve_workflow_node`, `cancel_run`입니다.
+`list_workflow_options`, `recommend_workflow`, `dispatch_request`, `get_request`, `get_run`,
+`get_workflow_execution`, `list_artifacts`, `get_worker_readiness`,
+`approve_workflow_node`, `cancel_run`입니다.
 `list_workflow_options`에서 정확한 key/version을 확인한 뒤 `dispatch_request`에 함께 전달하면
 해당 요청만 선택한 Workflow를 사용한다. 둘 다 생략하면 프로젝트 기본 binding을 사용한다.
 실제 접근 가능 범위는 token을 발급할 때 부여한 프로젝트 scope와 permission으로 제한됩니다.

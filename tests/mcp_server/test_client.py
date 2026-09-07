@@ -87,6 +87,28 @@ async def test_recommend_workflow_uses_project_scoped_control_plane_endpoint() -
     assert result == {"confidence": "high"}
 
 
+async def test_worker_readiness_uses_read_only_project_endpoint() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["request"] = request
+        return httpx.Response(200, json={"issues": [], "alerts": []})
+
+    project_id = uuid4()
+    client = ControlPlaneClient(
+        base_url="http://control.test",
+        token="secret",
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await client.get_worker_readiness(project_id)
+
+    request: httpx.Request = captured["request"]
+    assert request.method == "GET"
+    assert request.url.path == f"/v1/projects/{project_id}/worker-readiness"
+    assert result == {"issues": [], "alerts": []}
+
+
 async def test_missing_token_fails_before_network_request() -> None:
     client = ControlPlaneClient(base_url="http://control.test", token=None)
 

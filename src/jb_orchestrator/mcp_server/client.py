@@ -72,6 +72,12 @@ class ControlPlaneClient:
             await self._request("GET", f"/v1/projects/{project_id}/workflow-options"),
         )
 
+    async def get_worker_readiness(self, project_id: UUID) -> JsonObject:
+        return cast(
+            JsonObject,
+            await self._request("GET", f"/v1/projects/{project_id}/worker-readiness"),
+        )
+
     async def recommend_workflow(
         self, project_id: UUID, *, prompt: str, limit: int = 3
     ) -> JsonObject:
