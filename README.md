@@ -560,6 +560,15 @@ ORCH-065 gives MCP Control Agents project-scoped Worker readiness parity:
 - OpenClaw instructions use the tool when READY work is not progressing without implying remediation
 - the protocol E2E test proves the authenticated MCP-to-Control-Plane path
 
+ORCH-066 hardens Worker readiness monitoring for multi-process operation:
+
+- keyset pagination moves each bounded cycle to the next active-project page and wraps at the end
+- a PostgreSQL transaction advisory lock serializes alert transitions for each project
+- diagnostics and alert/event mutation share one transaction while a project lock is held
+- one project failure is recorded in the cycle result without stopping later project evaluations
+- structured cycle logs expose attempted, succeeded, failed, and remaining-page information
+- deterministic repository and runtime tests prove stable pagination, lock-safe mutation, and fair sweeps
+
 ## Prerequisites
 
 - Python 3.12
