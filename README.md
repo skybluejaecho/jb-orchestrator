@@ -627,6 +627,15 @@ ORCH-071 adds opt-in bounded automatic retry for transient notification failures
 - due retries preserve the Delivery identity and create an `automatic` Attempt
 - explicit manual retry clears any automatic schedule and remains available to operators
 
+ORCH-072 adds an explicit operator control for scheduled notification retries:
+
+- `POST /v1/projects/{project_id}/notification-deliveries/{delivery_id}/automatic-retry/cancel`
+  removes a pending automatic schedule
+- cancellation preserves the failed status, reason, classification, and complete Attempt history
+- repeated cancellation is idempotent while active and succeeded Deliveries return a conflict
+- cancellation is project-scoped, requires `notification.manage`, and is audited with its actor
+- operators can still use the existing retry endpoint to run the same Delivery immediately
+
 ## Prerequisites
 
 - Python 3.12

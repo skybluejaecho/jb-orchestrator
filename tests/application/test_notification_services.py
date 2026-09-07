@@ -7,8 +7,10 @@ from jb_orchestrator.application.exceptions import ResourceConflict
 from jb_orchestrator.application.worker_readiness_services import WorkerReadinessService
 from jb_orchestrator.domain import Project
 from jb_orchestrator.notifications import (
+    NotificationDelivery,
     NotificationDeliveryStatus,
     NotificationEventType,
+    NotificationFailureCode,
 )
 from jb_orchestrator.worker_presence import WorkerKind
 from tests.support import MemoryStore, MemoryUnitOfWork
@@ -127,3 +129,55 @@ async def test_duplicate_subscription_is_replayed_but_conflicting_filter_is_reje
                 "event_types": (NotificationEventType.WORKER_READINESS_ALERTED,),
             },
         )
+
+
+async def test_scheduled_automatic_retry_can_be_cancelled_idempotently() -> None:
+    store = MemoryStore()
+    project = Project(
+        key="notification-retry-controls",
+        name="Notification Retry Controls",
+        repository_url="https://example.com/notification-retry-controls.git",
+    )
+    store.projects[project.id] = project
+    delivery = NotificationDelivery(
+        subscription_id=project.id,
+        project_id=project.id,
+        event_id=project.id,
+        alert_id=project.id,
+        event_type=NotificationEventType.WORKER_READINESS_ALERTED,
+        provider_key="webhook",
+        destination_ref="ops",
+        payload={"message": "alert"},
+        idempotency_key="notification:retry-controls",
+    )
+    store.notification_deliveries[delivery.id] = delivery
+    service = NotificationService(lambda: MemoryUnitOfWork(store))
+    claimed = await service.claim_next(worker_id="worker-1", provider_key="webhook")
+    assert claimed is not None and claimed.lease_token is not None
+    await service.fail(
+        claimed.id,
+        claimed.lease_token,
+        "temporary outage",
+        code=NotificationFailureCode.PROVIDER_UNAVAILABLE,
+        retryable=True,
+        automatic_retry_limit=2,
+        next_attempt_at=datetime.now(UTC) + timedelta(minutes=1),
+    )
+
+    cancelled, replayed = await service.cancel_automatic_retry(
+        project.id, delivery.id, requested_by="operator"
+    )
+    repeated, repeated_replayed = await service.cancel_automatic_retry(
+        project.id, delivery.id, requested_by="operator"
+    )
+
+    assert not replayed
+    assert repeated_replayed
+    assert repeated.id == cancelled.id
+    assert cancelled.status is NotificationDeliveryStatus.FAILED
+    assert cancelled.failure_reason == "temporary outage"
+    assert cancelled.failure_retryable is True
+    assert cancelled.automatic_retry_limit == 0
+    assert cancelled.next_attempt_at is None
+    assert store.events[-1].event_type == "notification.delivery_automatic_retry_cancelled"
+    assert store.events[-1].payload["actor"] == "operator"

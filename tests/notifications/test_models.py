@@ -105,6 +105,31 @@ def test_due_retryable_failure_can_be_claimed_automatically() -> None:
     assert item.next_attempt_at is None
 
 
+def test_scheduled_automatic_retry_can_be_cancelled_without_losing_failure() -> None:
+    item = delivery()
+    now = datetime(2026, 9, 7, tzinfo=UTC)
+    item.claim("worker-1", lease_seconds=30, at=now)
+    assert item.lease_token is not None
+    item.fail(
+        item.lease_token,
+        "provider unavailable",
+        code=NotificationFailureCode.PROVIDER_UNAVAILABLE,
+        retryable=True,
+        automatic_retry_limit=2,
+        next_attempt_at=now + timedelta(minutes=1),
+        at=now,
+    )
+
+    assert item.cancel_automatic_retry(at=now + timedelta(seconds=1))
+    assert not item.cancel_automatic_retry(at=now + timedelta(seconds=2))
+    assert item.status is NotificationDeliveryStatus.FAILED
+    assert item.failure_reason == "provider unavailable"
+    assert item.failure_retryable is True
+    assert item.attempt_count == 1
+    assert item.automatic_retry_limit == 0
+    assert item.next_attempt_at is None
+
+
 def test_attempt_requires_owned_lease_to_finish() -> None:
     lease_token = uuid4()
     attempt = NotificationDeliveryAttempt(

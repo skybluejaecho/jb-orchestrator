@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 from httpx import ASGITransport, AsyncClient
 
 from jb_orchestrator.api.main import create_app
@@ -141,12 +143,17 @@ async def test_notification_delivery_attempts_and_manual_retry_api() -> None:
         claimed.lease_token,
         "provider unavailable",
         code=NotificationFailureCode.PROVIDER_UNAVAILABLE,
+        retryable=True,
+        automatic_retry_limit=2,
+        next_attempt_at=datetime.now(UTC) + timedelta(minutes=1),
     )
     app = create_app(notification_service=service, auth_enabled=False)
     base = f"/v1/projects/{project.id}/notification-deliveries/{delivery.id}"
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         attempts = await client.get(f"{base}/attempts")
+        cancelled = await client.post(f"{base}/automatic-retry/cancel")
+        repeated_cancel = await client.post(f"{base}/automatic-retry/cancel")
         retried = await client.post(f"{base}/retry")
         replayed = await client.post(f"{base}/retry")
 
@@ -154,6 +161,11 @@ async def test_notification_delivery_attempts_and_manual_retry_api() -> None:
     assert attempts.json()[0]["trigger"] == "initial"
     assert attempts.json()[0]["status"] == "failed"
     assert "lease_token" not in attempts.json()[0]
+    assert cancelled.status_code == 202
+    assert cancelled.json()["status"] == "failed"
+    assert cancelled.json()["next_attempt_at"] is None
+    assert cancelled.json()["failure_reason"] == "provider unavailable"
+    assert repeated_cancel.status_code == 200
     assert retried.status_code == 202
     assert retried.json()["status"] == "pending"
     assert replayed.status_code == 200
