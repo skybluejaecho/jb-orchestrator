@@ -79,6 +79,32 @@ def test_failed_delivery_is_terminal() -> None:
     assert item.idempotency_key
 
 
+def test_due_retryable_failure_can_be_claimed_automatically() -> None:
+    item = delivery()
+    started_at = datetime(2026, 9, 7, tzinfo=UTC)
+    item.claim("worker-1", lease_seconds=30, at=started_at)
+    assert item.lease_token is not None
+    item.fail(
+        item.lease_token,
+        "provider unavailable",
+        code=NotificationFailureCode.PROVIDER_UNAVAILABLE,
+        retryable=True,
+        automatic_retry_limit=2,
+        next_attempt_at=started_at + timedelta(seconds=30),
+        at=started_at,
+    )
+
+    with pytest.raises(InvalidStateTransition):
+        item.claim("worker-2", lease_seconds=30, at=started_at + timedelta(seconds=29))
+
+    trigger = item.claim("worker-2", lease_seconds=30, at=started_at + timedelta(seconds=30))
+    assert trigger is NotificationAttemptTrigger.AUTOMATIC
+    assert item.status is NotificationDeliveryStatus.CLAIMED
+    assert item.attempt_count == 2
+    assert item.failure_code is None
+    assert item.next_attempt_at is None
+
+
 def test_attempt_requires_owned_lease_to_finish() -> None:
     lease_token = uuid4()
     attempt = NotificationDeliveryAttempt(

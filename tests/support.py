@@ -626,6 +626,13 @@ class MemoryNotificationDeliveryRepository:
                         and delivery.lease_expires_at is not None
                         and delivery.lease_expires_at <= now
                     )
+                    or (
+                        delivery.status is NotificationDeliveryStatus.FAILED
+                        and delivery.failure_retryable is True
+                        and delivery.next_attempt_at is not None
+                        and delivery.next_attempt_at <= now
+                        and delivery.attempt_count <= delivery.automatic_retry_limit
+                    )
                 )
             ),
             key=lambda value: (value.created_at, value.id),
