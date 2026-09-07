@@ -8,8 +8,7 @@ Workflow 상태를 Control Plane API에서 읽고 프로젝트 SSE stream으로 
 Jarvis는 프로젝트 상태를 조회하고 사용자의 요청을 제출하며 명시적인 승인 결정을
 처리하고 실행을 취소하며 작업공간 검토 명령을 등록하므로 `project.read`,
 `request.dispatch`, `workflow.approve`, `run.cancel`, `workspace.manage`, `scm.publish`,
-`all_projects` 범위를
-가진 전용 서비스 계정을 사용한다.
+`notification.manage`, `all_projects` 범위를 가진 전용 서비스 계정을 사용한다.
 
 ```powershell
 uv run jb auth issue `
@@ -21,6 +20,7 @@ uv run jb auth issue `
   --permission run.cancel `
   --permission workspace.manage `
   --permission scm.publish `
+  --permission notification.manage `
   --all-projects
 
 Copy-Item apps/jarvis/.env.example apps/jarvis/.env.local
@@ -71,6 +71,10 @@ Worker를 재시작해도 PostgreSQL 원장이 재시도 시점을 결정한다.
 게시의 `시도 이력`을 펼치면 Control Plane의 시도별 원장을 최신순으로 조회한다. 최초 실행,
 수동·자동 재시도, 임대 만료 회수와 각 Worker·처리 시간·실패 분류를 표시하며 내부 임대 토큰은
 브라우저에 전달하지 않는다.
+프로젝트 알림 전송 패널은 Control Plane의 최근 Delivery와 시도별 원장을 표시한다. 실패 항목은
+같은 Delivery identity로 즉시 재시도할 수 있고, 자동 재시도가 예약된 항목은 실패 증거를 보존한
+채 예약만 취소할 수 있다. Jarvis는 알림 이벤트에 맞춰 원장을 다시 조회하며 브라우저 자체
+타이머로 전송을 실행하지 않는다. 실제 claim과 외부 전송은 계속 Notification Worker가 담당한다.
 Worker 현황판은 실행·Workspace·SCM Worker가 PostgreSQL에 기록한 process heartbeat를 30초마다
 조회한다. 온라인, heartbeat 임계값을 넘긴 응답 지연, 정상 종료를 구분하고 hostname·PID·지원
 capability·workspace scope를 표시한다. 작업 lease 상태와 Worker process 상태는 독립적으로
@@ -99,8 +103,8 @@ npm run build
 
 계약 테스트는 Control Plane을 실제로 실행하지 않고 server proxy의 인증 header, 오류 전달,
 dispatch payload, 멱등 재시도 규칙, 실행 상세·산출물·외부 실행 조회, 승인 결정, 실행 취소와
-SCM 게시 계약을 검증한다. 동일한 검사는 GitHub Actions의 `Jarvis` job에서 모든 `develop` 및
-`main` PR과 push에 실행된다.
+SCM 게시와 알림 Delivery 관찰·복구 계약을 검증한다. 동일한 검사는 GitHub Actions의 `Jarvis`
+job에서 모든 `develop` 및 `main` PR과 push에 실행된다.
 
 ## System smoke
 
@@ -110,7 +114,8 @@ SCM 게시 계약을 검증한다. 동일한 검사는 GitHub Actions의 `Jarvis
 ```powershell
 $env:JB_ENVIRONMENT = "test"
 uv run alembic upgrade head
-uv run --with-editable . --with-editable adapters/github --with-editable tools/system-smoke-executor jb system smoke
+uv run --with-editable . --with-editable adapters/github --with-editable adapters/webhook `
+  --with-editable tools/system-smoke-executor jb system smoke
 ```
 
 smoke executor는 외부 agent runtime을 호출하지 않으며 `JB_ENVIRONMENT=test`가 아니면 시작을
