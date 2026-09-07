@@ -116,3 +116,16 @@ def test_scm_publications_have_a_dedicated_write_permission() -> None:
         required_permission("POST", f"/v1/scm-publications/{execution_id}/automatic-retry/cancel")
         is ApiPermission.SCM_PUBLISH
     )
+
+
+def test_notification_subscriptions_have_a_dedicated_write_permission() -> None:
+    project_id = "00000000-0000-0000-0000-000000000000"
+    path = f"/v1/projects/{project_id}/notification-subscriptions"
+
+    assert required_permission("GET", path) is ApiPermission.PROJECT_READ
+    assert required_permission("POST", path) is ApiPermission.NOTIFICATION_MANAGE
+    assert required_permission("PATCH", f"{path}/{project_id}") is ApiPermission.NOTIFICATION_MANAGE
+    assert (
+        required_permission("GET", f"/v1/projects/{project_id}/notification-deliveries")
+        is ApiPermission.PROJECT_READ
+    )

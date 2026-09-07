@@ -14,6 +14,7 @@ from jb_orchestrator.application.budget_services import BudgetService
 from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNotFound
 from jb_orchestrator.application.external_execution_services import ExternalExecutionService
 from jb_orchestrator.application.model_services import ModelCatalogService
+from jb_orchestrator.application.notification_services import NotificationService
 from jb_orchestrator.application.phase_pack_services import PhasePackCatalogService
 from jb_orchestrator.application.project_observation_services import ProjectObservationService
 from jb_orchestrator.application.request_dispatch_services import RequestDispatchService
@@ -48,6 +49,7 @@ def create_app(
     scm_publication_service: ScmPublicationService | None = None,
     worker_presence_service: WorkerPresenceService | None = None,
     worker_readiness_service: WorkerReadinessService | None = None,
+    notification_service: NotificationService | None = None,
     auth_enabled: bool | None = None,
 ) -> FastAPI:
     """Build the API application."""
@@ -69,6 +71,7 @@ def create_app(
         or scm_publication_service is None
         or worker_presence_service is None
         or worker_readiness_service is None
+        or notification_service is None
         or (auth_enabled and security_service is None)
     ):
         session_factory = create_session_factory()
@@ -112,6 +115,8 @@ def create_app(
         worker_readiness_service = WorkerReadinessService(
             lambda: SqlAlchemyUnitOfWork(session_factory)
         )
+    if notification_service is None:
+        notification_service = NotificationService(lambda: SqlAlchemyUnitOfWork(session_factory))
     if auth_enabled and security_service is None:
         security_service = SecurityService(lambda: SqlAlchemyUnitOfWork(session_factory))
     app.state.orchestration_service = service
@@ -127,6 +132,7 @@ def create_app(
     app.state.scm_publication_service = scm_publication_service
     app.state.worker_presence_service = worker_presence_service
     app.state.worker_readiness_service = worker_readiness_service
+    app.state.notification_service = notification_service
     app.state.security_service = security_service
     app.state.auth_enabled = auth_enabled
 

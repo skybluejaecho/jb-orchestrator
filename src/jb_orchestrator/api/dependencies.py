@@ -7,6 +7,7 @@ from fastapi import Request
 from jb_orchestrator.application.budget_services import BudgetService
 from jb_orchestrator.application.external_execution_services import ExternalExecutionService
 from jb_orchestrator.application.model_services import ModelCatalogService
+from jb_orchestrator.application.notification_services import NotificationService
 from jb_orchestrator.application.phase_pack_services import PhasePackCatalogService
 from jb_orchestrator.application.project_observation_services import ProjectObservationService
 from jb_orchestrator.application.request_dispatch_services import RequestDispatchService
@@ -95,3 +96,9 @@ def get_worker_readiness_service(request: Request) -> WorkerReadinessService:
     """Return the project worker-readiness diagnostic service."""
 
     return cast(WorkerReadinessService, request.app.state.worker_readiness_service)
+
+
+def get_notification_service(request: Request) -> NotificationService:
+    """Return the project notification configuration and outbox service."""
+
+    return cast(NotificationService, request.app.state.notification_service)

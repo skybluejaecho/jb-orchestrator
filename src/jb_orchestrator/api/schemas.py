@@ -11,6 +11,10 @@ from jb_orchestrator.budgets import UsageKind
 from jb_orchestrator.domain import ProjectStatus, RequestStatus, RunStatus
 from jb_orchestrator.external_executions import ExternalExecutionStatus
 from jb_orchestrator.model_routing import ModelTier, RequirementLevel
+from jb_orchestrator.notifications import (
+    NotificationDeliveryStatus,
+    NotificationEventType,
+)
 from jb_orchestrator.scm import (
     ScmPublicationAttemptStatus,
     ScmPublicationAttemptTrigger,
@@ -49,6 +53,53 @@ class ProjectResponse(BaseModel):
     repository_url: str
     default_branch: str
     status: ProjectStatus
+    created_at: datetime
+    updated_at: datetime
+
+
+class NotificationSubscriptionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider_key: str = Field(pattern=r"^[a-z][a-z0-9._-]*$", max_length=64)
+    destination_ref: str = Field(min_length=1, max_length=255)
+    event_types: tuple[NotificationEventType, ...] = Field(min_length=1, max_length=3)
+
+
+class NotificationSubscriptionConfigure(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    event_types: tuple[NotificationEventType, ...] = Field(min_length=1, max_length=3)
+    enabled: bool
+
+
+class NotificationSubscriptionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    project_id: UUID
+    provider_key: str
+    destination_ref: str
+    event_types: tuple[NotificationEventType, ...]
+    enabled: bool
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class NotificationDeliveryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    subscription_id: UUID
+    project_id: UUID
+    event_id: UUID
+    alert_id: UUID
+    event_type: NotificationEventType
+    provider_key: str
+    destination_ref: str
+    payload: dict[str, Any]
+    idempotency_key: str
+    status: NotificationDeliveryStatus
     created_at: datetime
     updated_at: datetime
 

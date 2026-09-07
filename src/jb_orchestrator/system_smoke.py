@@ -504,6 +504,20 @@ def run_system_smoke(
                 headers=setup_headers,
                 payload={"definition_key": workflow_key, "definition_version": 1},
             )
+            notification_subscription = _request(
+                api,
+                "POST",
+                f"/v1/projects/{project['id']}/notification-subscriptions",
+                headers=setup_headers,
+                payload={
+                    "provider_key": "smoke",
+                    "destination_ref": "system-smoke-observer",
+                    "event_types": [
+                        "worker.readiness_alerted",
+                        "worker.readiness_resolved",
+                    ],
+                },
+            )
 
             jarvis_environment = base_environment | {
                 "JARVIS_CONTROL_PLANE_URL": f"http://{host}:{api_port}",
@@ -562,6 +576,21 @@ def run_system_smoke(
                 or unassigned_alerts[0].get("status") != "active"
             ):
                 raise SystemSmokeError("readiness monitor did not persist the assignment alert")
+            alerted_deliveries = _request(
+                api,
+                "GET",
+                f"/v1/projects/{project['id']}/notification-deliveries",
+                headers=setup_headers,
+            )
+            if (
+                not isinstance(alerted_deliveries, list)
+                or len(alerted_deliveries) != 1
+                or alerted_deliveries[0].get("subscription_id")
+                != notification_subscription.get("id")
+                or alerted_deliveries[0].get("event_type") != "worker.readiness_alerted"
+                or alerted_deliveries[0].get("status") != "pending"
+            ):
+                raise SystemSmokeError("readiness alert did not create a delivery intent")
             worker = subprocess.run(
                 [sys.executable, "-m", "jb_orchestrator.worker.main", "--once"],
                 cwd=project_root,
@@ -604,6 +633,19 @@ def run_system_smoke(
                 or resolved_alerts[0].get("status") != "resolved"
             ):
                 raise SystemSmokeError("readiness monitor did not resolve the assignment alert")
+            resolved_deliveries = _request(
+                api,
+                "GET",
+                f"/v1/projects/{project['id']}/notification-deliveries",
+                headers=setup_headers,
+            )
+            if not isinstance(resolved_deliveries, list) or {
+                delivery.get("event_type") for delivery in resolved_deliveries
+            } != {
+                "worker.readiness_alerted",
+                "worker.readiness_resolved",
+            }:
+                raise SystemSmokeError("readiness resolution did not create a delivery intent")
             if not awaiting["artifacts"]:
                 raise SystemSmokeError("worker completed without producing a task artifact")
             _request(

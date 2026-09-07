@@ -18,6 +18,7 @@ class ApiPermission(StrEnum):
     RUN_CANCEL = "run.cancel"
     WORKSPACE_MANAGE = "workspace.manage"
     SCM_PUBLISH = "scm.publish"
+    NOTIFICATION_MANAGE = "notification.manage"
     PROJECT_ADMIN = "project.admin"
 
 
