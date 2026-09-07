@@ -232,6 +232,8 @@ def test_system_smoke_reports_process_boundary_result(monkeypatch: MonkeyPatch) 
         "worker-readiness",
         "scm-worker",
         "github-publisher",
+        "notification-worker",
+        "webhook-notifier",
         "jarvis",
     ]
     assert payload["executions"]["approved"]["status"] == "succeeded"

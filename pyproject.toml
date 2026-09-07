@@ -53,6 +53,7 @@ pythonpath = [
   ".",
   "adapters/openclaw/src",
   "adapters/github/src",
+  "adapters/webhook/src",
   "tools/system-smoke-executor/src",
 ]
 asyncio_mode = "auto"
@@ -67,5 +68,10 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-packages = ["jb_orchestrator", "jb_openclaw_executor", "jb_github_publisher"]
-mypy_path = ["adapters/openclaw/src", "adapters/github/src"]
+packages = [
+  "jb_orchestrator",
+  "jb_openclaw_executor",
+  "jb_github_publisher",
+  "jb_webhook_notifier",
+]
+mypy_path = ["adapters/openclaw/src", "adapters/github/src", "adapters/webhook/src"]

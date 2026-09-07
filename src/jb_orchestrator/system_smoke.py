@@ -27,6 +27,7 @@ from jb_orchestrator.system_smoke_scm import (
     ScmSmokeRepository,
     prepare_scm_repository,
 )
+from jb_orchestrator.system_smoke_webhook import WebhookStub
 from jb_orchestrator.worker import ExecutorRegistry, TaskClaim
 
 SMOKE_EXECUTOR_KEY = "system-smoke"
@@ -54,6 +55,8 @@ class SystemSmokeResult:
                 "worker-readiness",
                 "scm-worker",
                 "github-publisher",
+                "notification-worker",
+                "webhook-notifier",
                 "jarvis",
             ],
             "project_id": self.project_id,
@@ -357,6 +360,36 @@ def _run_scm_worker(
         raise SystemSmokeError(f"SCM worker failed with exit code {worker.returncode}\n{output}")
 
 
+def _run_notification_worker(
+    project_root: Path,
+    environment: Mapping[str, str],
+    *,
+    timeout_seconds: float,
+) -> None:
+    worker = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "jb_orchestrator.notifications.worker_main",
+            "--once",
+            "--lease-seconds",
+            "20",
+            "--delivery-timeout",
+            "10",
+        ],
+        cwd=project_root,
+        env=dict(environment),
+        capture_output=True,
+        timeout=timeout_seconds,
+        check=False,
+    )
+    if worker.returncode != 0:
+        output = (worker.stdout + worker.stderr).decode(errors="replace")
+        raise SystemSmokeError(
+            f"notification worker failed with exit code {worker.returncode}\n{output}"
+        )
+
+
 def _run_readiness_monitor(
     project_root: Path,
     environment: Mapping[str, str],
@@ -447,6 +480,9 @@ def run_system_smoke(
             fail_first_create=True,
         )
         github_stub.__enter__()
+        webhook_secret = "system-smoke-signing-secret"
+        webhook_stub = WebhookStub(webhook_secret)
+        webhook_stub.__enter__()
         processes: list[_ManagedProcess] = []
         clients: list[httpx.Client] = []
         try:
@@ -510,7 +546,7 @@ def run_system_smoke(
                 f"/v1/projects/{project['id']}/notification-subscriptions",
                 headers=setup_headers,
                 payload={
-                    "provider_key": "smoke",
+                    "provider_key": "webhook",
                     "destination_ref": "system-smoke-observer",
                     "event_types": [
                         "worker.readiness_alerted",
@@ -646,6 +682,44 @@ def run_system_smoke(
                 "worker.readiness_resolved",
             }:
                 raise SystemSmokeError("readiness resolution did not create a delivery intent")
+            webhook_environment = base_environment | {
+                "JB_WEBHOOK_DESTINATIONS": json.dumps(
+                    {
+                        "system-smoke-observer": {
+                            "url": webhook_stub.endpoint_url,
+                            "signing_secret": webhook_secret,
+                        }
+                    }
+                ),
+                "JB_WEBHOOK_ALLOW_INSECURE_LOOPBACK": "true",
+            }
+            _run_notification_worker(
+                project_root,
+                webhook_environment,
+                timeout_seconds=timeout_seconds,
+            )
+            _run_notification_worker(
+                project_root,
+                webhook_environment,
+                timeout_seconds=timeout_seconds,
+            )
+            delivered = _request(
+                api,
+                "GET",
+                f"/v1/projects/{project['id']}/notification-deliveries",
+                headers=setup_headers,
+            )
+            if (
+                not isinstance(delivered, list)
+                or {item.get("status") for item in delivered} != {"succeeded"}
+                or any("lease_token" in item for item in delivered)
+            ):
+                raise SystemSmokeError("Notification Worker did not durably complete deliveries")
+            if {item.get("event_type") for item in webhook_stub.deliveries} != {
+                "worker.readiness_alerted",
+                "worker.readiness_resolved",
+            }:
+                raise SystemSmokeError("signed Webhook endpoint did not receive both events")
             if not awaiting["artifacts"]:
                 raise SystemSmokeError("worker completed without producing a task artifact")
             _request(
@@ -781,10 +855,13 @@ def run_system_smoke(
                 for instance in worker_instances
                 if instance.get("observed_status") == "stopped"
             }
-            if not {"execution", "scm", "readiness_monitor"}.issubset(worker_kinds):
-                raise SystemSmokeError(
-                    "execution, SCM, and readiness monitor process lifetimes were not recorded"
-                )
+            if not {
+                "execution",
+                "scm",
+                "readiness_monitor",
+                "notification",
+            }.issubset(worker_kinds):
+                raise SystemSmokeError("required Worker process lifetimes were not recorded")
 
             second = _request(
                 jarvis,
@@ -825,3 +902,4 @@ def run_system_smoke(
             for process in reversed(processes):
                 process.stop()
             github_stub.__exit__(None, None, None)
+            webhook_stub.__exit__(None, None, None)

@@ -592,6 +592,18 @@ ORCH-068 adds the provider-neutral Notification Worker boundary:
 - the Worker registers provider keys as capabilities in the shared process-presence ledger
 - concrete network providers remain independently installable adapters
 
+ORCH-069 adds the first installable notification provider:
+
+- `adapters/webhook` registers the `webhook` provider without coupling it to the core package
+- opaque destination references resolve to endpoint URLs and optional HMAC secrets only in the
+  Worker environment
+- Webhook requests carry a canonical JSON envelope, delivery metadata, and an idempotency key
+- optional `X-JB-Signature-256` protects the exact request body with HMAC-SHA256
+- production endpoints require HTTPS; insecure loopback HTTP is restricted to the test environment
+- response bodies, endpoint URLs, and signing secrets are never persisted as delivery evidence
+- transport, throttling, server, and rejection failures map to stable provider-neutral categories
+- the process smoke proves signed delivery and the Notification Worker presence lifecycle
+
 ## Prerequisites
 
 - Python 3.12
@@ -882,14 +894,15 @@ npm run build
 ```
 
 전체 로컬 경계는 반드시 비어 있는 일회용 PostgreSQL test database에서 검증합니다. 다음 명령은
-smoke 전용 executor와 GitHub publisher를 임시 설치하고 Control Plane, Worker, SCM Worker와
-Jarvis를 실제 별도 process로 실행합니다.
+smoke 전용 executor, GitHub publisher와 Webhook notifier를 임시 설치하고 Control Plane,
+Worker, SCM Worker, Notification Worker와 Jarvis를 실제 별도 process로 실행합니다.
 
 ```powershell
 $env:JB_ENVIRONMENT = "test"
 $env:JB_DATABASE_URL = "postgresql+asyncpg://jb_orchestrator:jb_orchestrator@localhost:5432/jb_orchestrator"
 uv run alembic upgrade head
-uv run --with-editable . --with-editable adapters/github --with-editable tools/system-smoke-executor jb system smoke
+uv run --with-editable . --with-editable adapters/github --with-editable adapters/webhook `
+  --with-editable tools/system-smoke-executor jb system smoke
 ```
 
 이 명령은 지정한 database에 고유한 smoke project와 service account를 생성하므로 개발 또는
