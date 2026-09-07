@@ -423,7 +423,7 @@ def run_system_smoke(
     *,
     api_port: int = 18080,
     jarvis_port: int = 13000,
-    timeout_seconds: float = 30.0,
+    timeout_seconds: float = 60.0,
 ) -> SystemSmokeResult:
     """Exercise real process and HTTP boundaries against a disposable test database."""
 

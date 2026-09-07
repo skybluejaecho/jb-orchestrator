@@ -207,8 +207,10 @@ def test_mcp_smoke_reports_stdio_runtime_inventory(monkeypatch: MonkeyPatch) -> 
 
 def test_system_smoke_reports_process_boundary_result(monkeypatch: MonkeyPatch) -> None:
     project_id = "00000000-0000-0000-0000-000000000001"
+    captured: dict[str, object] = {}
 
-    def fake_smoke(*_: object, **__: object) -> SystemSmokeResult:
+    def fake_smoke(*_: object, **options: object) -> SystemSmokeResult:
+        captured.update(options)
         return SystemSmokeResult(
             project_id=project_id,
             completed_execution_id="00000000-0000-0000-0000-000000000002",
@@ -222,6 +224,7 @@ def test_system_smoke_reports_process_boundary_result(monkeypatch: MonkeyPatch) 
     result = runner.invoke(app, ["system", "smoke"])
 
     assert result.exit_code == 0
+    assert captured["timeout_seconds"] == 60.0
     payload = json.loads(result.stdout)
     assert payload["status"] == "ready"
     assert payload["components"] == [
