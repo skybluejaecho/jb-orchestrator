@@ -56,7 +56,10 @@ def delivery_from_record(record: NotificationDeliveryRecord) -> NotificationDeli
         result=record.result,
         failure_reason=record.failure_reason,
         failure_code=record.failure_code,
+        failure_retryable=record.failure_retryable,
         attempt_count=record.attempt_count,
+        automatic_retry_limit=record.automatic_retry_limit,
+        next_attempt_at=record.next_attempt_at,
         created_at=record.created_at,
         updated_at=record.updated_at,
         completed_at=record.completed_at,
@@ -75,6 +78,7 @@ def attempt_from_record(record: NotificationDeliveryAttemptRecord) -> Notificati
         result=record.result,
         failure_reason=record.failure_reason,
         failure_code=record.failure_code,
+        failure_retryable=record.failure_retryable,
         started_at=record.started_at,
         finished_at=record.finished_at,
     )
@@ -221,6 +225,16 @@ class SqlAlchemyNotificationDeliveryRepository:
                         (NotificationDeliveryRecord.status == NotificationDeliveryStatus.CLAIMED)
                         & (NotificationDeliveryRecord.lease_expires_at <= now)
                     ),
+                    (
+                        (NotificationDeliveryRecord.status == NotificationDeliveryStatus.FAILED)
+                        & (NotificationDeliveryRecord.failure_retryable.is_(True))
+                        & (NotificationDeliveryRecord.next_attempt_at.is_not(None))
+                        & (NotificationDeliveryRecord.next_attempt_at <= now)
+                        & (
+                            NotificationDeliveryRecord.attempt_count
+                            <= NotificationDeliveryRecord.automatic_retry_limit
+                        )
+                    ),
                 ),
             )
             .order_by(NotificationDeliveryRecord.created_at, NotificationDeliveryRecord.id)
@@ -281,7 +295,10 @@ class SqlAlchemyNotificationDeliveryRepository:
             "result": delivery.result,
             "failure_reason": delivery.failure_reason,
             "failure_code": delivery.failure_code,
+            "failure_retryable": delivery.failure_retryable,
             "attempt_count": delivery.attempt_count,
+            "automatic_retry_limit": delivery.automatic_retry_limit,
+            "next_attempt_at": delivery.next_attempt_at,
             "created_at": delivery.created_at,
             "updated_at": delivery.updated_at,
             "completed_at": delivery.completed_at,
@@ -345,6 +362,7 @@ class SqlAlchemyNotificationDeliveryAttemptRepository:
             "result": attempt.result,
             "failure_reason": attempt.failure_reason,
             "failure_code": attempt.failure_code,
+            "failure_retryable": attempt.failure_retryable,
             "started_at": attempt.started_at,
             "finished_at": attempt.finished_at,
         }
