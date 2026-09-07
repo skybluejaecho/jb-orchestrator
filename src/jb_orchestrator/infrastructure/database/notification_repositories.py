@@ -1,8 +1,9 @@
 """SQLAlchemy persistence for notification subscriptions and deliveries."""
 
+from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,8 +47,16 @@ def delivery_from_record(record: NotificationDeliveryRecord) -> NotificationDeli
         payload=record.payload,
         idempotency_key=record.idempotency_key,
         status=record.status,
+        worker_id=record.worker_id,
+        lease_token=record.lease_token,
+        lease_expires_at=record.lease_expires_at,
+        result=record.result,
+        failure_reason=record.failure_reason,
+        failure_code=record.failure_code,
+        attempt_count=record.attempt_count,
         created_at=record.created_at,
         updated_at=record.updated_at,
+        completed_at=record.completed_at,
     )
 
 
@@ -167,6 +176,45 @@ class SqlAlchemyNotificationDeliveryRepository:
             raise RuntimeError(f"unsupported notification database: {dialect_name}")
         return inserted_id is not None
 
+    async def get(
+        self, delivery_id: UUID, *, for_update: bool = False
+    ) -> NotificationDelivery | None:
+        statement = select(NotificationDeliveryRecord).where(
+            NotificationDeliveryRecord.id == delivery_id
+        )
+        if for_update:
+            statement = statement.with_for_update().execution_options(populate_existing=True)
+        record = await self._session.scalar(statement)
+        return delivery_from_record(record) if record is not None else None
+
+    async def claim_next(
+        self, *, worker_id: str, provider_key: str, lease_seconds: int
+    ) -> NotificationDelivery | None:
+        now = datetime.now(UTC)
+        record = await self._session.scalar(
+            select(NotificationDeliveryRecord)
+            .where(
+                NotificationDeliveryRecord.provider_key == provider_key,
+                or_(
+                    NotificationDeliveryRecord.status == NotificationDeliveryStatus.PENDING,
+                    (
+                        (NotificationDeliveryRecord.status == NotificationDeliveryStatus.CLAIMED)
+                        & (NotificationDeliveryRecord.lease_expires_at <= now)
+                    ),
+                ),
+            )
+            .order_by(NotificationDeliveryRecord.created_at, NotificationDeliveryRecord.id)
+            .limit(1)
+            .with_for_update(skip_locked=True)
+            .execution_options(populate_existing=True)
+        )
+        if record is None:
+            return None
+        delivery = delivery_from_record(record)
+        delivery.claim(worker_id, lease_seconds=lease_seconds, at=now)
+        self._update(record, delivery)
+        return delivery
+
     async def list_by_project(
         self,
         project_id: UUID,
@@ -187,6 +235,12 @@ class SqlAlchemyNotificationDeliveryRepository:
         )
         return [delivery_from_record(record) for record in records]
 
+    async def save(self, delivery: NotificationDelivery) -> None:
+        record = await self._session.get(NotificationDeliveryRecord, delivery.id)
+        if record is None:
+            raise LookupError(f"notification delivery not found: {delivery.id}")
+        self._update(record, delivery)
+
     @staticmethod
     def _values(delivery: NotificationDelivery) -> dict[str, object]:
         return {
@@ -201,6 +255,20 @@ class SqlAlchemyNotificationDeliveryRepository:
             "payload": delivery.payload,
             "idempotency_key": delivery.idempotency_key,
             "status": delivery.status,
+            "worker_id": delivery.worker_id,
+            "lease_token": delivery.lease_token,
+            "lease_expires_at": delivery.lease_expires_at,
+            "result": delivery.result,
+            "failure_reason": delivery.failure_reason,
+            "failure_code": delivery.failure_code,
+            "attempt_count": delivery.attempt_count,
             "created_at": delivery.created_at,
             "updated_at": delivery.updated_at,
+            "completed_at": delivery.completed_at,
         }
+
+    @classmethod
+    def _update(cls, record: NotificationDeliveryRecord, delivery: NotificationDelivery) -> None:
+        for key, value in cls._values(delivery).items():
+            if key != "id":
+                setattr(record, key, value)

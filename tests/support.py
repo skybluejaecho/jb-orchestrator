@@ -2,7 +2,7 @@
 
 from collections.abc import Collection
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import UTC, datetime
 from types import TracebackType
 from typing import Self
 from uuid import UUID
@@ -599,6 +599,38 @@ class MemoryNotificationDeliveryRepository:
         self._store.notification_deliveries[delivery.id] = delivery
         return True
 
+    async def get(
+        self, delivery_id: UUID, *, for_update: bool = False
+    ) -> NotificationDelivery | None:
+        del for_update
+        return self._store.notification_deliveries.get(delivery_id)
+
+    async def claim_next(
+        self, *, worker_id: str, provider_key: str, lease_seconds: int
+    ) -> NotificationDelivery | None:
+        now = datetime.now(UTC)
+        candidates = sorted(
+            (
+                delivery
+                for delivery in self._store.notification_deliveries.values()
+                if delivery.provider_key == provider_key
+                and (
+                    delivery.status is NotificationDeliveryStatus.PENDING
+                    or (
+                        delivery.status is NotificationDeliveryStatus.CLAIMED
+                        and delivery.lease_expires_at is not None
+                        and delivery.lease_expires_at <= now
+                    )
+                )
+            ),
+            key=lambda value: (value.created_at, value.id),
+        )
+        if not candidates:
+            return None
+        delivery = candidates[0]
+        delivery.claim(worker_id, lease_seconds=lease_seconds, at=now)
+        return delivery
+
     async def list_by_project(
         self,
         project_id: UUID,
@@ -616,6 +648,9 @@ class MemoryNotificationDeliveryRepository:
             key=lambda value: (value.created_at, value.id),
             reverse=True,
         )[:limit]
+
+    async def save(self, delivery: NotificationDelivery) -> None:
+        self._store.notification_deliveries[delivery.id] = delivery
 
 
 class MemoryEventRepository:

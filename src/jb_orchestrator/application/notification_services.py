@@ -1,6 +1,7 @@
 """Application services for notification subscriptions and delivery intents."""
 
 from collections.abc import Callable
+from typing import Any
 from uuid import UUID
 
 from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNotFound
@@ -10,6 +11,7 @@ from jb_orchestrator.notifications import (
     NotificationDelivery,
     NotificationDeliveryStatus,
     NotificationEventType,
+    NotificationFailureCode,
     NotificationSubscription,
 )
 
@@ -113,6 +115,69 @@ class NotificationService:
                 limit=limit,
             )
 
+    async def claim_next(
+        self, *, worker_id: str, provider_key: str, lease_seconds: int = 300
+    ) -> NotificationDelivery | None:
+        async with self._unit_of_work_factory() as unit_of_work:
+            delivery = await unit_of_work.notification_deliveries.claim_next(
+                worker_id=worker_id,
+                provider_key=provider_key,
+                lease_seconds=lease_seconds,
+            )
+            if delivery is None:
+                return None
+            await self._delivery_event(unit_of_work, delivery, "notification.delivery_claimed")
+            await unit_of_work.commit()
+            return delivery
+
+    async def succeed(
+        self, delivery_id: UUID, lease_token: UUID, result: dict[str, Any]
+    ) -> NotificationDelivery:
+        return await self._finish(delivery_id, lease_token, result=result)
+
+    async def fail(
+        self,
+        delivery_id: UUID,
+        lease_token: UUID,
+        reason: str,
+        *,
+        code: NotificationFailureCode = NotificationFailureCode.UNEXPECTED,
+    ) -> NotificationDelivery:
+        return await self._finish(
+            delivery_id,
+            lease_token,
+            failure_reason=reason,
+            failure_code=code,
+        )
+
+    async def _finish(
+        self,
+        delivery_id: UUID,
+        lease_token: UUID,
+        *,
+        result: dict[str, Any] | None = None,
+        failure_reason: str | None = None,
+        failure_code: NotificationFailureCode | None = None,
+    ) -> NotificationDelivery:
+        async with self._unit_of_work_factory() as unit_of_work:
+            delivery = await unit_of_work.notification_deliveries.get(delivery_id, for_update=True)
+            if delivery is None:
+                raise ResourceNotFound(f"notification delivery not found: {delivery_id}")
+            if failure_reason is None:
+                delivery.succeed(lease_token, result or {})
+                event_type = "notification.delivery_succeeded"
+            else:
+                delivery.fail(
+                    lease_token,
+                    failure_reason,
+                    code=failure_code or NotificationFailureCode.UNEXPECTED,
+                )
+                event_type = "notification.delivery_failed"
+            await unit_of_work.notification_deliveries.save(delivery)
+            await self._delivery_event(unit_of_work, delivery, event_type)
+            await unit_of_work.commit()
+            return delivery
+
     @staticmethod
     def _subscription_event(
         subscription: NotificationSubscription,
@@ -132,6 +197,32 @@ class NotificationService:
                 "enabled": subscription.enabled,
                 "actor": (actor or subscription.created_by).strip() or "anonymous",
             },
+        )
+
+    @staticmethod
+    async def _delivery_event(
+        unit_of_work: UnitOfWork,
+        delivery: NotificationDelivery,
+        event_type: str,
+    ) -> None:
+        await unit_of_work.events.append(
+            DomainEvent(
+                aggregate_type="notification_delivery",
+                aggregate_id=delivery.id,
+                event_type=event_type,
+                payload={
+                    "project_id": str(delivery.project_id),
+                    "provider_key": delivery.provider_key,
+                    "event_type": delivery.event_type.value,
+                    "status": delivery.status.value,
+                    "worker_id": delivery.worker_id,
+                    "attempt_count": delivery.attempt_count,
+                    "failure_reason": delivery.failure_reason,
+                    "failure_code": (
+                        delivery.failure_code.value if delivery.failure_code else None
+                    ),
+                },
+            )
         )
 
 

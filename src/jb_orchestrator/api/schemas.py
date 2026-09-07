@@ -14,6 +14,7 @@ from jb_orchestrator.model_routing import ModelTier, RequirementLevel
 from jb_orchestrator.notifications import (
     NotificationDeliveryStatus,
     NotificationEventType,
+    NotificationFailureCode,
 )
 from jb_orchestrator.scm import (
     ScmPublicationAttemptStatus,
@@ -100,8 +101,16 @@ class NotificationDeliveryResponse(BaseModel):
     payload: dict[str, Any]
     idempotency_key: str
     status: NotificationDeliveryStatus
+    worker_id: str | None
+    lease_token: UUID | None
+    lease_expires_at: datetime | None
+    result: dict[str, Any] | None
+    failure_reason: str | None
+    failure_code: NotificationFailureCode | None
+    attempt_count: int
     created_at: datetime
     updated_at: datetime
+    completed_at: datetime | None
 
 
 class UserRequestCreate(BaseModel):
