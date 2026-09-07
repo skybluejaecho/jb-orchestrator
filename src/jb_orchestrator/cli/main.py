@@ -23,6 +23,7 @@ from jb_orchestrator.cli.bundles import (
 from jb_orchestrator.cli.starter import StarterKitError, initialize_starter_kit
 from jb_orchestrator.config import get_settings
 from jb_orchestrator.infrastructure.database import SqlAlchemyUnitOfWork, create_session_factory
+from jb_orchestrator.release_check import ReleaseCheckError, run_release_check
 from jb_orchestrator.security import ApiPermission
 from jb_orchestrator.skills.materialization import (
     SkillMaterializationError,
@@ -335,6 +336,36 @@ def smoke_test_local_system(
         )
     except SystemSmokeError as exc:
         typer.echo(f"system smoke failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    echo_json(result.as_dict())
+
+
+@system_app.command("release-check")
+def check_release_readiness(
+    project_path: Annotated[
+        Path | None, typer.Option(help="Repository root containing all release surfaces.")
+    ] = None,
+    include_system_smoke: Annotated[
+        bool,
+        typer.Option(
+            "--include-system-smoke",
+            help="Also migrate a disposable test database and run the process-level smoke.",
+        ),
+    ] = False,
+    timeout_seconds: Annotated[
+        float, typer.Option(help="Maximum duration allowed for each individual check.")
+    ] = 900.0,
+) -> None:
+    """Run the reproducible local release-readiness gate."""
+
+    try:
+        result = run_release_check(
+            (project_path or Path.cwd()).resolve(),
+            include_system_smoke=include_system_smoke,
+            timeout_seconds=timeout_seconds,
+        )
+    except ReleaseCheckError as exc:
+        typer.echo(f"release check failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     echo_json(result.as_dict())
 
