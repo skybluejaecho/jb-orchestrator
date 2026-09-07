@@ -67,6 +67,10 @@ def test_metadata_creates_initial_domain_schema() -> None:
         "ix_worker_instances_status_seen",
         "ix_worker_instances_worker_id",
     }
+    worker_kind = next(
+        column for column in inspector.get_columns("worker_instances") if column["name"] == "kind"
+    )
+    assert worker_kind["type"].length == 32
     assert {index["name"] for index in inspector.get_indexes("worker_readiness_alerts")} >= {
         "ix_worker_readiness_alert_project_status"
     }

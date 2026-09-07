@@ -19,6 +19,12 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     with op.batch_alter_table("worker_instances") as batch_op:
         batch_op.drop_constraint("worker_kind", type_="check")
+        batch_op.alter_column(
+            "kind",
+            existing_type=sa.String(length=9),
+            type_=sa.String(length=32),
+            existing_nullable=False,
+        )
         batch_op.create_check_constraint(
             "worker_kind",
             "kind IN ('execution', 'workspace', 'scm', 'readiness_monitor')",
@@ -31,9 +37,16 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_column("worker_readiness_alerts", "critical_at")
+    op.execute("DELETE FROM worker_instances WHERE kind = 'readiness_monitor'")
     with op.batch_alter_table("worker_instances") as batch_op:
         batch_op.drop_constraint("worker_kind", type_="check")
         batch_op.create_check_constraint(
             "worker_kind",
             "kind IN ('execution', 'workspace', 'scm')",
+        )
+        batch_op.alter_column(
+            "kind",
+            existing_type=sa.String(length=32),
+            type_=sa.String(length=9),
+            existing_nullable=False,
         )
