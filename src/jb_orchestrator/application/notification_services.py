@@ -1,6 +1,7 @@
 """Application services for notification subscriptions and delivery intents."""
 
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -8,7 +9,10 @@ from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNot
 from jb_orchestrator.application.unit_of_work import UnitOfWork
 from jb_orchestrator.domain import DomainEvent
 from jb_orchestrator.notifications import (
+    NotificationAttemptStatus,
+    NotificationAttemptTrigger,
     NotificationDelivery,
+    NotificationDeliveryAttempt,
     NotificationDeliveryStatus,
     NotificationEventType,
     NotificationFailureCode,
@@ -115,18 +119,84 @@ class NotificationService:
                 limit=limit,
             )
 
+    async def list_attempts(
+        self, project_id: UUID, delivery_id: UUID, *, limit: int = 100
+    ) -> list[NotificationDeliveryAttempt]:
+        async with self._unit_of_work_factory() as unit_of_work:
+            await self._project_delivery(unit_of_work, project_id, delivery_id)
+            return await unit_of_work.notification_delivery_attempts.list_for_delivery(
+                delivery_id, limit=limit
+            )
+
+    async def retry(
+        self, project_id: UUID, delivery_id: UUID, *, requested_by: str
+    ) -> tuple[NotificationDelivery, bool]:
+        async with self._unit_of_work_factory() as unit_of_work:
+            delivery = await self._project_delivery(
+                unit_of_work, project_id, delivery_id, for_update=True
+            )
+            if delivery.status in {
+                NotificationDeliveryStatus.PENDING,
+                NotificationDeliveryStatus.CLAIMED,
+            }:
+                return delivery, True
+            if delivery.status is NotificationDeliveryStatus.SUCCEEDED:
+                raise ResourceConflict("succeeded notification delivery cannot be retried")
+            delivery.retry()
+            await unit_of_work.notification_deliveries.save(delivery)
+            await self._delivery_event(
+                unit_of_work,
+                delivery,
+                "notification.delivery_retried",
+                actor=requested_by.strip() or "anonymous",
+            )
+            await unit_of_work.commit()
+            return delivery, False
+
     async def claim_next(
         self, *, worker_id: str, provider_key: str, lease_seconds: int = 300
     ) -> NotificationDelivery | None:
         async with self._unit_of_work_factory() as unit_of_work:
-            delivery = await unit_of_work.notification_deliveries.claim_next(
+            claim = await unit_of_work.notification_deliveries.claim_next(
                 worker_id=worker_id,
                 provider_key=provider_key,
                 lease_seconds=lease_seconds,
             )
-            if delivery is None:
+            if claim is None:
                 return None
-            await self._delivery_event(unit_of_work, delivery, "notification.delivery_claimed")
+            delivery = claim.delivery
+            if delivery.lease_token is None:  # pragma: no cover - domain invariant
+                raise RuntimeError("claimed notification delivery has no lease token")
+            if claim.trigger is NotificationAttemptTrigger.LEASE_RECOVERY:
+                previous = await unit_of_work.notification_delivery_attempts.get(
+                    delivery.id,
+                    delivery.attempt_count - 1,
+                    for_update=True,
+                )
+                if previous is not None and previous.status is NotificationAttemptStatus.CLAIMED:
+                    previous.fail(
+                        previous.lease_token,
+                        "notification delivery lease expired before completion",
+                        code=NotificationFailureCode.LEASE_EXPIRED,
+                        at=delivery.updated_at,
+                    )
+                    await unit_of_work.notification_delivery_attempts.save(previous)
+            await unit_of_work.notification_delivery_attempts.add(
+                NotificationDeliveryAttempt(
+                    delivery_id=delivery.id,
+                    attempt_number=delivery.attempt_count,
+                    trigger=claim.trigger,
+                    worker_id=delivery.worker_id or worker_id,
+                    lease_token=delivery.lease_token,
+                    started_at=delivery.updated_at,
+                )
+            )
+            await self._delivery_event(
+                unit_of_work,
+                delivery,
+                "notification.delivery_claimed",
+                attempt_trigger=claim.trigger,
+            )
             await unit_of_work.commit()
             return delivery
 
@@ -163,17 +233,42 @@ class NotificationService:
             delivery = await unit_of_work.notification_deliveries.get(delivery_id, for_update=True)
             if delivery is None:
                 raise ResourceNotFound(f"notification delivery not found: {delivery_id}")
+            attempt = await unit_of_work.notification_delivery_attempts.get(
+                delivery.id, delivery.attempt_count, for_update=True
+            )
+            if attempt is None:
+                if delivery.worker_id is None:
+                    raise ResourceConflict("claimed notification delivery has no worker")
+                attempt = NotificationDeliveryAttempt(
+                    delivery_id=delivery.id,
+                    attempt_number=delivery.attempt_count,
+                    trigger=NotificationAttemptTrigger.LEASE_RECOVERY,
+                    worker_id=delivery.worker_id,
+                    lease_token=lease_token,
+                    started_at=delivery.updated_at,
+                )
+                await unit_of_work.notification_delivery_attempts.add(attempt)
+            finished_at = datetime.now(UTC)
             if failure_reason is None:
-                delivery.succeed(lease_token, result or {})
+                delivery.succeed(lease_token, result or {}, at=finished_at)
+                attempt.succeed(lease_token, result or {}, at=finished_at)
                 event_type = "notification.delivery_succeeded"
             else:
                 delivery.fail(
                     lease_token,
                     failure_reason,
                     code=failure_code or NotificationFailureCode.UNEXPECTED,
+                    at=finished_at,
+                )
+                attempt.fail(
+                    lease_token,
+                    failure_reason,
+                    code=failure_code or NotificationFailureCode.UNEXPECTED,
+                    at=finished_at,
                 )
                 event_type = "notification.delivery_failed"
             await unit_of_work.notification_deliveries.save(delivery)
+            await unit_of_work.notification_delivery_attempts.save(attempt)
             await self._delivery_event(unit_of_work, delivery, event_type)
             await unit_of_work.commit()
             return delivery
@@ -204,26 +299,49 @@ class NotificationService:
         unit_of_work: UnitOfWork,
         delivery: NotificationDelivery,
         event_type: str,
+        *,
+        actor: str | None = None,
+        attempt_trigger: NotificationAttemptTrigger | None = None,
     ) -> None:
+        payload: dict[str, Any] = {
+            "project_id": str(delivery.project_id),
+            "provider_key": delivery.provider_key,
+            "event_type": delivery.event_type.value,
+            "status": delivery.status.value,
+            "worker_id": delivery.worker_id,
+            "attempt_count": delivery.attempt_count,
+            "failure_reason": delivery.failure_reason,
+            "failure_code": delivery.failure_code.value if delivery.failure_code else None,
+        }
+        if actor is not None:
+            payload["actor"] = actor
+        if attempt_trigger is not None:
+            payload["attempt_trigger"] = attempt_trigger.value
         await unit_of_work.events.append(
             DomainEvent(
                 aggregate_type="notification_delivery",
                 aggregate_id=delivery.id,
                 event_type=event_type,
-                payload={
-                    "project_id": str(delivery.project_id),
-                    "provider_key": delivery.provider_key,
-                    "event_type": delivery.event_type.value,
-                    "status": delivery.status.value,
-                    "worker_id": delivery.worker_id,
-                    "attempt_count": delivery.attempt_count,
-                    "failure_reason": delivery.failure_reason,
-                    "failure_code": (
-                        delivery.failure_code.value if delivery.failure_code else None
-                    ),
-                },
+                payload=payload,
             )
         )
+
+    @staticmethod
+    async def _project_delivery(
+        unit_of_work: UnitOfWork,
+        project_id: UUID,
+        delivery_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> NotificationDelivery:
+        if await unit_of_work.projects.get(project_id) is None:
+            raise ResourceNotFound(f"project not found: {project_id}")
+        delivery = await unit_of_work.notification_deliveries.get(
+            delivery_id, for_update=for_update
+        )
+        if delivery is None or delivery.project_id != project_id:
+            raise ResourceNotFound(f"notification delivery not found: {delivery_id}")
+        return delivery
 
 
 async def enqueue_notification_deliveries(

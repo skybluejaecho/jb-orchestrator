@@ -25,6 +25,7 @@ from jb_orchestrator.infrastructure.database.models import (
     ExternalExecutionRecord,
     ModelProfileRecord,
     NodeExecutionRecord,
+    NotificationDeliveryAttemptRecord,
     NotificationDeliveryRecord,
     NotificationSubscriptionRecord,
     PhasePackDefinitionRecord,
@@ -46,6 +47,7 @@ from jb_orchestrator.infrastructure.database.models import (
     WorkspaceOperationRecord,
 )
 from jb_orchestrator.infrastructure.database.notification_repositories import (
+    SqlAlchemyNotificationDeliveryAttemptRepository,
     SqlAlchemyNotificationDeliveryRepository,
     SqlAlchemyNotificationSubscriptionRepository,
 )
@@ -93,6 +95,7 @@ __all__ = [
     "ExternalExecutionRecord",
     "ModelProfileRecord",
     "NodeExecutionRecord",
+    "NotificationDeliveryAttemptRecord",
     "NotificationDeliveryRecord",
     "NotificationSubscriptionRecord",
     "PhasePackDefinitionRecord",
@@ -109,6 +112,7 @@ __all__ = [
     "SqlAlchemyEventRepository",
     "SqlAlchemyExternalExecutionRepository",
     "SqlAlchemyModelProfileRepository",
+    "SqlAlchemyNotificationDeliveryAttemptRepository",
     "SqlAlchemyNotificationDeliveryRepository",
     "SqlAlchemyNotificationSubscriptionRepository",
     "SqlAlchemyPhasePackRepository",

@@ -24,6 +24,7 @@ def test_metadata_creates_initial_domain_schema() -> None:
         "model_profiles",
         "node_executions",
         "notification_deliveries",
+        "notification_delivery_attempts",
         "notification_subscriptions",
         "phase_pack_definitions",
         "project_workflow_bindings",
@@ -82,6 +83,9 @@ def test_metadata_creates_initial_domain_schema() -> None:
     assert {index["name"] for index in inspector.get_indexes("notification_deliveries")} >= {
         "ix_notification_deliveries_project_status",
         "ix_notification_deliveries_provider_claim",
+    }
+    assert {index["name"] for index in inspector.get_indexes("notification_delivery_attempts")} >= {
+        "ix_notification_delivery_attempts_delivery"
     }
     assert {index["name"] for index in inspector.get_indexes("scm_publication_attempts")} >= {
         "ix_scm_publication_attempts_publication_id"

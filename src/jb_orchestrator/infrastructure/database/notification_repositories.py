@@ -9,11 +9,14 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jb_orchestrator.infrastructure.database.models import (
+    NotificationDeliveryAttemptRecord,
     NotificationDeliveryRecord,
     NotificationSubscriptionRecord,
 )
 from jb_orchestrator.notifications import (
     NotificationDelivery,
+    NotificationDeliveryAttempt,
+    NotificationDeliveryClaim,
     NotificationDeliveryStatus,
     NotificationEventType,
     NotificationSubscription,
@@ -57,6 +60,23 @@ def delivery_from_record(record: NotificationDeliveryRecord) -> NotificationDeli
         created_at=record.created_at,
         updated_at=record.updated_at,
         completed_at=record.completed_at,
+    )
+
+
+def attempt_from_record(record: NotificationDeliveryAttemptRecord) -> NotificationDeliveryAttempt:
+    return NotificationDeliveryAttempt(
+        id=record.id,
+        delivery_id=record.delivery_id,
+        attempt_number=record.attempt_number,
+        trigger=record.trigger,
+        worker_id=record.worker_id,
+        lease_token=record.lease_token,
+        status=record.status,
+        result=record.result,
+        failure_reason=record.failure_reason,
+        failure_code=record.failure_code,
+        started_at=record.started_at,
+        finished_at=record.finished_at,
     )
 
 
@@ -189,7 +209,7 @@ class SqlAlchemyNotificationDeliveryRepository:
 
     async def claim_next(
         self, *, worker_id: str, provider_key: str, lease_seconds: int
-    ) -> NotificationDelivery | None:
+    ) -> NotificationDeliveryClaim | None:
         now = datetime.now(UTC)
         record = await self._session.scalar(
             select(NotificationDeliveryRecord)
@@ -211,9 +231,9 @@ class SqlAlchemyNotificationDeliveryRepository:
         if record is None:
             return None
         delivery = delivery_from_record(record)
-        delivery.claim(worker_id, lease_seconds=lease_seconds, at=now)
+        trigger = delivery.claim(worker_id, lease_seconds=lease_seconds, at=now)
         self._update(record, delivery)
-        return delivery
+        return NotificationDeliveryClaim(delivery=delivery, trigger=trigger)
 
     async def list_by_project(
         self,
@@ -272,3 +292,59 @@ class SqlAlchemyNotificationDeliveryRepository:
         for key, value in cls._values(delivery).items():
             if key != "id":
                 setattr(record, key, value)
+
+
+class SqlAlchemyNotificationDeliveryAttemptRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, attempt: NotificationDeliveryAttempt) -> None:
+        self._session.add(NotificationDeliveryAttemptRecord(**self._values(attempt)))
+
+    async def get(
+        self, delivery_id: UUID, attempt_number: int, *, for_update: bool = False
+    ) -> NotificationDeliveryAttempt | None:
+        statement = select(NotificationDeliveryAttemptRecord).where(
+            NotificationDeliveryAttemptRecord.delivery_id == delivery_id,
+            NotificationDeliveryAttemptRecord.attempt_number == attempt_number,
+        )
+        if for_update:
+            statement = statement.with_for_update().execution_options(populate_existing=True)
+        record = await self._session.scalar(statement)
+        return attempt_from_record(record) if record is not None else None
+
+    async def list_for_delivery(
+        self, delivery_id: UUID, *, limit: int = 100
+    ) -> list[NotificationDeliveryAttempt]:
+        records = await self._session.scalars(
+            select(NotificationDeliveryAttemptRecord)
+            .where(NotificationDeliveryAttemptRecord.delivery_id == delivery_id)
+            .order_by(NotificationDeliveryAttemptRecord.attempt_number.desc())
+            .limit(limit)
+        )
+        return [attempt_from_record(record) for record in records]
+
+    async def save(self, attempt: NotificationDeliveryAttempt) -> None:
+        record = await self._session.get(NotificationDeliveryAttemptRecord, attempt.id)
+        if record is None:
+            raise LookupError(f"notification delivery attempt not found: {attempt.id}")
+        for key, value in self._values(attempt).items():
+            if key != "id":
+                setattr(record, key, value)
+
+    @staticmethod
+    def _values(attempt: NotificationDeliveryAttempt) -> dict[str, object]:
+        return {
+            "id": attempt.id,
+            "delivery_id": attempt.delivery_id,
+            "attempt_number": attempt.attempt_number,
+            "trigger": attempt.trigger,
+            "worker_id": attempt.worker_id,
+            "lease_token": attempt.lease_token,
+            "status": attempt.status,
+            "result": attempt.result,
+            "failure_reason": attempt.failure_reason,
+            "failure_code": attempt.failure_code,
+            "started_at": attempt.started_at,
+            "finished_at": attempt.finished_at,
+        }

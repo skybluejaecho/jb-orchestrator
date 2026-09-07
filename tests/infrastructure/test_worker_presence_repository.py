@@ -131,4 +131,8 @@ async def test_worker_readiness_alert_round_trips_through_database() -> None:
     )
     assert completed.status is NotificationDeliveryStatus.SUCCEEDED
     assert completed.result == {"message_id": "database-message"}
+    attempts = await notification_service.list_attempts(project.id, completed.id)
+    assert len(attempts) == 1
+    assert attempts[0].status.value == "succeeded"
+    assert attempts[0].result == {"message_id": "database-message"}
     await engine.dispose()

@@ -23,6 +23,7 @@ from jb_orchestrator.infrastructure.database.model_repositories import (
     SqlAlchemyModelProfileRepository,
 )
 from jb_orchestrator.infrastructure.database.notification_repositories import (
+    SqlAlchemyNotificationDeliveryAttemptRepository,
     SqlAlchemyNotificationDeliveryRepository,
     SqlAlchemyNotificationSubscriptionRepository,
 )
@@ -84,6 +85,7 @@ class SqlAlchemyUnitOfWork:
     worker_readiness_alerts: SqlAlchemyWorkerReadinessAlertRepository
     notification_subscriptions: SqlAlchemyNotificationSubscriptionRepository
     notification_deliveries: SqlAlchemyNotificationDeliveryRepository
+    notification_delivery_attempts: SqlAlchemyNotificationDeliveryAttemptRepository
     workflow_definitions: SqlAlchemyWorkflowDefinitionRepository
     workflow_executions: SqlAlchemyWorkflowExecutionRepository
     project_workflow_bindings: SqlAlchemyProjectWorkflowBindingRepository
@@ -117,6 +119,9 @@ class SqlAlchemyUnitOfWork:
             self._session
         )
         self.notification_deliveries = SqlAlchemyNotificationDeliveryRepository(self._session)
+        self.notification_delivery_attempts = SqlAlchemyNotificationDeliveryAttemptRepository(
+            self._session
+        )
         self.workflow_definitions = SqlAlchemyWorkflowDefinitionRepository(self._session)
         self.workflow_executions = SqlAlchemyWorkflowExecutionRepository(self._session)
         self.project_workflow_bindings = SqlAlchemyProjectWorkflowBindingRepository(self._session)

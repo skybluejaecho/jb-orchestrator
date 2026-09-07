@@ -33,6 +33,8 @@ from jb_orchestrator.external_executions import ExternalExecutionStatus
 from jb_orchestrator.infrastructure.database.base import Base
 from jb_orchestrator.model_routing import ModelTier
 from jb_orchestrator.notifications import (
+    NotificationAttemptStatus,
+    NotificationAttemptTrigger,
     NotificationDeliveryStatus,
     NotificationEventType,
     NotificationFailureCode,
@@ -764,6 +766,42 @@ class NotificationDeliveryRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class NotificationDeliveryAttemptRecord(Base):
+    """Immutable-numbered evidence for one Notification Delivery claim."""
+
+    __tablename__ = "notification_delivery_attempts"
+    __table_args__ = (
+        UniqueConstraint(
+            "delivery_id",
+            "attempt_number",
+            name="uq_notification_delivery_attempt_number",
+        ),
+        CheckConstraint("attempt_number > 0", name="ck_notification_attempt_number"),
+        Index("ix_notification_delivery_attempts_delivery", "delivery_id", "attempt_number"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    delivery_id: Mapped[UUID] = mapped_column(
+        ForeignKey("notification_deliveries.id", ondelete="CASCADE"), nullable=False
+    )
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    trigger: Mapped[NotificationAttemptTrigger] = mapped_column(
+        string_enum(NotificationAttemptTrigger, "notification_attempt_trigger"), nullable=False
+    )
+    worker_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    lease_token: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    status: Mapped[NotificationAttemptStatus] = mapped_column(
+        string_enum(NotificationAttemptStatus, "notification_attempt_status"), nullable=False
+    )
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    failure_code: Mapped[NotificationFailureCode | None] = mapped_column(
+        string_enum(NotificationFailureCode, "notification_attempt_failure_code"), nullable=True
+    )
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class WorkflowDefinitionRecord(Base):
