@@ -108,7 +108,10 @@ class NotificationDeliveryResponse(BaseModel):
     result: dict[str, Any] | None
     failure_reason: str | None
     failure_code: NotificationFailureCode | None
+    failure_retryable: bool | None
     attempt_count: int
+    automatic_retry_limit: int
+    next_attempt_at: datetime | None
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None
@@ -126,6 +129,7 @@ class NotificationDeliveryAttemptResponse(BaseModel):
     result: dict[str, Any] | None
     failure_reason: str | None
     failure_code: NotificationFailureCode | None
+    failure_retryable: bool | None
     started_at: datetime
     finished_at: datetime | None
 

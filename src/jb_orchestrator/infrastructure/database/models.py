@@ -762,7 +762,10 @@ class NotificationDeliveryRecord(Base):
     failure_code: Mapped[NotificationFailureCode | None] = mapped_column(
         string_enum(NotificationFailureCode, "notification_failure_code"), nullable=True
     )
+    failure_retryable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    automatic_retry_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -800,6 +803,7 @@ class NotificationDeliveryAttemptRecord(Base):
     failure_code: Mapped[NotificationFailureCode | None] = mapped_column(
         string_enum(NotificationFailureCode, "notification_attempt_failure_code"), nullable=True
     )
+    failure_retryable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

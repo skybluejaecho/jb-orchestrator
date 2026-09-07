@@ -88,6 +88,73 @@ async def test_runtime_records_typed_provider_failure() -> None:
     assert attempt.failure_code is NotificationFailureCode.PROVIDER_UNAVAILABLE
 
 
+async def test_runtime_automatically_retries_due_retryable_failure() -> None:
+    store = MemoryStore()
+    item = add_delivery(store)
+    provider = Provider(fail=True)
+    runtime = NotificationRuntime(
+        "notification-worker",
+        NotificationService(lambda: MemoryUnitOfWork(store)),
+        NotificationProviderRegistry({"fixture": provider}),
+        lease_seconds=10,
+        delivery_timeout_seconds=5,
+        automatic_retry_limit=2,
+        automatic_retry_base_delay_seconds=1,
+        automatic_retry_max_delay_seconds=2,
+    )
+    original_key = item.idempotency_key
+
+    assert await runtime.run_once() is True
+    assert item.status is NotificationDeliveryStatus.FAILED
+    assert item.failure_retryable is True
+    assert item.automatic_retry_limit == 2
+    assert item.next_attempt_at is not None
+    assert await runtime.run_once() is False
+
+    item.next_attempt_at = datetime.now(UTC) - timedelta(seconds=1)
+    provider.fail = False
+    assert await runtime.run_once() is True
+
+    assert item.status is NotificationDeliveryStatus.SUCCEEDED
+    assert item.attempt_count == 2
+    assert item.next_attempt_at is None
+    assert [request.idempotency_key for request in provider.requests] == [
+        original_key,
+        original_key,
+    ]
+    attempts = sorted(
+        store.notification_delivery_attempts.values(), key=lambda value: value.attempt_number
+    )
+    assert [attempt.trigger.value for attempt in attempts] == ["initial", "automatic"]
+    assert [attempt.status.value for attempt in attempts] == ["failed", "succeeded"]
+
+
+async def test_runtime_stops_after_automatic_retry_limit_is_exhausted() -> None:
+    store = MemoryStore()
+    item = add_delivery(store)
+    runtime = NotificationRuntime(
+        "notification-worker",
+        NotificationService(lambda: MemoryUnitOfWork(store)),
+        NotificationProviderRegistry({"fixture": Provider(fail=True)}),
+        lease_seconds=10,
+        delivery_timeout_seconds=5,
+        automatic_retry_limit=1,
+        automatic_retry_base_delay_seconds=1,
+        automatic_retry_max_delay_seconds=1,
+    )
+
+    assert await runtime.run_once() is True
+    assert item.next_attempt_at is not None
+    item.next_attempt_at = datetime.now(UTC) - timedelta(seconds=1)
+    assert await runtime.run_once() is True
+
+    assert item.status is NotificationDeliveryStatus.FAILED
+    assert item.attempt_count == 2
+    assert item.failure_retryable is True
+    assert item.next_attempt_at is None
+    assert await runtime.run_once() is False
+
+
 async def test_failed_delivery_can_be_manually_retried_with_original_payload() -> None:
     store = MemoryStore()
     item = add_delivery(store)

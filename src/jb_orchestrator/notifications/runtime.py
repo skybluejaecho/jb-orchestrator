@@ -1,9 +1,12 @@
 """Lease-bounded runtime for durable notification deliveries."""
 
 import asyncio
+import math
+from datetime import UTC, datetime, timedelta
 
 from jb_orchestrator.application import NotificationService
 from jb_orchestrator.notifications.models import (
+    MAX_AUTOMATIC_RETRY_LIMIT,
     NotificationDelivery,
     NotificationFailureCode,
     NotificationProviderFailure,
@@ -22,6 +25,9 @@ class NotificationRuntime:
         poll_interval_seconds: float = 1.0,
         lease_seconds: int = 60,
         delivery_timeout_seconds: float = 30.0,
+        automatic_retry_limit: int = 0,
+        automatic_retry_base_delay_seconds: float = 30.0,
+        automatic_retry_max_delay_seconds: float = 300.0,
     ) -> None:
         if not worker_id.strip():
             raise ValueError("notification worker id must not be empty")
@@ -31,12 +37,24 @@ class NotificationRuntime:
             raise ValueError("notification worker intervals must be positive")
         if delivery_timeout_seconds >= lease_seconds:
             raise ValueError("notification delivery timeout must be shorter than its lease")
+        if not 0 <= automatic_retry_limit <= MAX_AUTOMATIC_RETRY_LIMIT:
+            raise ValueError(
+                "notification automatic retry limit must be between 0 and "
+                f"{MAX_AUTOMATIC_RETRY_LIMIT}"
+            )
+        if automatic_retry_base_delay_seconds <= 0 or automatic_retry_max_delay_seconds <= 0:
+            raise ValueError("notification automatic retry delays must be positive")
+        if automatic_retry_base_delay_seconds > automatic_retry_max_delay_seconds:
+            raise ValueError("notification retry base delay must not exceed maximum delay")
         self._worker_id = worker_id.strip()
         self._notifications = notifications
         self._providers = providers
         self._poll_interval_seconds = poll_interval_seconds
         self._lease_seconds = lease_seconds
         self._delivery_timeout_seconds = delivery_timeout_seconds
+        self._automatic_retry_limit = automatic_retry_limit
+        self._automatic_retry_base_delay_seconds = automatic_retry_base_delay_seconds
+        self._automatic_retry_max_delay_seconds = automatic_retry_max_delay_seconds
 
     async def run_once(self) -> bool:
         delivery = await self._claim_next()
@@ -60,11 +78,18 @@ class NotificationRuntime:
             )
         except Exception as exc:
             code = self._failure_code(exc)
+            retryable = code in {
+                NotificationFailureCode.PROVIDER_UNAVAILABLE,
+                NotificationFailureCode.TIMEOUT,
+            }
             await self._notifications.fail(
                 delivery.id,
                 lease_token,
                 str(exc) or type(exc).__name__,
                 code=code,
+                retryable=retryable,
+                automatic_retry_limit=self._automatic_retry_limit,
+                next_attempt_at=self._next_attempt_at(delivery) if retryable else None,
             )
         else:
             await self._notifications.succeed(delivery.id, lease_token, result.output)
@@ -93,3 +118,17 @@ class NotificationRuntime:
         if isinstance(exc, TimeoutError):
             return NotificationFailureCode.TIMEOUT
         return NotificationFailureCode.UNEXPECTED
+
+    def _next_attempt_at(self, delivery: NotificationDelivery) -> datetime | None:
+        if self._automatic_retry_limit == 0:
+            return None
+        if delivery.attempt_count > self._automatic_retry_limit:
+            return None
+        exponent = delivery.attempt_count - 1
+        ratio = self._automatic_retry_max_delay_seconds / self._automatic_retry_base_delay_seconds
+        steps_to_cap = max(0, math.ceil(math.log2(ratio)))
+        delay = min(
+            self._automatic_retry_base_delay_seconds * (2 ** min(exponent, steps_to_cap)),
+            self._automatic_retry_max_delay_seconds,
+        )
+        return datetime.now(UTC) + timedelta(seconds=delay)

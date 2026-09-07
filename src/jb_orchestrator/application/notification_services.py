@@ -212,12 +212,18 @@ class NotificationService:
         reason: str,
         *,
         code: NotificationFailureCode = NotificationFailureCode.UNEXPECTED,
+        retryable: bool = False,
+        automatic_retry_limit: int = 0,
+        next_attempt_at: datetime | None = None,
     ) -> NotificationDelivery:
         return await self._finish(
             delivery_id,
             lease_token,
             failure_reason=reason,
             failure_code=code,
+            failure_retryable=retryable,
+            automatic_retry_limit=automatic_retry_limit,
+            next_attempt_at=next_attempt_at,
         )
 
     async def _finish(
@@ -228,6 +234,9 @@ class NotificationService:
         result: dict[str, Any] | None = None,
         failure_reason: str | None = None,
         failure_code: NotificationFailureCode | None = None,
+        failure_retryable: bool = False,
+        automatic_retry_limit: int = 0,
+        next_attempt_at: datetime | None = None,
     ) -> NotificationDelivery:
         async with self._unit_of_work_factory() as unit_of_work:
             delivery = await unit_of_work.notification_deliveries.get(delivery_id, for_update=True)
@@ -258,18 +267,26 @@ class NotificationService:
                     lease_token,
                     failure_reason,
                     code=failure_code or NotificationFailureCode.UNEXPECTED,
+                    retryable=failure_retryable,
+                    automatic_retry_limit=automatic_retry_limit,
+                    next_attempt_at=next_attempt_at,
                     at=finished_at,
                 )
                 attempt.fail(
                     lease_token,
                     failure_reason,
                     code=failure_code or NotificationFailureCode.UNEXPECTED,
+                    retryable=failure_retryable,
                     at=finished_at,
                 )
                 event_type = "notification.delivery_failed"
             await unit_of_work.notification_deliveries.save(delivery)
             await unit_of_work.notification_delivery_attempts.save(attempt)
             await self._delivery_event(unit_of_work, delivery, event_type)
+            if delivery.next_attempt_at is not None:
+                await self._delivery_event(
+                    unit_of_work, delivery, "notification.delivery_retry_scheduled"
+                )
             await unit_of_work.commit()
             return delivery
 
@@ -312,6 +329,11 @@ class NotificationService:
             "attempt_count": delivery.attempt_count,
             "failure_reason": delivery.failure_reason,
             "failure_code": delivery.failure_code.value if delivery.failure_code else None,
+            "failure_retryable": delivery.failure_retryable,
+            "automatic_retry_limit": delivery.automatic_retry_limit,
+            "next_attempt_at": (
+                delivery.next_attempt_at.isoformat() if delivery.next_attempt_at else None
+            ),
         }
         if actor is not None:
             payload["actor"] = actor

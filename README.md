@@ -617,6 +617,16 @@ ORCH-070 adds durable notification attempt evidence and operator-controlled reco
   readers without exposing lease tokens
 - the process smoke proves an initial Webhook failure followed by a successful manual retry
 
+ORCH-071 adds opt-in bounded automatic retry for transient notification failures:
+
+- automatic retry is disabled by default and allows at most ten retries after the initial attempt
+- only provider unavailability and timeouts are retryable; rejected and unexpected failures remain
+  terminal
+- retry schedules survive Worker restarts through durable `next_attempt_at` state
+- exponential backoff grows from the configured base delay without exceeding its maximum
+- due retries preserve the Delivery identity and create an `automatic` Attempt
+- explicit manual retry clears any automatic schedule and remains available to operators
+
 ## Prerequisites
 
 - Python 3.12
@@ -632,6 +642,8 @@ docker compose up -d postgres
 uv run alembic upgrade head
 uv run jb-readiness-monitor
 uv run jb-notification-worker --list-providers
+uv run jb-notification-worker --automatic-retry-limit 2 `
+  --automatic-retry-base-delay 30 --automatic-retry-max-delay 300
 ```
 
 원격 클라이언트를 연결하려면 먼저 서비스 계정을 발급합니다. Token 원문은 이 명령에서만

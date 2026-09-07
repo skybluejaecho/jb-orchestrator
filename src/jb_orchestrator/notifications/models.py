@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 from jb_orchestrator.domain import DomainValidationError, InvalidStateTransition
 
 PROVIDER_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9._-]{0,63}$")
+MAX_AUTOMATIC_RETRY_LIMIT = 10
 
 
 class NotificationEventType(StrEnum):
@@ -42,6 +43,7 @@ class NotificationAttemptStatus(StrEnum):
 class NotificationAttemptTrigger(StrEnum):
     INITIAL = "initial"
     MANUAL = "manual"
+    AUTOMATIC = "automatic"
     LEASE_RECOVERY = "lease_recovery"
 
 
@@ -117,7 +119,10 @@ class NotificationDelivery:
     result: dict[str, Any] | None = None
     failure_reason: str | None = None
     failure_code: NotificationFailureCode | None = None
+    failure_retryable: bool | None = None
     attempt_count: int = 0
+    automatic_retry_limit: int = 0
+    next_attempt_at: datetime | None = None
     id: UUID = field(default_factory=uuid4)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -132,6 +137,11 @@ class NotificationDelivery:
             raise DomainValidationError("notification delivery idempotency key is invalid")
         if self.attempt_count < 0:
             raise DomainValidationError("notification delivery attempt_count must not be negative")
+        if not 0 <= self.automatic_retry_limit <= MAX_AUTOMATIC_RETRY_LIMIT:
+            raise DomainValidationError(
+                "notification automatic_retry_limit must be between 0 and "
+                f"{MAX_AUTOMATIC_RETRY_LIMIT}"
+            )
 
     def claim(
         self, worker_id: str, *, lease_seconds: int, at: datetime | None = None
@@ -143,7 +153,18 @@ class NotificationDelivery:
             and self.lease_expires_at is not None
             and self._as_utc(self.lease_expires_at) <= self._as_utc(changed_at)
         )
-        if self.status is not NotificationDeliveryStatus.PENDING and not expired:
+        scheduled_retry = (
+            self.status is NotificationDeliveryStatus.FAILED
+            and self.failure_retryable is True
+            and self.next_attempt_at is not None
+            and self._as_utc(self.next_attempt_at) <= self._as_utc(changed_at)
+            and self.attempt_count <= self.automatic_retry_limit
+        )
+        if (
+            self.status is not NotificationDeliveryStatus.PENDING
+            and not expired
+            and not scheduled_retry
+        ):
             raise InvalidStateTransition("notification delivery cannot be claimed")
         if not worker_id.strip() or lease_seconds <= 0:
             raise DomainValidationError("notification delivery claim requires worker and lease")
@@ -152,6 +173,12 @@ class NotificationDelivery:
         self.lease_token = uuid4()
         self.lease_expires_at = changed_at + timedelta(seconds=lease_seconds)
         self.attempt_count += 1
+        if scheduled_retry:
+            self.failure_reason = None
+            self.failure_code = None
+            self.failure_retryable = None
+            self.next_attempt_at = None
+            self.completed_at = None
         self.updated_at = changed_at
         return trigger
 
@@ -163,6 +190,8 @@ class NotificationDelivery:
             and self._as_utc(self.lease_expires_at) <= self._as_utc(changed_at)
         ):
             return NotificationAttemptTrigger.LEASE_RECOVERY
+        if self.status is NotificationDeliveryStatus.FAILED:
+            return NotificationAttemptTrigger.AUTOMATIC
         if self.attempt_count > 0:
             return NotificationAttemptTrigger.MANUAL
         return NotificationAttemptTrigger.INITIAL
@@ -178,6 +207,9 @@ class NotificationDelivery:
         self.result = None
         self.failure_reason = None
         self.failure_code = None
+        self.failure_retryable = None
+        self.automatic_retry_limit = 0
+        self.next_attempt_at = None
         self.completed_at = None
         self.updated_at = changed_at
 
@@ -200,17 +232,33 @@ class NotificationDelivery:
         reason: str,
         *,
         code: NotificationFailureCode,
+        retryable: bool = False,
+        automatic_retry_limit: int = 0,
+        next_attempt_at: datetime | None = None,
         at: datetime | None = None,
     ) -> None:
         self._require_claim(lease_token)
         normalized = reason.strip()
         if not normalized:
             raise DomainValidationError("notification delivery failure reason must not be empty")
+        if not 0 <= automatic_retry_limit <= MAX_AUTOMATIC_RETRY_LIMIT:
+            raise DomainValidationError(
+                f"automatic retry limit must be between 0 and {MAX_AUTOMATIC_RETRY_LIMIT}"
+            )
+        if next_attempt_at is not None and (
+            not retryable or self.attempt_count > automatic_retry_limit
+        ):
+            raise DomainValidationError(
+                "scheduled notification retry requires an available retry attempt"
+            )
         changed_at = at or datetime.now(UTC)
         self.status = NotificationDeliveryStatus.FAILED
         self.result = None
         self.failure_reason = normalized
         self.failure_code = code
+        self.failure_retryable = retryable
+        self.automatic_retry_limit = automatic_retry_limit
+        self.next_attempt_at = next_attempt_at
         self.lease_expires_at = None
         self.updated_at = changed_at
         self.completed_at = changed_at
@@ -242,6 +290,7 @@ class NotificationDeliveryAttempt:
     result: dict[str, Any] | None = None
     failure_reason: str | None = None
     failure_code: NotificationFailureCode | None = None
+    failure_retryable: bool | None = None
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     finished_at: datetime | None = None
 
@@ -264,6 +313,7 @@ class NotificationDeliveryAttempt:
         reason: str,
         *,
         code: NotificationFailureCode,
+        retryable: bool = False,
         at: datetime | None = None,
     ) -> None:
         self._require_claim(lease_token)
@@ -273,6 +323,7 @@ class NotificationDeliveryAttempt:
         self.status = NotificationAttemptStatus.FAILED
         self.failure_reason = normalized
         self.failure_code = code
+        self.failure_retryable = retryable
         self.finished_at = at or datetime.now(UTC)
 
     def _require_claim(self, lease_token: UUID) -> None:

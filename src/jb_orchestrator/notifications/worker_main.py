@@ -29,6 +29,11 @@ def run(
     poll_interval: float = typer.Option(1.0, min=0.1),
     lease_seconds: int = typer.Option(60, min=2),
     delivery_timeout: float = typer.Option(30.0, min=0.1),
+    automatic_retry_limit: int = typer.Option(
+        0, min=0, max=10, help="Automatic retries after the initial attempt."
+    ),
+    automatic_retry_base_delay: float = typer.Option(30.0, min=0.1),
+    automatic_retry_max_delay: float = typer.Option(300.0, min=0.1),
 ) -> None:
     """Start a worker using installed notification provider entry points."""
 
@@ -60,6 +65,9 @@ def run(
         poll_interval_seconds=poll_interval,
         lease_seconds=lease_seconds,
         delivery_timeout_seconds=delivery_timeout,
+        automatic_retry_limit=automatic_retry_limit,
+        automatic_retry_base_delay_seconds=automatic_retry_base_delay,
+        automatic_retry_max_delay_seconds=automatic_retry_max_delay,
     )
     presence = WorkerPresenceRuntime(
         WorkerPresenceService(uow),
