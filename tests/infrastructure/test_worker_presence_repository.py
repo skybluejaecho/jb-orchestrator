@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from jb_orchestrator.application import (
@@ -85,7 +87,14 @@ async def test_worker_readiness_alert_round_trips_through_database() -> None:
     )
     await workflow.start(created.run.id, "unavailable", 1)
 
-    report = await WorkerReadinessService(factory).evaluate_project(project.id)
+    now = datetime.now(UTC)
+    service = WorkerReadinessService(factory)
+    report = await service.evaluate_project(project.id, at=now, critical_after_seconds=1)
+    await service.evaluate_project(
+        project.id,
+        at=now + timedelta(seconds=2),
+        critical_after_seconds=1,
+    )
 
     assert len(report.alerts) == 1
     assert report.alerts[0].status is WorkerReadinessAlertStatus.ACTIVE
@@ -93,4 +102,5 @@ async def test_worker_readiness_alert_round_trips_through_database() -> None:
         [stored] = await unit_of_work.worker_readiness_alerts.list_by_project(project.id)
     assert stored.id == report.alerts[0].id
     assert stored.executor_key == "specialized"
+    assert stored.critical_at is not None
     await engine.dispose()

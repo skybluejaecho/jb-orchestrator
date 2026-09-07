@@ -669,6 +669,7 @@ class WorkerReadinessAlertRecord(Base):
     )
     first_detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     last_observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    critical_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 

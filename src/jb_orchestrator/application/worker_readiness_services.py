@@ -6,7 +6,7 @@ from uuid import UUID
 
 from jb_orchestrator.application.exceptions import ResourceNotFound
 from jb_orchestrator.application.unit_of_work import UnitOfWork
-from jb_orchestrator.domain import DomainEvent
+from jb_orchestrator.domain import DomainEvent, ProjectStatus
 from jb_orchestrator.worker_presence import (
     ProjectWorkerReadiness,
     WorkerCapabilityCoverage,
@@ -100,6 +100,7 @@ class WorkerReadinessService:
         project_id: UUID,
         *,
         stale_after_seconds: float = 90.0,
+        critical_after_seconds: float = 300.0,
         at: datetime | None = None,
     ) -> ProjectWorkerReadiness:
         checked_at = at or datetime.now(UTC)
@@ -136,10 +137,18 @@ class WorkerReadinessService:
                     await self._append_alert_event(unit_of_work, alert, "worker.readiness_alerted")
                 else:
                     reason_changed = alert.observe(issue.reason, at=checked_at)
+                    escalated = alert.escalate(
+                        critical_after_seconds=critical_after_seconds,
+                        at=checked_at,
+                    )
                     await unit_of_work.worker_readiness_alerts.save(alert)
                     if reason_changed:
                         await self._append_alert_event(
                             unit_of_work, alert, "worker.readiness_alert_reason_changed"
+                        )
+                    if escalated:
+                        await self._append_alert_event(
+                            unit_of_work, alert, "worker.readiness_critical"
                         )
 
             active_alerts = await unit_of_work.worker_readiness_alerts.list_by_project(
@@ -166,6 +175,30 @@ class WorkerReadinessService:
             at=checked_at,
         )
 
+    async def evaluate_active_projects(
+        self,
+        *,
+        stale_after_seconds: float = 90.0,
+        critical_after_seconds: float = 300.0,
+        limit: int = 100,
+        at: datetime | None = None,
+    ) -> tuple[ProjectWorkerReadiness, ...]:
+        if limit <= 0:
+            raise ValueError("worker readiness project limit must be positive")
+        async with self._unit_of_work_factory() as unit_of_work:
+            projects = await unit_of_work.projects.list(status=ProjectStatus.ACTIVE, limit=limit)
+        return tuple(
+            [
+                await self.evaluate_project(
+                    project.id,
+                    stale_after_seconds=stale_after_seconds,
+                    critical_after_seconds=critical_after_seconds,
+                    at=at,
+                )
+                for project in projects
+            ]
+        )
+
     @staticmethod
     async def _append_alert_event(
         unit_of_work: UnitOfWork, alert: WorkerReadinessAlert, event_type: str
@@ -183,6 +216,7 @@ class WorkerReadinessService:
                     "executor_key": alert.executor_key,
                     "reason": alert.reason.value,
                     "status": alert.status.value,
+                    "critical_at": alert.critical_at.isoformat() if alert.critical_at else None,
                 },
             )
         )

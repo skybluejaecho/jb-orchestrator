@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     worker_heartbeat_interval_seconds: float = Field(default=30.0, gt=0)
     worker_presence_stale_after_seconds: float = Field(default=90.0, gt=0)
     worker_readiness_alert_critical_after_seconds: float = Field(default=300.0, gt=0)
+    worker_readiness_poll_interval_seconds: float = Field(default=30.0, gt=0)
+    worker_readiness_project_limit: int = Field(default=100, gt=0)
     worker_cancellation_timeout_seconds: float = Field(default=10.0, gt=0)
     skill_cache_dir: Path = Path(".jb-orchestrator/cache/skills")
     skill_local_root: Path = Path("skills")

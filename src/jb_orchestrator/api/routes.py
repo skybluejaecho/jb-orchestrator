@@ -209,6 +209,7 @@ async def evaluate_project_worker_readiness(
     report = await service.evaluate_project(
         project_id,
         stale_after_seconds=settings.worker_presence_stale_after_seconds,
+        critical_after_seconds=settings.worker_readiness_alert_critical_after_seconds,
     )
     return _worker_readiness_response(report)
 
@@ -216,7 +217,6 @@ async def evaluate_project_worker_readiness(
 def _worker_readiness_response(
     report: ProjectWorkerReadiness,
 ) -> ProjectWorkerReadinessResponse:
-    critical_after = get_settings().worker_readiness_alert_critical_after_seconds
     alerts = []
     for alert in report.alerts:
         detected_at = _as_utc(alert.first_detected_at)
@@ -229,7 +229,7 @@ def _worker_readiness_response(
             "resolved"
             if alert.status is WorkerReadinessAlertStatus.RESOLVED
             else "critical"
-            if age_seconds >= critical_after
+            if alert.critical_at is not None
             else "warning"
         )
         action = (
@@ -254,6 +254,7 @@ def _worker_readiness_response(
                 recommended_action=action,
                 first_detected_at=alert.first_detected_at,
                 last_observed_at=alert.last_observed_at,
+                critical_at=alert.critical_at,
                 resolved_at=alert.resolved_at,
             )
         )

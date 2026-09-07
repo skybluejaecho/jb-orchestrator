@@ -23,6 +23,7 @@ def alert_from_record(record: WorkerReadinessAlertRecord) -> WorkerReadinessAler
         status=record.status,
         first_detected_at=record.first_detected_at,
         last_observed_at=record.last_observed_at,
+        critical_at=record.critical_at,
         resolved_at=record.resolved_at,
     )
 
@@ -94,5 +95,6 @@ class SqlAlchemyWorkerReadinessAlertRepository:
             "status": alert.status,
             "first_detected_at": alert.first_detected_at,
             "last_observed_at": alert.last_observed_at,
+            "critical_at": alert.critical_at,
             "resolved_at": alert.resolved_at,
         }
