@@ -656,6 +656,15 @@ ORCH-074 adds provider-neutral notification subscription management to Jarvis:
 - Jarvis validates the bounded event vocabulary before proxying changes with `notification.manage`
 - subscription Domain Events refresh the server-backed view without optimistic local ownership
 
+ORCH-075 extends the real-process acceptance boundary through Jarvis notification routes:
+
+- the smoke creates and configures subscriptions through the running Jarvis server
+- Delivery listing, Attempt inspection, automatic retry cancellation, and immediate retry all use
+  Jarvis proxies instead of bypassing them through direct Control Plane calls
+- the Notification Worker schedules a bounded retry after the intentional first Webhook failure
+- the test proves Jarvis authorization and payload translation across PostgreSQL and real processes
+- the default per-process readiness timeout is 60 seconds to accommodate a cold Vinext startup
+
 ## Prerequisites
 
 - Python 3.12
