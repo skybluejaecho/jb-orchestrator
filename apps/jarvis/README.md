@@ -75,6 +75,10 @@ Worker를 재시작해도 PostgreSQL 원장이 재시도 시점을 결정한다.
 같은 Delivery identity로 즉시 재시도할 수 있고, 자동 재시도가 예약된 항목은 실패 증거를 보존한
 채 예약만 취소할 수 있다. Jarvis는 알림 이벤트에 맞춰 원장을 다시 조회하며 브라우저 자체
 타이머로 전송을 실행하지 않는다. 실제 claim과 외부 전송은 계속 Notification Worker가 담당한다.
+알림 구독 패널에서는 설치형 provider key, Worker가 해석할 목적지 참조와 readiness 이벤트 범위를
+등록할 수 있다. 기존 구독의 이벤트 필터와 활성화 상태도 변경할 수 있지만 실제 endpoint URL,
+인증 정보와 서명 secret은 입력하거나 표시하지 않는다. 이 값들은 계속 Notification Worker 환경의
+destination resolver가 소유한다.
 Worker 현황판은 실행·Workspace·SCM Worker가 PostgreSQL에 기록한 process heartbeat를 30초마다
 조회한다. 온라인, heartbeat 임계값을 넘긴 응답 지연, 정상 종료를 구분하고 hostname·PID·지원
 capability·workspace scope를 표시한다. 작업 lease 상태와 Worker process 상태는 독립적으로
