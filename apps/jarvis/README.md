@@ -79,6 +79,10 @@ Worker를 재시작해도 PostgreSQL 원장이 재시도 시점을 결정한다.
 등록할 수 있다. 기존 구독의 이벤트 필터와 활성화 상태도 변경할 수 있지만 실제 endpoint URL,
 인증 정보와 서명 secret은 입력하거나 표시하지 않는다. 이 값들은 계속 Notification Worker 환경의
 destination resolver가 소유한다.
+구독 입력과 기존 구독에는 해당 provider capability를 가진 Notification Worker의 현재 상태가
+표시된다. 온라인, 응답 지연·종료, 지원 Worker 없음 상태를 구분하지만 계획된 배포 전에 설정할 수
+있도록 등록 자체는 차단하지 않는다. Delivery 화면은 상태·provider·이벤트 필터를 제공하고 자동
+재시도 예약과 실패 항목을 먼저 배치한다.
 Worker 현황판은 실행·Workspace·SCM Worker가 PostgreSQL에 기록한 process heartbeat를 30초마다
 조회한다. 온라인, heartbeat 임계값을 넘긴 응답 지연, 정상 종료를 구분하고 hostname·PID·지원
 capability·workspace scope를 표시한다. 작업 lease 상태와 Worker process 상태는 독립적으로
