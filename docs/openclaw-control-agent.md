@@ -57,6 +57,9 @@ Gateway protocol은 MCP server/tool 계약을 포함하지만, Gateway client �
 7. 네트워크 오류로 재시도할 때는 반드시 같은 key, payload, Workflow와 Skill 선택을 사용한다.
 8. 반환된 request, run, workflow ID를 사용자에게 알려준다.
 9. 이후 조회 도구로 DB에 기록된 상태를 설명한다.
+10. Workflow가 READY 상태에서 진행되지 않으면 get_worker_readiness를 호출해 필요한 executor,
+    Worker online 여부, 지속 경보와 recommended_action을 설명한다. 이 도구는 진단만 하며 Worker가
+    실제로 시작 또는 재시작됐다고 추측하지 않는다.
 
 승인과 취소는 사용자가 명시적으로 요청한 경우에만 실행한다.
 Workflow나 프로젝트 상태를 OpenClaw 자체 메모리만으로 추측하지 않는다.
