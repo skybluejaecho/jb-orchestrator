@@ -665,6 +665,15 @@ ORCH-075 extends the real-process acceptance boundary through Jarvis notificatio
 - the test proves Jarvis authorization and payload translation across PostgreSQL and real processes
 - the default per-process readiness timeout is 60 seconds to accommodate a cold Vinext startup
 
+ORCH-076 improves Jarvis notification operations without tightening orchestration coupling:
+
+- Delivery history can be filtered by status, provider, and event type
+- scheduled retries and failures are prioritized ahead of active and successful deliveries
+- subscription cards compare provider keys with durable Notification Worker capabilities
+- online, delayed or stopped, and missing provider support are shown as distinct diagnostics
+- provider diagnostics remain advisory, so operators can configure subscriptions before deployment
+- Worker presence labels now cover Notification and readiness-monitor processes explicitly
+
 ## Prerequisites
 
 - Python 3.12

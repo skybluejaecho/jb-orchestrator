@@ -40,11 +40,43 @@ describe('Jarvis notification delivery routes', () => {
     expect(response.status).toBe(200);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe(
-      'http://control-plane.test/v1/projects/project%2F1/notification-deliveries',
+      'http://control-plane.test/v1/projects/project%2F1/notification-deliveries?limit=200',
     );
     expect(new Headers(init?.headers).get('Authorization')).toBe(
       'Bearer server-token',
     );
+  });
+
+  it('검증된 상태 필터를 Control Plane으로 전달한다', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(Response.json([]));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await getDeliveries(
+      new Request(
+        'http://jarvis.test/api/notification-deliveries?projectId=project-1&status=failed',
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      'http://control-plane.test/v1/projects/project-1/notification-deliveries?limit=200&status=failed',
+    );
+  });
+
+  it('지원하지 않는 상태 필터는 upstream 호출 전에 거부한다', async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await getDeliveries(
+      new Request(
+        'http://jarvis.test/api/notification-deliveries?projectId=project-1&status=unknown',
+      ),
+    );
+
+    expect(response.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('프로젝트와 Delivery 범위를 유지해 Attempt를 조회한다', async () => {
