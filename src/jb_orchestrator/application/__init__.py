@@ -9,6 +9,7 @@ from jb_orchestrator.application.commands import (
 )
 from jb_orchestrator.application.external_execution_services import ExternalExecutionService
 from jb_orchestrator.application.model_services import ModelCatalogService
+from jb_orchestrator.application.notification_services import NotificationService
 from jb_orchestrator.application.phase_pack_services import PhasePackCatalogService
 from jb_orchestrator.application.project_observation_services import ProjectObservationService
 from jb_orchestrator.application.request_dispatch_services import (
@@ -42,6 +43,7 @@ __all__ = [
     "IssuedServiceAccount",
     "ModelCatalogService",
     "NodeSkillAddon",
+    "NotificationService",
     "OrchestrationService",
     "PhasePackCatalogService",
     "ProjectObservationService",

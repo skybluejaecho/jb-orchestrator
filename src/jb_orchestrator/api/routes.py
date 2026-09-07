@@ -11,6 +11,7 @@ from jb_orchestrator.api.dependencies import (
     get_budget_service,
     get_external_execution_service,
     get_model_catalog_service,
+    get_notification_service,
     get_orchestration_service,
     get_phase_pack_catalog_service,
     get_project_observation_service,
@@ -32,6 +33,10 @@ from jb_orchestrator.api.schemas import (
     ModelProfileCreate,
     ModelProfileResponse,
     NodeExecutionResponse,
+    NotificationDeliveryResponse,
+    NotificationSubscriptionConfigure,
+    NotificationSubscriptionCreate,
+    NotificationSubscriptionResponse,
     PhasePackCreate,
     PhasePackResponse,
     ProjectCreate,
@@ -79,6 +84,7 @@ from jb_orchestrator.application import (
     ExternalExecutionService,
     ModelCatalogService,
     NodeSkillAddon,
+    NotificationService,
     OrchestrationService,
     PhasePackCatalogService,
     ProjectObservationService,
@@ -102,6 +108,7 @@ from jb_orchestrator.domain import (
 )
 from jb_orchestrator.external_executions import ExternalExecutionStatus
 from jb_orchestrator.model_routing import ModelProfile, ModelRoutingRequest
+from jb_orchestrator.notifications import NotificationDeliveryStatus
 from jb_orchestrator.phase_packs import (
     PhaseInputDefinition,
     PhasePackDefinition,
@@ -151,6 +158,7 @@ WorkerPresenceServiceDependency = Annotated[
 WorkerReadinessServiceDependency = Annotated[
     WorkerReadinessService, Depends(get_worker_readiness_service)
 ]
+NotificationServiceDependency = Annotated[NotificationService, Depends(get_notification_service)]
 
 
 @router.get("/workers", response_model=list[WorkerPresenceResponse])
@@ -272,6 +280,88 @@ def _worker_readiness_response(
 
 def _as_utc(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+@router.post(
+    "/projects/{project_id}/notification-subscriptions",
+    response_model=NotificationSubscriptionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_notification_subscription(
+    project_id: UUID,
+    payload: NotificationSubscriptionCreate,
+    request: Request,
+    response: Response,
+    service: NotificationServiceDependency,
+) -> NotificationSubscriptionResponse:
+    principal = getattr(request.state, "principal", None)
+    subscription, replayed = await service.create_subscription(
+        project_id,
+        provider_key=payload.provider_key,
+        destination_ref=payload.destination_ref,
+        event_types=payload.event_types,
+        created_by=principal.account_key if principal is not None else "anonymous",
+    )
+    if replayed:
+        response.status_code = status.HTTP_200_OK
+    return NotificationSubscriptionResponse.model_validate(subscription)
+
+
+@router.get(
+    "/projects/{project_id}/notification-subscriptions",
+    response_model=list[NotificationSubscriptionResponse],
+)
+async def list_notification_subscriptions(
+    project_id: UUID,
+    service: NotificationServiceDependency,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[NotificationSubscriptionResponse]:
+    return [
+        NotificationSubscriptionResponse.model_validate(subscription)
+        for subscription in await service.list_subscriptions(project_id, limit=limit)
+    ]
+
+
+@router.patch(
+    "/projects/{project_id}/notification-subscriptions/{subscription_id}",
+    response_model=NotificationSubscriptionResponse,
+)
+async def configure_notification_subscription(
+    project_id: UUID,
+    subscription_id: UUID,
+    payload: NotificationSubscriptionConfigure,
+    request: Request,
+    service: NotificationServiceDependency,
+) -> NotificationSubscriptionResponse:
+    principal = getattr(request.state, "principal", None)
+    subscription = await service.configure_subscription(
+        project_id,
+        subscription_id,
+        event_types=payload.event_types,
+        enabled=payload.enabled,
+        configured_by=principal.account_key if principal is not None else "anonymous",
+    )
+    return NotificationSubscriptionResponse.model_validate(subscription)
+
+
+@router.get(
+    "/projects/{project_id}/notification-deliveries",
+    response_model=list[NotificationDeliveryResponse],
+)
+async def list_notification_deliveries(
+    project_id: UUID,
+    service: NotificationServiceDependency,
+    delivery_status: Annotated[NotificationDeliveryStatus | None, Query(alias="status")] = None,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[NotificationDeliveryResponse]:
+    return [
+        NotificationDeliveryResponse.model_validate(delivery)
+        for delivery in await service.list_deliveries(
+            project_id,
+            status=delivery_status,
+            limit=limit,
+        )
+    ]
 
 
 def workflow_definition_response(

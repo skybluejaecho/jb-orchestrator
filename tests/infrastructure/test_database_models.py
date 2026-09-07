@@ -23,6 +23,8 @@ def test_metadata_creates_initial_domain_schema() -> None:
         "budget_reservations",
         "model_profiles",
         "node_executions",
+        "notification_deliveries",
+        "notification_subscriptions",
         "phase_pack_definitions",
         "project_workflow_bindings",
         "projects",
@@ -73,6 +75,12 @@ def test_metadata_creates_initial_domain_schema() -> None:
     assert worker_kind["type"].length == 32
     assert {index["name"] for index in inspector.get_indexes("worker_readiness_alerts")} >= {
         "ix_worker_readiness_alert_project_status"
+    }
+    assert {index["name"] for index in inspector.get_indexes("notification_subscriptions")} >= {
+        "ix_notification_subscriptions_project_enabled"
+    }
+    assert {index["name"] for index in inspector.get_indexes("notification_deliveries")} >= {
+        "ix_notification_deliveries_project_status"
     }
     assert {index["name"] for index in inspector.get_indexes("scm_publication_attempts")} >= {
         "ix_scm_publication_attempts_publication_id"

@@ -26,6 +26,11 @@ from jb_orchestrator.domain import (
 )
 from jb_orchestrator.external_executions import ExternalExecution, ExternalExecutionStatus
 from jb_orchestrator.model_routing import ModelProfile
+from jb_orchestrator.notifications import (
+    NotificationDelivery,
+    NotificationDeliveryStatus,
+    NotificationSubscription,
+)
 from jb_orchestrator.phase_packs import PhasePackDefinition
 from jb_orchestrator.scm import (
     ScmPublication,
@@ -83,6 +88,8 @@ class MemoryStore:
     worker_instances: dict[UUID, WorkerInstance] = field(default_factory=dict)
     worker_readiness_alerts: dict[UUID, WorkerReadinessAlert] = field(default_factory=dict)
     denied_readiness_evaluation_projects: set[UUID] = field(default_factory=set)
+    notification_subscriptions: dict[UUID, NotificationSubscription] = field(default_factory=dict)
+    notification_deliveries: dict[UUID, NotificationDelivery] = field(default_factory=dict)
     service_accounts: dict[UUID, ServiceAccount] = field(default_factory=dict)
 
 
@@ -526,6 +533,91 @@ class MemoryWorkerReadinessAlertRepository:
         self._store.worker_readiness_alerts[alert.id] = alert
 
 
+class MemoryNotificationSubscriptionRepository:
+    def __init__(self, store: MemoryStore) -> None:
+        self._store = store
+
+    async def try_add(self, subscription: NotificationSubscription) -> bool:
+        existing = await self.get_destination(
+            subscription.project_id,
+            subscription.provider_key,
+            subscription.destination_ref,
+        )
+        if existing is not None:
+            return False
+        self._store.notification_subscriptions[subscription.id] = subscription
+        return True
+
+    async def get(
+        self, subscription_id: UUID, *, for_update: bool = False
+    ) -> NotificationSubscription | None:
+        return self._store.notification_subscriptions.get(subscription_id)
+
+    async def get_destination(
+        self, project_id: UUID, provider_key: str, destination_ref: str
+    ) -> NotificationSubscription | None:
+        return next(
+            (
+                subscription
+                for subscription in self._store.notification_subscriptions.values()
+                if subscription.project_id == project_id
+                and subscription.provider_key == provider_key
+                and subscription.destination_ref == destination_ref
+            ),
+            None,
+        )
+
+    async def list_by_project(
+        self, project_id: UUID, *, enabled: bool | None = None, limit: int = 100
+    ) -> list[NotificationSubscription]:
+        return sorted(
+            (
+                subscription
+                for subscription in self._store.notification_subscriptions.values()
+                if subscription.project_id == project_id
+                and (enabled is None or subscription.enabled is enabled)
+            ),
+            key=lambda value: (value.created_at, value.id),
+            reverse=True,
+        )[:limit]
+
+    async def save(self, subscription: NotificationSubscription) -> None:
+        self._store.notification_subscriptions[subscription.id] = subscription
+
+
+class MemoryNotificationDeliveryRepository:
+    def __init__(self, store: MemoryStore) -> None:
+        self._store = store
+
+    async def try_add(self, delivery: NotificationDelivery) -> bool:
+        if any(
+            existing.subscription_id == delivery.subscription_id
+            and existing.event_id == delivery.event_id
+            for existing in self._store.notification_deliveries.values()
+        ):
+            return False
+        self._store.notification_deliveries[delivery.id] = delivery
+        return True
+
+    async def list_by_project(
+        self,
+        project_id: UUID,
+        *,
+        status: NotificationDeliveryStatus | None = None,
+        limit: int = 100,
+    ) -> list[NotificationDelivery]:
+        return sorted(
+            (
+                delivery
+                for delivery in self._store.notification_deliveries.values()
+                if delivery.project_id == project_id
+                and (status is None or delivery.status is status)
+            ),
+            key=lambda value: (value.created_at, value.id),
+            reverse=True,
+        )[:limit]
+
+
 class MemoryEventRepository:
     def __init__(self, store: MemoryStore) -> None:
         self._store = store
@@ -951,6 +1043,8 @@ class MemoryUnitOfWork:
         self.scm_publication_attempts = MemoryScmPublicationAttemptRepository(store)
         self.worker_instances = MemoryWorkerInstanceRepository(store)
         self.worker_readiness_alerts = MemoryWorkerReadinessAlertRepository(store)
+        self.notification_subscriptions = MemoryNotificationSubscriptionRepository(store)
+        self.notification_deliveries = MemoryNotificationDeliveryRepository(store)
         self.workflow_definitions = MemoryWorkflowDefinitionRepository(store)
         self.workflow_executions = MemoryWorkflowExecutionRepository(store)
         self.project_workflow_bindings = MemoryProjectWorkflowBindingRepository(store)

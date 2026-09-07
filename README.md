@@ -569,6 +569,17 @@ ORCH-066 hardens Worker readiness monitoring for multi-process operation:
 - structured cycle logs expose attempted, succeeded, failed, and remaining-page information
 - deterministic repository and runtime tests prove stable pagination, lock-safe mutation, and fair sweeps
 
+ORCH-067 adds durable notification subscriptions and a delivery outbox:
+
+- projects register provider-neutral destinations by opaque reference without persisting credentials
+- subscriptions explicitly select alerted, critical, and resolved Worker-readiness transitions
+- supported readiness events create pending delivery intents in the same PostgreSQL transaction
+- immutable delivery snapshots retain the destination, payload, source event, alert, and idempotency key
+- unique subscription/event pairs suppress duplicate delivery creation across repeated evaluations
+- `notification.manage` protects subscription changes while project readers can inspect delivery history
+- disabling a subscription affects future events without deleting already-persisted delivery intents
+- no network delivery occurs until a separately installed Notification Worker and provider are added
+
 ## Prerequisites
 
 - Python 3.12

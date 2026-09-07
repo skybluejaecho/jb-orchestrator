@@ -71,6 +71,8 @@ def required_permission(method: str, path: str) -> ApiPermission:
         return ApiPermission.WORKFLOW_APPROVE
     if path.endswith("/scm-publications") or "/scm-publications/" in path:
         return ApiPermission.SCM_PUBLISH
+    if "/notification-subscriptions" in path:
+        return ApiPermission.NOTIFICATION_MANAGE
     if path.endswith("/cancel"):
         return ApiPermission.RUN_CANCEL
     if path.endswith("/workspace-operations"):

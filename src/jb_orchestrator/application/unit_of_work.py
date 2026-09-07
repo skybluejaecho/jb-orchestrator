@@ -18,6 +18,10 @@ from jb_orchestrator.domain.repositories import (
 )
 from jb_orchestrator.external_executions import ExternalExecutionRepository
 from jb_orchestrator.model_routing.repositories import ModelProfileRepository
+from jb_orchestrator.notifications import (
+    NotificationDeliveryRepository,
+    NotificationSubscriptionRepository,
+)
 from jb_orchestrator.phase_packs import PhasePackRepository
 from jb_orchestrator.scm import ScmPublicationAttemptRepository, ScmPublicationRepository
 from jb_orchestrator.security import ServiceAccountRepository
@@ -90,6 +94,12 @@ class UnitOfWork(Protocol):
 
     @property
     def worker_readiness_alerts(self) -> WorkerReadinessAlertRepository: ...
+
+    @property
+    def notification_subscriptions(self) -> NotificationSubscriptionRepository: ...
+
+    @property
+    def notification_deliveries(self) -> NotificationDeliveryRepository: ...
 
     @property
     def workflow_definitions(self) -> WorkflowDefinitionRepository: ...
