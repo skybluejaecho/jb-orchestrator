@@ -15,11 +15,13 @@ class WebhookSmokeError(RuntimeError):
 
 
 class WebhookStub:
-    def __init__(self, signing_secret: str) -> None:
+    def __init__(self, signing_secret: str, *, fail_first_delivery: bool = False) -> None:
         self._signing_secret = signing_secret.encode()
+        self._fail_first_delivery = fail_first_delivery
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
         self.deliveries: list[dict[str, Any]] = []
+        self.delivery_attempts = 0
 
     @property
     def endpoint_url(self) -> str:
@@ -48,6 +50,10 @@ class WebhookStub:
                 payload = json.loads(body)
                 if not isinstance(payload, dict) or not self.headers.get("Idempotency-Key"):
                     owner._respond(self, 400)
+                    return
+                owner.delivery_attempts += 1
+                if owner._fail_first_delivery and owner.delivery_attempts == 1:
+                    owner._respond(self, 503)
                     return
                 owner.deliveries.append(payload)
                 owner._respond(self, 202, request_id=f"webhook-{len(owner.deliveries)}")

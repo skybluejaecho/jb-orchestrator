@@ -3,6 +3,11 @@ from httpx import ASGITransport, AsyncClient
 from jb_orchestrator.api.main import create_app
 from jb_orchestrator.application import NotificationService, SecurityService
 from jb_orchestrator.domain import Project
+from jb_orchestrator.notifications import (
+    NotificationDelivery,
+    NotificationEventType,
+    NotificationFailureCode,
+)
 from jb_orchestrator.security import ApiPermission
 from tests.support import MemoryStore, MemoryUnitOfWork
 
@@ -106,3 +111,49 @@ async def test_notification_subscription_write_requires_dedicated_permission() -
     assert forbidden.status_code == 403
     assert created.status_code == 201
     assert readable.status_code == 200
+
+
+async def test_notification_delivery_attempts_and_manual_retry_api() -> None:
+    store = MemoryStore()
+    project = Project(
+        key="notification-retry-api",
+        name="Notification Retry API",
+        repository_url="https://example.com/notification-retry-api.git",
+    )
+    store.projects[project.id] = project
+    delivery = NotificationDelivery(
+        subscription_id=project.id,
+        project_id=project.id,
+        event_id=project.id,
+        alert_id=project.id,
+        event_type=NotificationEventType.WORKER_READINESS_ALERTED,
+        provider_key="webhook",
+        destination_ref="ops",
+        payload={"message": "alert"},
+        idempotency_key="notification:retry-api",
+    )
+    store.notification_deliveries[delivery.id] = delivery
+    service = NotificationService(lambda: MemoryUnitOfWork(store))
+    claimed = await service.claim_next(worker_id="worker-1", provider_key="webhook")
+    assert claimed is not None and claimed.lease_token is not None
+    await service.fail(
+        claimed.id,
+        claimed.lease_token,
+        "provider unavailable",
+        code=NotificationFailureCode.PROVIDER_UNAVAILABLE,
+    )
+    app = create_app(notification_service=service, auth_enabled=False)
+    base = f"/v1/projects/{project.id}/notification-deliveries/{delivery.id}"
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        attempts = await client.get(f"{base}/attempts")
+        retried = await client.post(f"{base}/retry")
+        replayed = await client.post(f"{base}/retry")
+
+    assert attempts.status_code == 200
+    assert attempts.json()[0]["trigger"] == "initial"
+    assert attempts.json()[0]["status"] == "failed"
+    assert "lease_token" not in attempts.json()[0]
+    assert retried.status_code == 202
+    assert retried.json()["status"] == "pending"
+    assert replayed.status_code == 200

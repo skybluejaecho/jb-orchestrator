@@ -33,6 +33,7 @@ from jb_orchestrator.api.schemas import (
     ModelProfileCreate,
     ModelProfileResponse,
     NodeExecutionResponse,
+    NotificationDeliveryAttemptResponse,
     NotificationDeliveryResponse,
     NotificationSubscriptionConfigure,
     NotificationSubscriptionCreate,
@@ -362,6 +363,45 @@ async def list_notification_deliveries(
             limit=limit,
         )
     ]
+
+
+@router.get(
+    "/projects/{project_id}/notification-deliveries/{delivery_id}/attempts",
+    response_model=list[NotificationDeliveryAttemptResponse],
+)
+async def list_notification_delivery_attempts(
+    project_id: UUID,
+    delivery_id: UUID,
+    service: NotificationServiceDependency,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[NotificationDeliveryAttemptResponse]:
+    return [
+        NotificationDeliveryAttemptResponse.model_validate(attempt)
+        for attempt in await service.list_attempts(project_id, delivery_id, limit=limit)
+    ]
+
+
+@router.post(
+    "/projects/{project_id}/notification-deliveries/{delivery_id}/retry",
+    response_model=NotificationDeliveryResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def retry_notification_delivery(
+    project_id: UUID,
+    delivery_id: UUID,
+    request: Request,
+    response: Response,
+    service: NotificationServiceDependency,
+) -> NotificationDeliveryResponse:
+    principal = getattr(request.state, "principal", None)
+    delivery, replayed = await service.retry(
+        project_id,
+        delivery_id,
+        requested_by=principal.account_key if principal is not None else "anonymous",
+    )
+    if replayed:
+        response.status_code = status.HTTP_200_OK
+    return NotificationDeliveryResponse.model_validate(delivery)
 
 
 def workflow_definition_response(

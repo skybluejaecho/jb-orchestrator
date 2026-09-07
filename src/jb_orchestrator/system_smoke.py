@@ -481,7 +481,7 @@ def run_system_smoke(
         )
         github_stub.__enter__()
         webhook_secret = "system-smoke-signing-secret"
-        webhook_stub = WebhookStub(webhook_secret)
+        webhook_stub = WebhookStub(webhook_secret, fail_first_delivery=True)
         webhook_stub.__enter__()
         processes: list[_ManagedProcess] = []
         clients: list[httpx.Client] = []
@@ -709,17 +709,64 @@ def run_system_smoke(
                 f"/v1/projects/{project['id']}/notification-deliveries",
                 headers=setup_headers,
             )
+            if not isinstance(delivered, list) or {item.get("status") for item in delivered} != {
+                "failed",
+                "succeeded",
+            }:
+                raise SystemSmokeError("Webhook failure was not durably classified")
+            failed_delivery = next(item for item in delivered if item.get("status") == "failed")
+            if failed_delivery.get("failure_code") != "provider_unavailable":
+                raise SystemSmokeError("transient Webhook failure was not classified")
+            retried_delivery = _request(
+                api,
+                "POST",
+                f"/v1/projects/{project['id']}/notification-deliveries/"
+                f"{failed_delivery['id']}/retry",
+                headers=setup_headers,
+            )
+            if retried_delivery.get("status") != "pending":
+                raise SystemSmokeError("failed Webhook delivery was not queued for retry")
+            _run_notification_worker(
+                project_root,
+                webhook_environment,
+                timeout_seconds=timeout_seconds,
+            )
+            completed_deliveries = _request(
+                api,
+                "GET",
+                f"/v1/projects/{project['id']}/notification-deliveries",
+                headers=setup_headers,
+            )
             if (
-                not isinstance(delivered, list)
-                or {item.get("status") for item in delivered} != {"succeeded"}
-                or any("lease_token" in item for item in delivered)
+                not isinstance(completed_deliveries, list)
+                or {item.get("status") for item in completed_deliveries} != {"succeeded"}
+                or any("lease_token" in item for item in completed_deliveries)
             ):
-                raise SystemSmokeError("Notification Worker did not durably complete deliveries")
+                raise SystemSmokeError("retried Webhook delivery did not succeed")
+            attempts = _request(
+                api,
+                "GET",
+                f"/v1/projects/{project['id']}/notification-deliveries/"
+                f"{failed_delivery['id']}/attempts",
+                headers=setup_headers,
+            )
+            if (
+                not isinstance(attempts, list)
+                or len(attempts) != 2
+                or attempts[0].get("trigger") != "manual"
+                or attempts[0].get("status") != "succeeded"
+                or attempts[1].get("trigger") != "initial"
+                or attempts[1].get("failure_code") != "provider_unavailable"
+                or any("lease_token" in attempt for attempt in attempts)
+            ):
+                raise SystemSmokeError("Webhook delivery attempt ledger is incomplete")
             if {item.get("event_type") for item in webhook_stub.deliveries} != {
                 "worker.readiness_alerted",
                 "worker.readiness_resolved",
             }:
                 raise SystemSmokeError("signed Webhook endpoint did not receive both events")
+            if webhook_stub.delivery_attempts != 3:
+                raise SystemSmokeError("Webhook manual retry did not execute exactly once")
             if not awaiting["artifacts"]:
                 raise SystemSmokeError("worker completed without producing a task artifact")
             _request(
