@@ -647,6 +647,15 @@ ORCH-073 brings notification delivery operations into Jarvis without moving exec
 - Jarvis server routes keep the service-account token out of the browser and preserve project scope
 - the Notification Worker remains the only component that claims and sends Delivery records
 
+ORCH-074 adds provider-neutral notification subscription management to Jarvis:
+
+- operators can register a provider key, opaque destination reference, and supported readiness
+  events for the selected project
+- existing subscriptions expose event-filter editing and explicit enable or disable controls
+- endpoint URLs and secrets remain exclusively in the Notification Worker environment
+- Jarvis validates the bounded event vocabulary before proxying changes with `notification.manage`
+- subscription Domain Events refresh the server-backed view without optimistic local ownership
+
 ## Prerequisites
 
 - Python 3.12
