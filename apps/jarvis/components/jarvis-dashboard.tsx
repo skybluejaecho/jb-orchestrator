@@ -42,6 +42,7 @@ import { ExecutionInspector } from '@/components/execution-inspector';
 import { WorkerPresencePanel } from '@/components/worker-presence';
 import { WorkerReadinessPanel } from '@/components/worker-readiness';
 import { NotificationDeliveries } from '@/components/notification-deliveries';
+import { NotificationSubscriptions } from '@/components/notification-subscriptions';
 
 type ConnectionState = 'connecting' | 'live' | 'degraded';
 
@@ -121,6 +122,8 @@ const eventTypes = [
   'notification.delivery_retried',
   'notification.delivery_retry_scheduled',
   'notification.delivery_automatic_retry_cancelled',
+  'notification.subscription_created',
+  'notification.subscription_configured',
   'budget.configured',
   'budget.limit_changed',
   'budget.reserved',
@@ -653,12 +656,20 @@ export function JarvisDashboard() {
           </div>
 
           {selectedProjectId && (
-            <NotificationDeliveries
-              key={selectedProjectId}
-              projectId={selectedProjectId}
-              revision={eventRevision}
-              onChanged={() => loadOverview(selectedProjectId)}
-            />
+            <div className="grid gap-5 xl:grid-cols-2">
+              <NotificationSubscriptions
+                key={`subscriptions-${selectedProjectId}`}
+                projectId={selectedProjectId}
+                revision={eventRevision}
+                onChanged={() => loadOverview(selectedProjectId)}
+              />
+              <NotificationDeliveries
+                key={`deliveries-${selectedProjectId}`}
+                projectId={selectedProjectId}
+                revision={eventRevision}
+                onChanged={() => loadOverview(selectedProjectId)}
+              />
+            </div>
           )}
 
           {selectedExecutionId && (
