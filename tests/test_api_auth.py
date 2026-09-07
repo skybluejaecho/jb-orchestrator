@@ -136,3 +136,11 @@ def test_notification_subscriptions_have_a_dedicated_write_permission() -> None:
         )
         is ApiPermission.NOTIFICATION_MANAGE
     )
+    assert (
+        required_permission(
+            "POST",
+            f"/v1/projects/{project_id}/notification-deliveries/"
+            f"{project_id}/automatic-retry/cancel",
+        )
+        is ApiPermission.NOTIFICATION_MANAGE
+    )
