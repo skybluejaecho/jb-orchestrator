@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 from httpx import ASGITransport, AsyncClient
 
@@ -238,4 +239,72 @@ async def test_active_project_evaluation_escalates_once_and_skips_archived_proje
     assert [event.event_type for event in store.events] == [
         "worker.readiness_alerted",
         "worker.readiness_critical",
+    ]
+
+
+async def test_evaluation_skips_alert_mutation_when_another_monitor_holds_lock() -> None:
+    store = MemoryStore()
+    project = Project(
+        key="locked-alerts",
+        name="Locked Alerts",
+        repository_url="https://github.com/example/locked.git",
+    )
+    store.projects[project.id] = project
+    ready_execution(store, project, "openclaw")
+    store.denied_readiness_evaluation_projects.add(project.id)
+
+    report = await WorkerReadinessService(lambda: MemoryUnitOfWork(store)).evaluate_project(
+        project.id
+    )
+
+    assert len(report.issues) == 1
+    assert report.alerts == ()
+    assert store.worker_readiness_alerts == {}
+    assert store.events == []
+
+
+async def test_active_project_batch_isolates_one_project_failure() -> None:
+    store = MemoryStore()
+    first = Project(
+        id=UUID(int=1),
+        key="first-active",
+        name="First Active",
+        repository_url="https://github.com/example/first.git",
+    )
+    second = Project(
+        id=UUID(int=2),
+        key="second-active",
+        name="Second Active",
+        repository_url="https://github.com/example/second.git",
+        created_at=first.created_at,
+    )
+    store.projects[first.id] = first
+    store.projects[second.id] = second
+
+    class FailingReadinessService(WorkerReadinessService):
+        async def evaluate_project(
+            self,
+            project_id: UUID,
+            *,
+            stale_after_seconds: float = 90.0,
+            critical_after_seconds: float = 300.0,
+            at: datetime | None = None,
+        ) -> object:
+            if project_id == first.id:
+                raise RuntimeError("isolated failure")
+            return await super().evaluate_project(
+                project_id,
+                stale_after_seconds=stale_after_seconds,
+                critical_after_seconds=critical_after_seconds,
+                at=at,
+            )
+
+    batch = await FailingReadinessService(
+        lambda: MemoryUnitOfWork(store)
+    ).evaluate_active_project_batch()
+
+    assert batch.attempted_count == 2
+    assert [report.project_id for report in batch.reports] == [second.id]
+    assert [(failure.project_id, failure.error_type) for failure in batch.failures] == [
+        (first.id, "RuntimeError")
     ]

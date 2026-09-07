@@ -1,9 +1,10 @@
 """SQLAlchemy adapter for durable worker-readiness alerts."""
 
+import hashlib
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jb_orchestrator.infrastructure.database.models import WorkerReadinessAlertRecord
@@ -31,6 +32,15 @@ def alert_from_record(record: WorkerReadinessAlertRecord) -> WorkerReadinessAler
 class SqlAlchemyWorkerReadinessAlertRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def try_acquire_project_evaluation_lock(self, project_id: UUID) -> bool:
+        bind = self._session.get_bind()
+        if bind.dialect.name != "postgresql":
+            return True
+        acquired = await self._session.scalar(
+            select(func.pg_try_advisory_xact_lock(_project_evaluation_lock_key(project_id)))
+        )
+        return bool(acquired)
 
     async def add(self, alert: WorkerReadinessAlert) -> None:
         self._session.add(WorkerReadinessAlertRecord(**self._values(alert)))
@@ -98,3 +108,12 @@ class SqlAlchemyWorkerReadinessAlertRepository:
             "critical_at": alert.critical_at,
             "resolved_at": alert.resolved_at,
         }
+
+
+def _project_evaluation_lock_key(project_id: UUID) -> int:
+    digest = hashlib.blake2b(
+        project_id.bytes,
+        digest_size=8,
+        person=b"jb-ready",
+    ).digest()
+    return int.from_bytes(digest, byteorder="big", signed=True)

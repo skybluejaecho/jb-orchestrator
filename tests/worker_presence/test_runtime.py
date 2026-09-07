@@ -1,4 +1,6 @@
 import asyncio
+from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 from jb_orchestrator.application import WorkerPresenceService, WorkerReadinessService
 from jb_orchestrator.domain import Project
@@ -46,3 +48,42 @@ async def test_readiness_monitor_evaluates_active_projects_once() -> None:
     )
 
     assert await runtime.run_once() == 1
+
+
+async def test_readiness_monitor_sweeps_every_active_project_across_cycles() -> None:
+    store = MemoryStore()
+    created_at = datetime(2026, 9, 7, tzinfo=UTC)
+    projects = [
+        Project(
+            id=UUID(int=index),
+            key=f"monitor-project-{index}",
+            name=f"Monitor Project {index}",
+            repository_url=f"https://github.com/example/monitor-{index}.git",
+            created_at=created_at - timedelta(minutes=index),
+        )
+        for index in range(1, 4)
+    ]
+    store.projects.update({project.id: project for project in projects})
+    runtime = WorkerReadinessMonitorRuntime(
+        WorkerReadinessService(lambda: MemoryUnitOfWork(store)),
+        poll_interval_seconds=1,
+        project_limit=2,
+    )
+
+    assert await runtime.run_once() == 2
+    assert runtime.last_cycle is not None
+    assert [report.project_id for report in runtime.last_cycle.reports] == [
+        projects[0].id,
+        projects[1].id,
+    ]
+
+    assert await runtime.run_once() == 1
+    assert runtime.last_cycle is not None
+    assert [report.project_id for report in runtime.last_cycle.reports] == [projects[2].id]
+
+    assert await runtime.run_once() == 2
+    assert runtime.last_cycle is not None
+    assert [report.project_id for report in runtime.last_cycle.reports] == [
+        projects[0].id,
+        projects[1].id,
+    ]

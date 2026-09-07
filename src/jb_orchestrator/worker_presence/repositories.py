@@ -26,6 +26,8 @@ class WorkerInstanceRepository(Protocol):
 
 
 class WorkerReadinessAlertRepository(Protocol):
+    async def try_acquire_project_evaluation_lock(self, project_id: UUID) -> bool: ...
+
     async def add(self, alert: WorkerReadinessAlert) -> None: ...
 
     async def get_occurrence(

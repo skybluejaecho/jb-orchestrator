@@ -117,10 +117,26 @@ class SqlAlchemyProjectRepository:
         record = await self._session.scalar(select(ProjectRecord).where(ProjectRecord.key == key))
         return project_from_record(record) if record is not None else None
 
-    async def list(self, *, status: ProjectStatus | None = None, limit: int = 100) -> list[Project]:
+    async def list(
+        self,
+        *,
+        status: ProjectStatus | None = None,
+        after: Project | None = None,
+        limit: int = 100,
+    ) -> list[Project]:
         statement = select(ProjectRecord)
         if status is not None:
             statement = statement.where(ProjectRecord.status == status)
+        if after is not None:
+            statement = statement.where(
+                or_(
+                    ProjectRecord.created_at < after.created_at,
+                    and_(
+                        ProjectRecord.created_at == after.created_at,
+                        ProjectRecord.id > after.id,
+                    ),
+                )
+            )
         records = await self._session.scalars(
             statement.order_by(ProjectRecord.created_at.desc(), ProjectRecord.id).limit(limit)
         )
