@@ -9,5 +9,5 @@ Publisher와 별도의 loopback API·로컬 bare remote fixture로 검증한다.
 설치한다. 전체 smoke는 다음처럼 core, GitHub Publisher와 이 fixture를 함께 설치한다.
 
 ```powershell
-uv run --with-editable . --with-editable adapters/github --with-editable tools/system-smoke-executor jb system smoke
+uv run --with-editable . --with-editable adapters/github --with-editable adapters/webhook --with-editable tools/system-smoke-executor jb system smoke
 ```
