@@ -250,6 +250,7 @@ async def _issue_tokens(suffix: str) -> tuple[str, str]:
                 ApiPermission.RUN_CANCEL,
                 ApiPermission.SCM_PUBLISH,
                 ApiPermission.WORKSPACE_MANAGE,
+                ApiPermission.NOTIFICATION_MANAGE,
             ),
             all_projects=True,
         )
@@ -376,6 +377,12 @@ def _run_notification_worker(
             "20",
             "--delivery-timeout",
             "10",
+            "--automatic-retry-limit",
+            "1",
+            "--automatic-retry-base-delay",
+            "300",
+            "--automatic-retry-max-delay",
+            "300",
         ],
         cwd=project_root,
         env=dict(environment),
@@ -416,7 +423,7 @@ def run_system_smoke(
     *,
     api_port: int = 18080,
     jarvis_port: int = 13000,
-    timeout_seconds: float = 30.0,
+    timeout_seconds: float = 60.0,
 ) -> SystemSmokeResult:
     """Exercise real process and HTTP boundaries against a disposable test database."""
 
@@ -540,21 +547,6 @@ def run_system_smoke(
                 headers=setup_headers,
                 payload={"definition_key": workflow_key, "definition_version": 1},
             )
-            notification_subscription = _request(
-                api,
-                "POST",
-                f"/v1/projects/{project['id']}/notification-subscriptions",
-                headers=setup_headers,
-                payload={
-                    "provider_key": "webhook",
-                    "destination_ref": "system-smoke-observer",
-                    "event_types": [
-                        "worker.readiness_alerted",
-                        "worker.readiness_resolved",
-                    ],
-                },
-            )
-
             jarvis_environment = base_environment | {
                 "JARVIS_CONTROL_PLANE_URL": f"http://{host}:{api_port}",
                 "JARVIS_API_TOKEN": jarvis_token,
@@ -575,6 +567,47 @@ def run_system_smoke(
                 timeout_seconds=timeout_seconds,
                 process=jarvis_process,
             )
+            notification_subscription = _request(
+                jarvis,
+                "POST",
+                "/api/notification-subscriptions",
+                payload={
+                    "projectId": project["id"],
+                    "providerKey": "webhook",
+                    "destinationRef": "system-smoke-observer",
+                    "eventTypes": ["worker.readiness_alerted"],
+                },
+            )
+            listed_subscriptions = _request(
+                jarvis,
+                "GET",
+                f"/api/notification-subscriptions?projectId={project['id']}",
+            )
+            if (
+                not isinstance(listed_subscriptions, list)
+                or len(listed_subscriptions) != 1
+                or listed_subscriptions[0].get("id") != notification_subscription.get("id")
+            ):
+                raise SystemSmokeError("Jarvis did not list the notification subscription")
+            configured_subscription = _request(
+                jarvis,
+                "PATCH",
+                "/api/notification-subscriptions/configure",
+                payload={
+                    "projectId": project["id"],
+                    "subscriptionId": notification_subscription["id"],
+                    "eventTypes": [
+                        "worker.readiness_alerted",
+                        "worker.readiness_resolved",
+                    ],
+                    "enabled": True,
+                },
+            )
+            if set(configured_subscription.get("event_types", [])) != {
+                "worker.readiness_alerted",
+                "worker.readiness_resolved",
+            }:
+                raise SystemSmokeError("Jarvis did not configure notification event filters")
 
             first = _request(
                 jarvis,
@@ -613,10 +646,9 @@ def run_system_smoke(
             ):
                 raise SystemSmokeError("readiness monitor did not persist the assignment alert")
             alerted_deliveries = _request(
-                api,
+                jarvis,
                 "GET",
-                f"/v1/projects/{project['id']}/notification-deliveries",
-                headers=setup_headers,
+                f"/api/notification-deliveries?projectId={project['id']}",
             )
             if (
                 not isinstance(alerted_deliveries, list)
@@ -670,10 +702,9 @@ def run_system_smoke(
             ):
                 raise SystemSmokeError("readiness monitor did not resolve the assignment alert")
             resolved_deliveries = _request(
-                api,
+                jarvis,
                 "GET",
-                f"/v1/projects/{project['id']}/notification-deliveries",
-                headers=setup_headers,
+                f"/api/notification-deliveries?projectId={project['id']}",
             )
             if not isinstance(resolved_deliveries, list) or {
                 delivery.get("event_type") for delivery in resolved_deliveries
@@ -704,10 +735,9 @@ def run_system_smoke(
                 timeout_seconds=timeout_seconds,
             )
             delivered = _request(
-                api,
+                jarvis,
                 "GET",
-                f"/v1/projects/{project['id']}/notification-deliveries",
-                headers=setup_headers,
+                f"/api/notification-deliveries?projectId={project['id']}",
             )
             if not isinstance(delivered, list) or {item.get("status") for item in delivered} != {
                 "failed",
@@ -717,12 +747,34 @@ def run_system_smoke(
             failed_delivery = next(item for item in delivered if item.get("status") == "failed")
             if failed_delivery.get("failure_code") != "provider_unavailable":
                 raise SystemSmokeError("transient Webhook failure was not classified")
-            retried_delivery = _request(
-                api,
+            if (
+                failed_delivery.get("failure_retryable") is not True
+                or failed_delivery.get("automatic_retry_limit") != 1
+                or not failed_delivery.get("next_attempt_at")
+            ):
+                raise SystemSmokeError("Webhook automatic retry was not durably scheduled")
+            cancelled_notification_retry = _request(
+                jarvis,
                 "POST",
-                f"/v1/projects/{project['id']}/notification-deliveries/"
-                f"{failed_delivery['id']}/retry",
-                headers=setup_headers,
+                "/api/notification-deliveries/automatic-retry/cancel",
+                payload={
+                    "projectId": project["id"],
+                    "deliveryId": failed_delivery["id"],
+                },
+            )
+            if (
+                cancelled_notification_retry.get("status") != "failed"
+                or cancelled_notification_retry.get("next_attempt_at") is not None
+            ):
+                raise SystemSmokeError("Jarvis did not cancel notification automatic retry")
+            retried_delivery = _request(
+                jarvis,
+                "POST",
+                "/api/notification-deliveries/retry",
+                payload={
+                    "projectId": project["id"],
+                    "deliveryId": failed_delivery["id"],
+                },
             )
             if retried_delivery.get("status") != "pending":
                 raise SystemSmokeError("failed Webhook delivery was not queued for retry")
@@ -732,10 +784,9 @@ def run_system_smoke(
                 timeout_seconds=timeout_seconds,
             )
             completed_deliveries = _request(
-                api,
+                jarvis,
                 "GET",
-                f"/v1/projects/{project['id']}/notification-deliveries",
-                headers=setup_headers,
+                f"/api/notification-deliveries?projectId={project['id']}",
             )
             if (
                 not isinstance(completed_deliveries, list)
@@ -744,11 +795,10 @@ def run_system_smoke(
             ):
                 raise SystemSmokeError("retried Webhook delivery did not succeed")
             attempts = _request(
-                api,
+                jarvis,
                 "GET",
-                f"/v1/projects/{project['id']}/notification-deliveries/"
-                f"{failed_delivery['id']}/attempts",
-                headers=setup_headers,
+                "/api/notification-deliveries/attempts"
+                f"?projectId={project['id']}&deliveryId={failed_delivery['id']}",
             )
             if (
                 not isinstance(attempts, list)

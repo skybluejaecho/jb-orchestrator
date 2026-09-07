@@ -322,7 +322,7 @@ def smoke_test_local_system(
     jarvis_port: Annotated[int, typer.Option(help="Temporary Jarvis port.")] = 13000,
     timeout_seconds: Annotated[
         float, typer.Option(help="Per-process readiness and transition timeout.")
-    ] = 30.0,
+    ] = 60.0,
 ) -> None:
     """Exercise PostgreSQL, API, Worker, and Jarvis using disposable test data."""
 

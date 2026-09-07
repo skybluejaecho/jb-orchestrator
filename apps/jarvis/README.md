@@ -123,4 +123,7 @@ uv run --with-editable . --with-editable adapters/github --with-editable adapter
 ```
 
 smoke executor는 외부 agent runtime을 호출하지 않으며 `JB_ENVIRONMENT=test`가 아니면 시작을
-거부한다.
+거부한다. 알림 경계는 Jarvis route로 구독 생성과 설정, Delivery 및 Attempt 조회, 자동 재시도
+예약 취소와 즉시 재시도를 수행한 뒤 실제 Notification Worker와 서명 Webhook Stub의 결과를
+검증한다. Vinext 콜드 스타트를 고려한 기본 준비 제한은 60초이며 `--timeout-seconds`로 조정할 수
+있다.
