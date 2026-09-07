@@ -9,6 +9,7 @@ from typer.testing import CliRunner
 
 from jb_orchestrator.cli.main import app
 from jb_orchestrator.config import get_settings
+from jb_orchestrator.release_check import ReleaseCheckResult
 from jb_orchestrator.system_smoke import SystemSmokeResult
 
 runner = CliRunner()
@@ -243,3 +244,28 @@ def test_system_smoke_reports_process_boundary_result(monkeypatch: MonkeyPatch) 
     assert payload["executions"]["cancelled"]["status"] == "cancelled"
     assert payload["scm_publication"]["status"] == "succeeded"
     assert payload["scm_publication"]["provider"] == "github"
+
+
+def test_release_check_command_reports_gate_result(monkeypatch: MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_release_check(*_: object, **options: object) -> ReleaseCheckResult:
+        captured.update(options)
+        return ReleaseCheckResult(
+            checks=("python-lock", "python-tests"),
+            duration_seconds=1.25,
+            system_smoke_included=False,
+        )
+
+    monkeypatch.setattr("jb_orchestrator.cli.main.run_release_check", fake_release_check)
+
+    result = runner.invoke(app, ["system", "release-check", "--timeout-seconds", "30"])
+
+    assert result.exit_code == 0
+    assert captured == {"include_system_smoke": False, "timeout_seconds": 30.0}
+    assert json.loads(result.stdout) == {
+        "checks": ["python-lock", "python-tests"],
+        "duration_seconds": 1.25,
+        "status": "ready",
+        "system_smoke_included": False,
+    }

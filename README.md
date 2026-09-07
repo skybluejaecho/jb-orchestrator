@@ -674,6 +674,15 @@ ORCH-076 improves Jarvis notification operations without tightening orchestratio
 - provider diagnostics remain advisory, so operators can configure subscriptions before deployment
 - Worker presence labels now cover Notification and readiness-monitor processes explicitly
 
+ORCH-077 makes first-release readiness reproducible locally and visible as one CI decision:
+
+- `jb system release-check` runs the locked Python, Jarvis, and OpenClaw contract gates in a stable
+  fail-fast order
+- `--include-system-smoke` appends migrations and the complete real-process acceptance boundary
+- the full mode fails closed unless `JB_ENVIRONMENT=test` is explicitly configured
+- each command has a bounded timeout and failures retain the final diagnostic output
+- CI aggregates every independent job into one `Release readiness` status for branch protection
+
 ## Prerequisites
 
 - Python 3.12
@@ -963,6 +972,22 @@ npm run format:check
 npm run lint
 npm test
 npm run build
+```
+
+동일한 릴리스 게이트를 저장소 root에서 한 번에 실행할 수 있습니다. 기본 모드는 외부 agent
+runtime 없이 Python lock·품질·테스트, Jarvis 품질·테스트·빌드, OpenClaw protocol contract를
+검증합니다.
+
+```powershell
+uv run jb system release-check
+```
+
+전체 process 경계까지 검증하려면 반드시 비어 있는 일회용 PostgreSQL test database를 지정합니다.
+
+```powershell
+$env:JB_ENVIRONMENT = "test"
+$env:JB_DATABASE_URL = "postgresql+asyncpg://jb_orchestrator:jb_orchestrator@localhost:5432/jb_orchestrator"
+uv run jb system release-check --include-system-smoke
 ```
 
 전체 로컬 경계는 반드시 비어 있는 일회용 PostgreSQL test database에서 검증합니다. 다음 명령은

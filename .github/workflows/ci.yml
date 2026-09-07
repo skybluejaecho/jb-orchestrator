@@ -187,3 +187,28 @@ jobs:
           uv run --with-editable . --with-editable adapters/github
           --with-editable adapters/webhook --with-editable tools/system-smoke-executor
           jb system smoke
+
+  release-readiness:
+    name: Release readiness
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - quality
+      - jarvis
+      - openclaw-contract
+      - test
+      - system-smoke
+    steps:
+      - name: Require every release gate
+        env:
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          JARVIS_RESULT: ${{ needs.jarvis.result }}
+          OPENCLAW_RESULT: ${{ needs.openclaw-contract.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          SYSTEM_SMOKE_RESULT: ${{ needs.system-smoke.result }}
+        run: |
+          test "$QUALITY_RESULT" = "success"
+          test "$JARVIS_RESULT" = "success"
+          test "$OPENCLAW_RESULT" = "success"
+          test "$TEST_RESULT" = "success"
+          test "$SYSTEM_SMOKE_RESULT" = "success"
