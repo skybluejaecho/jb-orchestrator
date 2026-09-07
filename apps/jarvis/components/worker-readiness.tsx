@@ -46,6 +46,7 @@ type ReadinessAlert = ReadinessIssue & {
     | 'none';
   first_detected_at: string;
   last_observed_at: string;
+  critical_at: string | null;
   resolved_at: string | null;
 };
 
