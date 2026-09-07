@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from jb_orchestrator.application import (
     CreateUserRequest,
+    NotificationService,
     OrchestrationService,
     RegisterProject,
     WorkerPresenceService,
@@ -11,6 +12,7 @@ from jb_orchestrator.application import (
     WorkflowService,
 )
 from jb_orchestrator.infrastructure.database import Base, SqlAlchemyUnitOfWork
+from jb_orchestrator.notifications import NotificationEventType
 from jb_orchestrator.worker_presence import (
     WorkerKind,
     WorkerLifecycleStatus,
@@ -88,6 +90,14 @@ async def test_worker_readiness_alert_round_trips_through_database() -> None:
     await workflow.start(created.run.id, "unavailable", 1)
 
     now = datetime.now(UTC)
+    notification_service = NotificationService(factory)
+    subscription, _ = await notification_service.create_subscription(
+        project.id,
+        provider_key="webhook",
+        destination_ref="database-target",
+        event_types=(NotificationEventType.WORKER_READINESS_ALERTED,),
+        created_by="test",
+    )
     service = WorkerReadinessService(factory)
     report = await service.evaluate_project(project.id, at=now, critical_after_seconds=1)
     await service.evaluate_project(
@@ -103,4 +113,8 @@ async def test_worker_readiness_alert_round_trips_through_database() -> None:
     assert stored.id == report.alerts[0].id
     assert stored.executor_key == "specialized"
     assert stored.critical_at is not None
+    [delivery] = await notification_service.list_deliveries(project.id)
+    assert delivery.subscription_id == subscription.id
+    assert delivery.alert_id == stored.id
+    assert delivery.event_type is NotificationEventType.WORKER_READINESS_ALERTED
     await engine.dispose()

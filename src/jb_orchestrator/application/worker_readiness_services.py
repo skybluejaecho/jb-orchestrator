@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from jb_orchestrator.application.exceptions import ResourceNotFound
+from jb_orchestrator.application.notification_services import enqueue_notification_deliveries
 from jb_orchestrator.application.unit_of_work import UnitOfWork
 from jb_orchestrator.domain import DomainEvent, Project, ProjectStatus
 from jb_orchestrator.worker_presence import (
@@ -278,23 +279,23 @@ class WorkerReadinessService:
     async def _append_alert_event(
         unit_of_work: UnitOfWork, alert: WorkerReadinessAlert, event_type: str
     ) -> None:
-        await unit_of_work.events.append(
-            DomainEvent(
-                aggregate_type="project",
-                aggregate_id=alert.project_id,
-                event_type=event_type,
-                payload={
-                    "alert_id": str(alert.id),
-                    "workflow_execution_id": str(alert.workflow_execution_id),
-                    "run_id": str(alert.run_id),
-                    "node_key": alert.node_key,
-                    "executor_key": alert.executor_key,
-                    "reason": alert.reason.value,
-                    "status": alert.status.value,
-                    "critical_at": alert.critical_at.isoformat() if alert.critical_at else None,
-                },
-            )
+        event = DomainEvent(
+            aggregate_type="project",
+            aggregate_id=alert.project_id,
+            event_type=event_type,
+            payload={
+                "alert_id": str(alert.id),
+                "workflow_execution_id": str(alert.workflow_execution_id),
+                "run_id": str(alert.run_id),
+                "node_key": alert.node_key,
+                "executor_key": alert.executor_key,
+                "reason": alert.reason.value,
+                "status": alert.status.value,
+                "critical_at": alert.critical_at.isoformat() if alert.critical_at else None,
+            },
         )
+        await unit_of_work.events.append(event)
+        await enqueue_notification_deliveries(unit_of_work, event)
 
     @staticmethod
     def _latest_execution_workers(workers: list[WorkerInstance]) -> list[WorkerInstance]:

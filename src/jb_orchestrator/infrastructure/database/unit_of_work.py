@@ -22,6 +22,10 @@ from jb_orchestrator.infrastructure.database.external_execution_repositories imp
 from jb_orchestrator.infrastructure.database.model_repositories import (
     SqlAlchemyModelProfileRepository,
 )
+from jb_orchestrator.infrastructure.database.notification_repositories import (
+    SqlAlchemyNotificationDeliveryRepository,
+    SqlAlchemyNotificationSubscriptionRepository,
+)
 from jb_orchestrator.infrastructure.database.phase_pack_repositories import (
     SqlAlchemyPhasePackRepository,
 )
@@ -78,6 +82,8 @@ class SqlAlchemyUnitOfWork:
     scm_publication_attempts: SqlAlchemyScmPublicationAttemptRepository
     worker_instances: SqlAlchemyWorkerInstanceRepository
     worker_readiness_alerts: SqlAlchemyWorkerReadinessAlertRepository
+    notification_subscriptions: SqlAlchemyNotificationSubscriptionRepository
+    notification_deliveries: SqlAlchemyNotificationDeliveryRepository
     workflow_definitions: SqlAlchemyWorkflowDefinitionRepository
     workflow_executions: SqlAlchemyWorkflowExecutionRepository
     project_workflow_bindings: SqlAlchemyProjectWorkflowBindingRepository
@@ -107,6 +113,10 @@ class SqlAlchemyUnitOfWork:
         self.scm_publication_attempts = SqlAlchemyScmPublicationAttemptRepository(self._session)
         self.worker_instances = SqlAlchemyWorkerInstanceRepository(self._session)
         self.worker_readiness_alerts = SqlAlchemyWorkerReadinessAlertRepository(self._session)
+        self.notification_subscriptions = SqlAlchemyNotificationSubscriptionRepository(
+            self._session
+        )
+        self.notification_deliveries = SqlAlchemyNotificationDeliveryRepository(self._session)
         self.workflow_definitions = SqlAlchemyWorkflowDefinitionRepository(self._session)
         self.workflow_executions = SqlAlchemyWorkflowExecutionRepository(self._session)
         self.project_workflow_bindings = SqlAlchemyProjectWorkflowBindingRepository(self._session)

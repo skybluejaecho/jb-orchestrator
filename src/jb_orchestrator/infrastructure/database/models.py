@@ -32,6 +32,7 @@ from jb_orchestrator.domain.runs import RunStatus
 from jb_orchestrator.external_executions import ExternalExecutionStatus
 from jb_orchestrator.infrastructure.database.base import Base
 from jb_orchestrator.model_routing import ModelTier
+from jb_orchestrator.notifications import NotificationDeliveryStatus, NotificationEventType
 from jb_orchestrator.scm import (
     ScmPublicationAttemptStatus,
     ScmPublicationAttemptTrigger,
@@ -674,6 +675,73 @@ class WorkerReadinessAlertRecord(Base):
     last_observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     critical_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class NotificationSubscriptionRecord(Base):
+    """Project-scoped destination and accepted notification event types."""
+
+    __tablename__ = "notification_subscriptions"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "provider_key",
+            "destination_ref",
+            name="uq_notification_subscription_destination",
+        ),
+        Index("ix_notification_subscriptions_project_enabled", "project_id", "enabled"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    provider_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    destination_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    event_types: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class NotificationDeliveryRecord(Base):
+    """Immutable intent to deliver one project event to one subscription."""
+
+    __tablename__ = "notification_deliveries"
+    __table_args__ = (
+        UniqueConstraint(
+            "subscription_id",
+            "event_id",
+            name="uq_notification_delivery_subscription_event",
+        ),
+        Index("ix_notification_deliveries_project_status", "project_id", "status"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    subscription_id: Mapped[UUID] = mapped_column(
+        ForeignKey("notification_subscriptions.id", ondelete="CASCADE"), nullable=False
+    )
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    event_id: Mapped[UUID] = mapped_column(
+        ForeignKey("events.id", ondelete="CASCADE"), nullable=False
+    )
+    alert_id: Mapped[UUID] = mapped_column(
+        ForeignKey("worker_readiness_alerts.id", ondelete="CASCADE"), nullable=False
+    )
+    event_type: Mapped[NotificationEventType] = mapped_column(
+        string_enum(NotificationEventType, "notification_event_type", length=64), nullable=False
+    )
+    provider_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    destination_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    status: Mapped[NotificationDeliveryStatus] = mapped_column(
+        string_enum(NotificationDeliveryStatus, "notification_delivery_status"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class WorkflowDefinitionRecord(Base):
