@@ -543,6 +543,15 @@ ORCH-063 adds durable Worker readiness alerts:
 - configurable duration thresholds distinguish warning from critical conditions
 - Jarvis shows persisted severity, elapsed time, and capability-specific recovery guidance
 
+ORCH-064 moves Worker readiness evaluation into an observable server-side monitor:
+
+- a dedicated process evaluates every active project without depending on an open Jarvis browser
+- the monitor registers its own process lifetime and heartbeat in the shared Worker ledger
+- repeated cycles preserve alert identity and emit one durable event when an alert becomes critical
+- archived projects are excluded and each cycle has an explicit project bound
+- Jarvis reads the resulting ledger without mutating orchestration state
+- the critical transition provides a stable source event for later notification adapters
+
 ## Prerequisites
 
 - Python 3.12
@@ -556,6 +565,7 @@ Copy-Item .env.example .env
 uv sync --extra dev
 docker compose up -d postgres
 uv run alembic upgrade head
+uv run jb-readiness-monitor
 ```
 
 원격 클라이언트를 연결하려면 먼저 서비스 계정을 발급합니다. Token 원문은 이 명령에서만
@@ -583,6 +593,7 @@ uv run jb doctor
 uv run jb skill digest skills/my-skill
 uv run jb-worker --list-executors
 uv run jb-scm-worker --list-publishers
+uv run jb-readiness-monitor
 uv run jb-mcp
 # After installing at least one executor adapter:
 uv run jb-worker --once

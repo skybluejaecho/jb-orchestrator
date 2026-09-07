@@ -357,6 +357,27 @@ def _run_scm_worker(
         raise SystemSmokeError(f"SCM worker failed with exit code {worker.returncode}\n{output}")
 
 
+def _run_readiness_monitor(
+    project_root: Path,
+    environment: Mapping[str, str],
+    *,
+    timeout_seconds: float,
+) -> None:
+    monitor = subprocess.run(
+        [sys.executable, "-m", "jb_orchestrator.worker_presence.monitor_main", "--once"],
+        cwd=project_root,
+        env=dict(environment),
+        capture_output=True,
+        timeout=timeout_seconds,
+        check=False,
+    )
+    if monitor.returncode != 0:
+        output = (monitor.stdout + monitor.stderr).decode(errors="replace")
+        raise SystemSmokeError(
+            f"readiness monitor failed with exit code {monitor.returncode}\n{output}"
+        )
+
+
 def run_system_smoke(
     project_root: Path,
     *,
@@ -516,6 +537,11 @@ def run_system_smoke(
                     "prompt": "Complete the deterministic system smoke task.",
                 },
             )
+            _run_readiness_monitor(
+                project_root,
+                base_environment,
+                timeout_seconds=timeout_seconds,
+            )
             unassigned = _request(
                 jarvis,
                 "GET",
@@ -529,6 +555,13 @@ def run_system_smoke(
                 or unassigned.get("online_execution_workers") != 0
             ):
                 raise SystemSmokeError("READY task without an online worker was not diagnosed")
+            unassigned_alerts = unassigned.get("alerts")
+            if (
+                not isinstance(unassigned_alerts, list)
+                or len(unassigned_alerts) != 1
+                or unassigned_alerts[0].get("status") != "active"
+            ):
+                raise SystemSmokeError("readiness monitor did not persist the assignment alert")
             worker = subprocess.run(
                 [sys.executable, "-m", "jb_orchestrator.worker.main", "--once"],
                 cwd=project_root,
@@ -554,6 +587,23 @@ def run_system_smoke(
             )
             if assigned.get("issues") != []:
                 raise SystemSmokeError("completed task remained in worker readiness diagnostics")
+            _run_readiness_monitor(
+                project_root,
+                base_environment,
+                timeout_seconds=timeout_seconds,
+            )
+            resolved = _request(
+                jarvis,
+                "GET",
+                f"/api/worker-readiness?projectId={project['id']}",
+            )
+            resolved_alerts = resolved.get("alerts")
+            if (
+                not isinstance(resolved_alerts, list)
+                or len(resolved_alerts) != 1
+                or resolved_alerts[0].get("status") != "resolved"
+            ):
+                raise SystemSmokeError("readiness monitor did not resolve the assignment alert")
             if not awaiting["artifacts"]:
                 raise SystemSmokeError("worker completed without producing a task artifact")
             _request(
@@ -689,9 +739,9 @@ def run_system_smoke(
                 for instance in worker_instances
                 if instance.get("observed_status") == "stopped"
             }
-            if not {"execution", "scm"}.issubset(worker_kinds):
+            if not {"execution", "scm", "readiness_monitor"}.issubset(worker_kinds):
                 raise SystemSmokeError(
-                    "execution and SCM worker process lifetimes were not recorded"
+                    "execution, SCM, and readiness monitor process lifetimes were not recorded"
                 )
 
             second = _request(

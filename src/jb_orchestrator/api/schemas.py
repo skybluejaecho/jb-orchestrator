@@ -384,6 +384,7 @@ class WorkerReadinessAlertResponse(BaseModel):
     recommended_action: str
     first_detected_at: datetime
     last_observed_at: datetime
+    critical_at: datetime | None
     resolved_at: datetime | None
 
 

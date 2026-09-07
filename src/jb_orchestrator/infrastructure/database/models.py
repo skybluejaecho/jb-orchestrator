@@ -49,7 +49,7 @@ from jb_orchestrator.workflows.models import NodeExecutionStatus, NodeOutcome, W
 from jb_orchestrator.workspace_operations import WorkspaceOperationKind, WorkspaceOperationStatus
 
 
-def string_enum(enum_type: type[Any], name: str) -> Enum:
+def string_enum(enum_type: type[Any], name: str, *, length: int | None = None) -> Enum:
     """Store string enum values portably with a database check constraint."""
 
     return Enum(
@@ -59,6 +59,7 @@ def string_enum(enum_type: type[Any], name: str) -> Enum:
         create_constraint=True,
         values_callable=lambda members: [member.value for member in members],
         validate_strings=True,
+        length=length,
     )
 
 
@@ -622,7 +623,9 @@ class WorkerInstanceRecord(Base):
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     worker_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    kind: Mapped[WorkerKind] = mapped_column(string_enum(WorkerKind, "worker_kind"), nullable=False)
+    kind: Mapped[WorkerKind] = mapped_column(
+        string_enum(WorkerKind, "worker_kind", length=32), nullable=False
+    )
     hostname: Mapped[str] = mapped_column(String(255), nullable=False)
     process_id: Mapped[int] = mapped_column(Integer, nullable=False)
     capabilities: Mapped[list[str]] = mapped_column(JSON, nullable=False)
@@ -669,6 +672,7 @@ class WorkerReadinessAlertRecord(Base):
     )
     first_detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     last_observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    critical_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 

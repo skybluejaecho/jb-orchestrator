@@ -11,8 +11,7 @@ export async function GET(request: Request) {
   }
   try {
     const response = await controlPlaneRequest(
-      `/v1/projects/${encodeURIComponent(projectId)}/worker-readiness/evaluate`,
-      { method: 'POST' },
+      `/v1/projects/${encodeURIComponent(projectId)}/worker-readiness`,
     );
     return Response.json(await response.json(), { status: response.status });
   } catch (error) {

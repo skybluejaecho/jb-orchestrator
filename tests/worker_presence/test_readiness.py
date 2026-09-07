@@ -4,7 +4,7 @@ from httpx import ASGITransport, AsyncClient
 
 from jb_orchestrator.api.main import create_app
 from jb_orchestrator.application import WorkerPresenceService, WorkerReadinessService
-from jb_orchestrator.domain import Project, Run, UserRequest
+from jb_orchestrator.domain import Project, ProjectStatus, Run, UserRequest
 from jb_orchestrator.worker_presence import (
     WorkerKind,
     WorkerReadinessAlertStatus,
@@ -202,3 +202,40 @@ async def test_evaluation_api_returns_alert_severity_and_recovery_action() -> No
     assert alert["status"] == "active"
     assert alert["severity"] == "warning"
     assert alert["recommended_action"] == "start_capable_worker"
+
+
+async def test_active_project_evaluation_escalates_once_and_skips_archived_projects() -> None:
+    store = MemoryStore()
+    active = Project(
+        key="active-alerts",
+        name="Active Alerts",
+        repository_url="https://github.com/example/active.git",
+    )
+    archived = Project(
+        key="archived-alerts",
+        name="Archived Alerts",
+        repository_url="https://github.com/example/archived.git",
+        status=ProjectStatus.ARCHIVED,
+    )
+    store.projects[active.id] = active
+    store.projects[archived.id] = archived
+    ready_execution(store, active, "openclaw")
+    ready_execution(store, archived, "specialized")
+    service = WorkerReadinessService(lambda: MemoryUnitOfWork(store))
+    now = datetime.now(UTC)
+
+    first = await service.evaluate_active_projects(at=now, critical_after_seconds=30)
+    second = await service.evaluate_active_projects(
+        at=now + timedelta(seconds=31), critical_after_seconds=30
+    )
+    third = await service.evaluate_active_projects(
+        at=now + timedelta(seconds=60), critical_after_seconds=30
+    )
+
+    assert [report.project_id for report in first] == [active.id]
+    assert second[0].alerts[0].critical_at == now + timedelta(seconds=31)
+    assert third[0].alerts[0].critical_at == now + timedelta(seconds=31)
+    assert [event.event_type for event in store.events] == [
+        "worker.readiness_alerted",
+        "worker.readiness_critical",
+    ]

@@ -13,6 +13,7 @@ class WorkerKind(StrEnum):
     EXECUTION = "execution"
     WORKSPACE = "workspace"
     SCM = "scm"
+    READINESS_MONITOR = "readiness_monitor"
 
 
 class WorkerLifecycleStatus(StrEnum):
