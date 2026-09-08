@@ -103,19 +103,50 @@ class ProjectRecord(TimestampMixin, Base):
 
 
 class ServiceAccountRecord(Base):
-    """Hashed bearer credential with explicit permissions and project scope."""
+    """Stable API identity with explicit permissions and project scope."""
 
     __tablename__ = "service_accounts"
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    token_digest: Mapped[str] = mapped_column(String(71), nullable=False)
     permissions: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     project_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     all_projects: Mapped[bool] = mapped_column(nullable=False, default=False)
     enabled: Mapped[bool] = mapped_column(nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ServiceAccountCredentialRecord(Base):
+    """Independently revocable bearer credential for a service account."""
+
+    __tablename__ = "service_account_credentials"
+    __table_args__ = (
+        CheckConstraint(
+            "expires_at IS NULL OR expires_at > created_at",
+            name="credential_expiration_after_creation",
+        ),
+        CheckConstraint(
+            "revoked_at IS NULL OR revoked_at >= created_at",
+            name="credential_revocation_after_creation",
+        ),
+        CheckConstraint(
+            "last_used_at IS NULL OR last_used_at >= created_at",
+            name="credential_usage_after_creation",
+        ),
+        Index("ix_service_account_credentials_account_id", "account_id"),
+        Index("ix_service_account_credentials_expires_at", "expires_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    account_id: Mapped[UUID] = mapped_column(
+        ForeignKey("service_accounts.id", ondelete="CASCADE"), nullable=False
+    )
+    token_digest: Mapped[str] = mapped_column(String(71), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ProjectWorkflowBindingRecord(TimestampMixin, Base):

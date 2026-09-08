@@ -25,7 +25,10 @@ from jb_orchestrator.notifications import (
 )
 from jb_orchestrator.phase_packs import PhasePackRepository
 from jb_orchestrator.scm import ScmPublicationAttemptRepository, ScmPublicationRepository
-from jb_orchestrator.security import ServiceAccountRepository
+from jb_orchestrator.security import (
+    ServiceAccountCredentialRepository,
+    ServiceAccountRepository,
+)
 from jb_orchestrator.skills.repositories import SkillRepository
 from jb_orchestrator.worker_presence import (
     WorkerInstanceRepository,
@@ -116,6 +119,9 @@ class UnitOfWork(Protocol):
 
     @property
     def service_accounts(self) -> ServiceAccountRepository: ...
+
+    @property
+    def service_account_credentials(self) -> ServiceAccountCredentialRepository: ...
 
     async def __aenter__(self) -> Self: ...
 
