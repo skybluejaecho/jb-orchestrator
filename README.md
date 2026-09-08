@@ -726,6 +726,18 @@ ORCH-081 establishes a guarded container image release boundary:
 - published images include OCI metadata, provenance, and an SBOM
 - server and Jarvis operators independently pin the exact image version they deploy
 
+ORCH-082 separates stable service-account identity from revocable bearer credentials:
+
+- one service account can own multiple credentials without duplicating permissions or project scope
+- each credential has independent expiration, revocation, and last-used timestamps
+- revoking an account still disables every credential that belongs to it
+- tokens issued before this migration remain valid because their existing identifier and digest are
+  backfilled as the account's first credential
+- the credential identifier is included in authenticated principals and issuance output so later
+  audit and rotation workflows can identify the exact secret that was used
+- credential rotation and revocation management endpoints are intentionally deferred to a separate
+  operational API/CLI change
+
 ## Prerequisites
 
 - Python 3.12
