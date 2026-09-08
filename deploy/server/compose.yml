@@ -1,10 +1,10 @@
-name: jb-orchestrator
+name: jb-orchestrator-server
 
 x-runtime-image: &runtime-image
   image: ${JB_RUNTIME_IMAGE:-jb-orchestrator-runtime:0.1.0-dev}
   build:
     context: ../..
-    dockerfile: deploy/single-host/Dockerfile.runtime
+    dockerfile: deploy/server/Dockerfile.runtime
 
 x-core-environment: &core-environment
   JB_ENVIRONMENT: production
@@ -69,7 +69,7 @@ services:
       timeout: 5s
       retries: 12
     ports:
-      - "${JB_API_PORT:-8000}:8000"
+      - "${JB_API_BIND_ADDRESS:-127.0.0.1}:${JB_API_PORT:-8000}:8000"
 
   readiness-monitor:
     <<: *runtime-defaults
@@ -136,36 +136,6 @@ services:
       JB_WEBHOOK_DESTINATIONS: ${JB_WEBHOOK_DESTINATIONS:-{}}
     depends_on: *database-dependency
 
-  jarvis:
-    image: ${JB_JARVIS_IMAGE:-jb-orchestrator-jarvis:0.1.0-dev}
-    build:
-      context: ../..
-      dockerfile: deploy/single-host/Dockerfile.jarvis
-    profiles: ["jarvis"]
-    init: true
-    restart: unless-stopped
-    stop_grace_period: 20s
-    environment:
-      JARVIS_CONTROL_PLANE_URL: ${JARVIS_CONTROL_PLANE_URL}
-      JARVIS_API_TOKEN: ${JARVIS_API_TOKEN}
-    depends_on:
-      api:
-        condition: service_healthy
-    healthcheck:
-      test:
-        - CMD
-        - node
-        - -e
-        - >-
-          fetch('http://127.0.0.1:3300').then(response => {
-            if (!response.ok) process.exit(1)
-          }).catch(() => process.exit(1))
-      interval: 10s
-      timeout: 5s
-      retries: 18
-    ports:
-      - "${JB_JARVIS_PORT:-3300}:3300"
-
   admin:
     <<: *runtime-image
     profiles: ["tools"]
@@ -181,4 +151,3 @@ volumes:
   openclaw-device:
   postgres-data:
   skill-cache:
-

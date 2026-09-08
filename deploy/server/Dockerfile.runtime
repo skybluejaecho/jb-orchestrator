@@ -29,4 +29,3 @@ RUN mkdir -p /state/openclaw-device /workspaces/repositories /workspaces/worktre
 USER jb
 
 CMD ["jb-api"]
-

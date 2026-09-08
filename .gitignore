@@ -17,6 +17,7 @@ dist/
 build/
 *.egg-info/
 .jb-orchestrator/
-deploy/single-host/.env
-deploy/single-host/runtime/
+deploy/server/.env
+deploy/server/runtime/
+deploy/clients/jarvis/.env
 node_modules/
