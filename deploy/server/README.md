@@ -26,13 +26,21 @@ docker compose --env-file deploy/server/.env `
   -f deploy/server/compose.yml --profile "*" config --quiet
 ~~~
 
+For an operational deployment, set JB_RUNTIME_IMAGE to an explicit published version such as
+ghcr.io/skybluejaecho/jb-orchestrator-runtime:0.1.0. Do not use a floating tag. Authenticate the
+Docker host first when the GHCR package is private. Leave the development image value unchanged
+only when intentionally building from the checked-out source with --build.
+
 ## Start
 
 Start the database, apply migrations once, then keep the API and readiness monitor running:
 
 ~~~powershell
 docker compose --env-file deploy/server/.env `
-  -f deploy/server/compose.yml up -d --build
+  -f deploy/server/compose.yml pull
+
+docker compose --env-file deploy/server/.env `
+  -f deploy/server/compose.yml up -d
 ~~~
 
 Add only the capabilities this host owns:

@@ -717,6 +717,15 @@ ORCH-080 separates server ownership from the local Jarvis client without splitti
 - Jarvis connects to the remote Control Plane using a distinct least-privilege service-account token
 - CI and contract tests validate the server and client compositions independently
 
+ORCH-081 establishes a guarded container image release boundary:
+
+- CI builds the Runtime and Jarvis images and verifies their non-root execution contracts
+- only stable `vX.Y.Z` tags whose component versions agree may publish packages
+- release tags must point to commits contained in `main`
+- GHCR receives explicit SemVer and source-commit tags without a mutable `latest` tag
+- published images include OCI metadata, provenance, and an SBOM
+- server and Jarvis operators independently pin the exact image version they deploy
+
 ## Prerequisites
 
 - Python 3.12
@@ -740,6 +749,8 @@ uv run jb-notification-worker --automatic-retry-limit 2 `
 [`deploy/server/README.md`](deploy/server/README.md)를 사용합니다. 사용자 PC에서 Jarvis를
 실행하려면 [`deploy/clients/jarvis/README.md`](deploy/clients/jarvis/README.md)를 사용합니다.
 두 구성은 서로 독립적으로 실행되며 Jarvis는 원격 서버에 UI port를 만들지 않습니다.
+컨테이너 버전 발행 및 운영 host 갱신 절차는
+[`docs/operations/container-image-release.md`](docs/operations/container-image-release.md)를 따릅니다.
 
 원격 클라이언트를 연결하려면 먼저 서비스 계정을 발급합니다. Token 원문은 이 명령에서만
 표시되므로 즉시 안전한 secret 저장소에 보관해야 합니다.
