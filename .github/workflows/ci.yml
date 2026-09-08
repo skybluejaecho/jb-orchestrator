@@ -104,10 +104,15 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7.0.1
 
-      - name: Validate single-host Compose configuration
+      - name: Validate server Compose configuration
         run: >-
-          docker compose --env-file deploy/single-host/.env.example
-          -f deploy/single-host/compose.yml --profile "*" config --quiet
+          docker compose --env-file deploy/server/.env.example
+          -f deploy/server/compose.yml --profile "*" config --quiet
+
+      - name: Validate local Jarvis client Compose configuration
+        run: >-
+          docker compose --env-file deploy/clients/jarvis/.env.example
+          -f deploy/clients/jarvis/compose.yml config --quiet
 
   test:
     name: Test
