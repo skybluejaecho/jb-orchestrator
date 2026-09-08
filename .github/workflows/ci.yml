@@ -97,6 +97,18 @@ jobs:
       - name: Verify OpenClaw Gateway contract
         run: npm test
 
+  deployment-contract:
+    name: Deployment contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Validate single-host Compose configuration
+        run: >-
+          docker compose --env-file deploy/single-host/.env.example
+          -f deploy/single-host/compose.yml --profile "*" config --quiet
+
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -196,6 +208,7 @@ jobs:
       - quality
       - jarvis
       - openclaw-contract
+      - deployment-contract
       - test
       - system-smoke
     steps:
@@ -204,11 +217,13 @@ jobs:
           QUALITY_RESULT: ${{ needs.quality.result }}
           JARVIS_RESULT: ${{ needs.jarvis.result }}
           OPENCLAW_RESULT: ${{ needs.openclaw-contract.result }}
+          DEPLOYMENT_RESULT: ${{ needs.deployment-contract.result }}
           TEST_RESULT: ${{ needs.test.result }}
           SYSTEM_SMOKE_RESULT: ${{ needs.system-smoke.result }}
         run: |
           test "$QUALITY_RESULT" = "success"
           test "$JARVIS_RESULT" = "success"
           test "$OPENCLAW_RESULT" = "success"
+          test "$DEPLOYMENT_RESULT" = "success"
           test "$TEST_RESULT" = "success"
           test "$SYSTEM_SMOKE_RESULT" = "success"
