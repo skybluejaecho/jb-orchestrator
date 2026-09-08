@@ -15,11 +15,16 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
 WORKDIR /app
 
 COPY pyproject.toml README.md alembic.ini ./
+COPY deploy/server/requirements.lock ./deploy/server/requirements.lock
 COPY src ./src
 COPY migrations ./migrations
 COPY adapters ./adapters
 COPY tools/openclaw-gateway-spike/package.json tools/openclaw-gateway-spike/package-lock.json ./tools/openclaw-gateway-spike/
-RUN python -m pip install --no-cache-dir . ./adapters/openclaw ./adapters/github ./adapters/webhook \
+RUN python -m pip install --no-cache-dir --require-hashes \
+        -r deploy/server/requirements.lock \
+    && python -m pip install --no-cache-dir --no-deps \
+        . ./adapters/openclaw ./adapters/github ./adapters/webhook \
+    && python -m pip check \
     && npm ci --omit=dev --no-audit --no-fund --prefix tools/openclaw-gateway-spike
 
 COPY tools/openclaw-gateway-spike/src ./tools/openclaw-gateway-spike/src
