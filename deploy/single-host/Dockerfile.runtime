@@ -1,0 +1,32 @@
+FROM node:22.19.0-bookworm-slim AS node-runtime
+
+FROM python:3.12.11-slim-bookworm
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && useradd --create-home --uid 10001 --shell /usr/sbin/nologin jb
+
+WORKDIR /app
+
+COPY pyproject.toml README.md alembic.ini ./
+COPY src ./src
+COPY migrations ./migrations
+COPY adapters ./adapters
+COPY tools/openclaw-gateway-spike/package.json tools/openclaw-gateway-spike/package-lock.json ./tools/openclaw-gateway-spike/
+RUN python -m pip install --no-cache-dir . ./adapters/openclaw ./adapters/github ./adapters/webhook \
+    && npm ci --omit=dev --no-audit --no-fund --prefix tools/openclaw-gateway-spike
+
+COPY tools/openclaw-gateway-spike/src ./tools/openclaw-gateway-spike/src
+RUN mkdir -p /state/openclaw-device /workspaces/repositories /workspaces/worktrees /app/skills \
+    && chown -R jb:jb /state /workspaces /app/skills
+
+USER jb
+
+CMD ["jb-api"]
+

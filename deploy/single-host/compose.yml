@@ -1,0 +1,184 @@
+name: jb-orchestrator
+
+x-runtime-image: &runtime-image
+  image: ${JB_RUNTIME_IMAGE:-jb-orchestrator-runtime:0.1.0-dev}
+  build:
+    context: ../..
+    dockerfile: deploy/single-host/Dockerfile.runtime
+
+x-core-environment: &core-environment
+  JB_ENVIRONMENT: production
+  JB_LOG_LEVEL: ${JB_LOG_LEVEL:-INFO}
+  JB_DATABASE_URL: postgresql+asyncpg://jb_orchestrator:${JB_POSTGRES_PASSWORD}@postgres:5432/jb_orchestrator
+  JB_WORKER_HEARTBEAT_INTERVAL_SECONDS: ${JB_WORKER_HEARTBEAT_INTERVAL_SECONDS:-30}
+  JB_WORKER_PRESENCE_STALE_AFTER_SECONDS: ${JB_WORKER_PRESENCE_STALE_AFTER_SECONDS:-90}
+
+x-database-dependency: &database-dependency
+  migrate:
+    condition: service_completed_successfully
+
+x-runtime-defaults: &runtime-defaults
+  <<: *runtime-image
+  init: true
+  restart: unless-stopped
+  stop_grace_period: 30s
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: jb_orchestrator
+      POSTGRES_USER: jb_orchestrator
+      POSTGRES_PASSWORD: ${JB_POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jb_orchestrator -d jb_orchestrator"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  migrate:
+    <<: *runtime-image
+    restart: "no"
+    command: ["alembic", "upgrade", "head"]
+    environment: *core-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *runtime-defaults
+    command: ["jb-api"]
+    environment:
+      <<: *core-environment
+      JB_API_HOST: 0.0.0.0
+      JB_API_PORT: 8000
+      JB_API_AUTH_ENABLED: "true"
+    depends_on: *database-dependency
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    ports:
+      - "${JB_API_PORT:-8000}:8000"
+
+  readiness-monitor:
+    <<: *runtime-defaults
+    command: ["jb-readiness-monitor"]
+    environment: *core-environment
+    depends_on: *database-dependency
+
+  task-worker:
+    <<: *runtime-defaults
+    profiles: ["execution"]
+    command: ["jb-worker"]
+    environment:
+      <<: *core-environment
+      JB_SKILL_CACHE_DIR: /state/skill-cache
+      JB_SKILL_LOCAL_ROOT: /app/skills
+      JB_SKILL_ALLOWED_REMOTE_HOSTS: ${JB_SKILL_ALLOWED_REMOTE_HOSTS:-[]}
+      JB_OPENCLAW_BRIDGE_PATH: /app/tools/openclaw-gateway-spike/src/bridge.mjs
+      JB_OPENCLAW_DEVICE_STATE_DIR: /state/openclaw-device
+      JB_OPENCLAW_WORKSPACE_ROOT: /workspaces/worktrees
+      JB_OPENCLAW_REPOSITORY_ROOTS: '["/workspaces/repositories"]'
+      OPENCLAW_GATEWAY_URL: ${OPENCLAW_GATEWAY_URL:-ws://host.docker.internal:18789}
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:-}
+      OPENCLAW_GATEWAY_PASSWORD: ${OPENCLAW_GATEWAY_PASSWORD:-}
+      OPENCLAW_GATEWAY_TLS_FINGERPRINT: ${OPENCLAW_GATEWAY_TLS_FINGERPRINT:-}
+    depends_on: *database-dependency
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - openclaw-device:/state/openclaw-device
+      - skill-cache:/state/skill-cache
+      - ${JB_SKILL_ROOT:-../../skills}:/app/skills:ro
+      - ${JB_REPOSITORY_ROOT:-./runtime/repositories}:/workspaces/repositories
+      - ${JB_WORKTREE_ROOT:-./runtime/worktrees}:/workspaces/worktrees
+
+  scm-worker:
+    <<: *runtime-defaults
+    profiles: ["scm"]
+    command:
+      - jb-scm-worker
+      - --workspace-scope
+      - git-worktree:06fbb7af18b23cb00bbe0ce1adc5e555d51716290a1839f7b736445226e100f6
+      - --automatic-retry-limit
+      - ${JB_SCM_AUTOMATIC_RETRY_LIMIT:-0}
+    environment:
+      <<: *core-environment
+      JB_GITHUB_TOKEN: ${JB_GITHUB_TOKEN:-}
+      JB_GITHUB_WORKSPACE_ROOTS: '["/workspaces/worktrees"]'
+      JB_GITHUB_API_URL: ${JB_GITHUB_API_URL:-https://api.github.com}
+      JB_GITHUB_WEB_HOST: ${JB_GITHUB_WEB_HOST:-github.com}
+    depends_on: *database-dependency
+    volumes:
+      - ${JB_REPOSITORY_ROOT:-./runtime/repositories}:/workspaces/repositories
+      - ${JB_WORKTREE_ROOT:-./runtime/worktrees}:/workspaces/worktrees
+
+  notification-worker:
+    <<: *runtime-defaults
+    profiles: ["notifications"]
+    command:
+      - jb-notification-worker
+      - --automatic-retry-limit
+      - ${JB_NOTIFICATION_AUTOMATIC_RETRY_LIMIT:-0}
+    environment:
+      <<: *core-environment
+      JB_WEBHOOK_DESTINATIONS: ${JB_WEBHOOK_DESTINATIONS:-{}}
+    depends_on: *database-dependency
+
+  jarvis:
+    image: ${JB_JARVIS_IMAGE:-jb-orchestrator-jarvis:0.1.0-dev}
+    build:
+      context: ../..
+      dockerfile: deploy/single-host/Dockerfile.jarvis
+    profiles: ["jarvis"]
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 20s
+    environment:
+      JARVIS_CONTROL_PLANE_URL: ${JARVIS_CONTROL_PLANE_URL}
+      JARVIS_API_TOKEN: ${JARVIS_API_TOKEN}
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:3300').then(response => {
+            if (!response.ok) process.exit(1)
+          }).catch(() => process.exit(1))
+      interval: 10s
+      timeout: 5s
+      retries: 18
+    ports:
+      - "${JB_JARVIS_PORT:-3300}:3300"
+
+  admin:
+    <<: *runtime-image
+    profiles: ["tools"]
+    entrypoint: ["jb"]
+    command: ["--help"]
+    environment:
+      <<: *core-environment
+      JB_CONTROL_PLANE_URL: ${JB_CONTROL_PLANE_URL:-http://api:8000}
+      JB_API_TOKEN: ${JB_API_TOKEN:-}
+    depends_on: *database-dependency
+
+volumes:
+  openclaw-device:
+  postgres-data:
+  skill-cache:
+
