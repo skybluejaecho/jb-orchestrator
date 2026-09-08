@@ -683,6 +683,17 @@ ORCH-077 makes first-release readiness reproducible locally and visible as one C
 - each command has a bounded timeout and failures retain the final diagnostic output
 - CI aggregates every independent job into one `Release readiness` status for branch protection
 
+ORCH-078 adds a role-scoped deployment preflight before processes are started:
+
+- `jb system preflight` checks every deployment role or a repeated `--role` subset
+- PostgreSQL connectivity and exact Alembic head parity are checked for database-owning processes
+- Control Plane authentication and remote transport rules fail closed in production
+- installed task executors, SCM publishers, and notification providers are loaded with their real
+  configuration contracts
+- OpenClaw bridge, Node.js, Gateway transport, TLS pin, and credential presence are diagnosed
+- MCP and Jarvis verify server-side Control Plane URLs and API token presence without rendering secrets
+- structured `pass`, `warning`, and `fail` results support both people and process supervisors
+
 ## Prerequisites
 
 - Python 3.12
@@ -989,6 +1000,31 @@ $env:JB_ENVIRONMENT = "test"
 $env:JB_DATABASE_URL = "postgresql+asyncpg://jb_orchestrator:jb_orchestrator@localhost:5432/jb_orchestrator"
 uv run jb system release-check --include-system-smoke
 ```
+
+## Deployment preflight
+
+실행할 process와 같은 환경에서 전체 역할의 운영 준비 상태를 점검합니다. 기본 호출은 모든 역할을
+검사하며 하나 이상의 필수 항목이 실패하면 JSON 보고서를 출력한 뒤 종료 코드 `1`을 반환합니다.
+
+```powershell
+uv run --with-editable . --with-editable adapters/openclaw `
+  --with-editable adapters/github --with-editable adapters/webhook `
+  jb system preflight
+```
+
+한 host에 배포할 역할만 선택하려면 `--role`을 반복합니다.
+
+```powershell
+uv run --with-editable . --with-editable adapters/openclaw `
+  jb system preflight --role task-worker --role readiness-monitor
+
+uv run jb system preflight --role mcp --role jarvis
+```
+
+지원 역할은 `control-plane`, `task-worker`, `scm-worker`, `notification-worker`,
+`readiness-monitor`, `mcp`, `jarvis`다. 비밀번호, API token, Webhook secret, Gateway credential은
+보고서에 포함되지 않는다. Preflight는 외부 API나 OpenClaw Gateway에 연결하지 않으며 실제 연결은
+각 환경의 명시적인 acceptance 단계에서 확인한다.
 
 전체 로컬 경계는 반드시 비어 있는 일회용 PostgreSQL test database에서 검증합니다. 다음 명령은
 smoke 전용 executor, GitHub publisher와 Webhook notifier를 임시 설치하고 Control Plane,

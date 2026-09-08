@@ -23,6 +23,7 @@ from jb_orchestrator.cli.bundles import (
 from jb_orchestrator.cli.starter import StarterKitError, initialize_starter_kit
 from jb_orchestrator.config import get_settings
 from jb_orchestrator.infrastructure.database import SqlAlchemyUnitOfWork, create_session_factory
+from jb_orchestrator.preflight import PreflightError, run_preflight
 from jb_orchestrator.release_check import ReleaseCheckError, run_release_check
 from jb_orchestrator.security import ApiPermission
 from jb_orchestrator.skills.materialization import (
@@ -368,6 +369,36 @@ def check_release_readiness(
         typer.echo(f"release check failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     echo_json(result.as_dict())
+
+
+@system_app.command("preflight")
+def check_deployment_preflight(
+    roles: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--role",
+            help="Deployment role to inspect; repeat the option to select multiple roles.",
+        ),
+    ] = None,
+    project_path: Annotated[
+        Path | None, typer.Option(help="Repository root containing migrations and adapters.")
+    ] = None,
+) -> None:
+    """Validate role-specific deployment configuration and database readiness."""
+
+    try:
+        report = asyncio.run(
+            run_preflight(
+                roles=roles or (),
+                project_root=(project_path or Path.cwd()).resolve(),
+            )
+        )
+    except PreflightError as exc:
+        typer.echo(f"preflight failed: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    echo_json(report.as_dict())
+    if not report.ready:
+        raise typer.Exit(code=1)
 
 
 @skill_app.command("digest")
