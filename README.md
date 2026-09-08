@@ -707,6 +707,16 @@ ORCH-079 adds a reproducible single-host runtime composition:
   explicit and distinct persistence boundaries
 - CI validates every optional Compose profile without pulling or starting deployment images
 
+ORCH-080 separates server ownership from the local Jarvis client without splitting repositories:
+
+- the server composition runs PostgreSQL, migrations, the Control Plane, readiness monitoring, and
+  optional Workers without publishing a Jarvis UI
+- the API binds to server loopback by default and can be explicitly bound to a private VPN interface
+- the Jarvis composition runs independently on a trusted workstation and publishes only to
+  `127.0.0.1`
+- Jarvis connects to the remote Control Plane using a distinct least-privilege service-account token
+- CI and contract tests validate the server and client compositions independently
+
 ## Prerequisites
 
 - Python 3.12
@@ -726,10 +736,10 @@ uv run jb-notification-worker --automatic-retry-limit 2 `
   --automatic-retry-base-delay 30 --automatic-retry-max-delay 300
 ```
 
-단일 Docker host에서 역할별 process를 운영하려면
-[`deploy/single-host/README.md`](deploy/single-host/README.md)의 Compose 절차를 사용합니다. 이 구성은
-새로운 orchestration 규칙을 구현하지 않으며 동일한 application service와 PostgreSQL 원장을 서로
-분리된 process로 실행합니다.
+원격 Docker host에서 서버 역할을 운영하려면
+[`deploy/server/README.md`](deploy/server/README.md)를 사용합니다. 사용자 PC에서 Jarvis를
+실행하려면 [`deploy/clients/jarvis/README.md`](deploy/clients/jarvis/README.md)를 사용합니다.
+두 구성은 서로 독립적으로 실행되며 Jarvis는 원격 서버에 UI port를 만들지 않습니다.
 
 원격 클라이언트를 연결하려면 먼저 서비스 계정을 발급합니다. Token 원문은 이 명령에서만
 표시되므로 즉시 안전한 secret 저장소에 보관해야 합니다.
