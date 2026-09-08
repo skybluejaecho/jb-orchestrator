@@ -694,6 +694,19 @@ ORCH-078 adds a role-scoped deployment preflight before processes are started:
 - MCP and Jarvis verify server-side Control Plane URLs and API token presence without rendering secrets
 - structured `pass`, `warning`, and `fail` results support both people and process supervisors
 
+ORCH-079 adds a reproducible single-host runtime composition:
+
+- one non-root Python image packages the Control Plane, migrations, Workers, OpenClaw bridge, GitHub
+  publisher, and Webhook notifier
+- a separate non-root Jarvis image builds once and serves the Vinext production output
+- PostgreSQL, migrations, API, and readiness monitoring form the default core deployment
+- Compose profiles independently enable task execution, SCM publication, notifications, Jarvis, and
+  one-shot administration
+- provider credentials are injected only into the process that owns each external capability
+- PostgreSQL, OpenClaw device identity, rebuildable skill cache, repositories, and worktrees use
+  explicit and distinct persistence boundaries
+- CI validates every optional Compose profile without pulling or starting deployment images
+
 ## Prerequisites
 
 - Python 3.12
@@ -712,6 +725,11 @@ uv run jb-notification-worker --list-providers
 uv run jb-notification-worker --automatic-retry-limit 2 `
   --automatic-retry-base-delay 30 --automatic-retry-max-delay 300
 ```
+
+단일 Docker host에서 역할별 process를 운영하려면
+[`deploy/single-host/README.md`](deploy/single-host/README.md)의 Compose 절차를 사용합니다. 이 구성은
+새로운 orchestration 규칙을 구현하지 않으며 동일한 application service와 PostgreSQL 원장을 서로
+분리된 process로 실행합니다.
 
 원격 클라이언트를 연결하려면 먼저 서비스 계정을 발급합니다. Token 원문은 이 명령에서만
 표시되므로 즉시 안전한 secret 저장소에 보관해야 합니다.
