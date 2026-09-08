@@ -1,9 +1,15 @@
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
 
 from jb_orchestrator.domain import DomainValidationError
-from jb_orchestrator.security import ApiPermission, ApiPrincipal, ServiceAccount
+from jb_orchestrator.security import (
+    ApiPermission,
+    ApiPrincipal,
+    ServiceAccount,
+    ServiceAccountCredential,
+)
 
 
 def test_service_account_requires_explicit_project_scope() -> None:
@@ -11,8 +17,28 @@ def test_service_account_requires_explicit_project_scope() -> None:
         ServiceAccount(
             key="openclaw",
             name="OpenClaw",
-            token_digest=f"sha256:{'a' * 64}",
             permissions=frozenset({ApiPermission.PROJECT_READ}),
+        )
+
+
+def test_credential_validates_lifecycle_and_active_state() -> None:
+    created_at = datetime(2026, 9, 9, tzinfo=UTC)
+    credential = ServiceAccountCredential(
+        account_id=uuid4(),
+        token_digest=f"sha256:{'a' * 64}",
+        created_at=created_at,
+        expires_at=created_at + timedelta(hours=1),
+    )
+
+    assert credential.is_active(created_at + timedelta(minutes=59))
+    assert not credential.is_active(created_at + timedelta(hours=1))
+
+    with pytest.raises(DomainValidationError, match="expiration"):
+        ServiceAccountCredential(
+            account_id=uuid4(),
+            token_digest=f"sha256:{'b' * 64}",
+            created_at=created_at,
+            expires_at=created_at,
         )
 
 

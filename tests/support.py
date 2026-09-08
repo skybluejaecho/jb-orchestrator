@@ -40,7 +40,7 @@ from jb_orchestrator.scm import (
     ScmPublicationClaim,
     ScmPublicationStatus,
 )
-from jb_orchestrator.security import ServiceAccount
+from jb_orchestrator.security import ServiceAccount, ServiceAccountCredential
 from jb_orchestrator.skills import SkillDefinition
 from jb_orchestrator.worker_presence import (
     WorkerInstance,
@@ -96,6 +96,7 @@ class MemoryStore:
         default_factory=dict
     )
     service_accounts: dict[UUID, ServiceAccount] = field(default_factory=dict)
+    service_account_credentials: dict[UUID, ServiceAccountCredential] = field(default_factory=dict)
 
 
 class MemoryProjectRepository:
@@ -157,6 +158,43 @@ class MemoryServiceAccountRepository:
         account = self._store.service_accounts.get(account_id)
         if account is not None:
             self._store.service_accounts[account_id] = replace(account, enabled=False)
+
+
+class MemoryServiceAccountCredentialRepository:
+    def __init__(self, store: MemoryStore) -> None:
+        self._store = store
+
+    async def add(self, credential: ServiceAccountCredential) -> None:
+        self._store.service_account_credentials[credential.id] = credential
+
+    async def get(self, credential_id: UUID) -> ServiceAccountCredential | None:
+        return self._store.service_account_credentials.get(credential_id)
+
+    async def list_for_account(self, account_id: UUID) -> list[ServiceAccountCredential]:
+        matches = [
+            credential
+            for credential in self._store.service_account_credentials.values()
+            if credential.account_id == account_id
+        ]
+        matches.sort(key=lambda value: value.id)
+        matches.sort(key=lambda value: value.created_at, reverse=True)
+        return matches
+
+    async def revoke(self, credential_id: UUID, revoked_at: datetime) -> None:
+        credential = self._store.service_account_credentials.get(credential_id)
+        if credential is not None and credential.revoked_at is None:
+            self._store.service_account_credentials[credential_id] = replace(
+                credential, revoked_at=revoked_at
+            )
+
+    async def mark_used(self, credential_id: UUID, used_at: datetime) -> None:
+        credential = self._store.service_account_credentials.get(credential_id)
+        if credential is not None and (
+            credential.last_used_at is None or credential.last_used_at < used_at
+        ):
+            self._store.service_account_credentials[credential_id] = replace(
+                credential, last_used_at=used_at
+            )
 
 
 class MemoryUserRequestRepository:
@@ -1131,6 +1169,7 @@ class MemoryUnitOfWork:
         self.workflow_executions = MemoryWorkflowExecutionRepository(store)
         self.project_workflow_bindings = MemoryProjectWorkflowBindingRepository(store)
         self.service_accounts = MemoryServiceAccountRepository(store)
+        self.service_account_credentials = MemoryServiceAccountCredentialRepository(store)
         self.committed = False
         self.rolled_back = False
 

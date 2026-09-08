@@ -34,6 +34,7 @@ def test_metadata_creates_initial_domain_schema() -> None:
         "scm_publications",
         "scm_publication_attempts",
         "service_accounts",
+        "service_account_credentials",
         "skill_definitions",
         "task_artifacts",
         "user_requests",
@@ -89,6 +90,10 @@ def test_metadata_creates_initial_domain_schema() -> None:
     }
     assert {index["name"] for index in inspector.get_indexes("scm_publication_attempts")} >= {
         "ix_scm_publication_attempts_publication_id"
+    }
+    assert {index["name"] for index in inspector.get_indexes("service_account_credentials")} >= {
+        "ix_service_account_credentials_account_id",
+        "ix_service_account_credentials_expires_at",
     }
 
 
