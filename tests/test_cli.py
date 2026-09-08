@@ -9,6 +9,12 @@ from typer.testing import CliRunner
 
 from jb_orchestrator.cli.main import app
 from jb_orchestrator.config import get_settings
+from jb_orchestrator.preflight import (
+    PreflightCheck,
+    PreflightReport,
+    PreflightRole,
+    PreflightStatus,
+)
 from jb_orchestrator.release_check import ReleaseCheckResult
 from jb_orchestrator.system_smoke import SystemSmokeResult
 
@@ -269,3 +275,62 @@ def test_release_check_command_reports_gate_result(monkeypatch: MonkeyPatch) -> 
         "status": "ready",
         "system_smoke_included": False,
     }
+
+
+def test_preflight_command_passes_repeated_roles_and_reports_success(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_preflight(**options: object) -> PreflightReport:
+        captured.update(options)
+        return PreflightReport(
+            environment="production",
+            roles=(PreflightRole.MCP, PreflightRole.JARVIS),
+            checks=(
+                PreflightCheck(
+                    key="mcp.api-token",
+                    status=PreflightStatus.PASS,
+                    detail="API token is configured",
+                    roles=(PreflightRole.MCP,),
+                ),
+            ),
+        )
+
+    monkeypatch.setattr("jb_orchestrator.cli.main.run_preflight", fake_preflight)
+
+    result = runner.invoke(
+        app,
+        ["system", "preflight", "--role", "mcp", "--role", "jarvis"],
+    )
+
+    assert result.exit_code == 0
+    assert captured["roles"] == ["mcp", "jarvis"]
+    payload = json.loads(result.stdout)
+    assert payload["ready"] is True
+    assert payload["summary"] == {"fail": 0, "pass": 1, "warning": 0}
+
+
+def test_preflight_command_returns_nonzero_with_structured_failure(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    async def fake_preflight(**_: object) -> PreflightReport:
+        return PreflightReport(
+            environment="production",
+            roles=(PreflightRole.CONTROL_PLANE,),
+            checks=(
+                PreflightCheck(
+                    key="control-plane.authentication",
+                    status=PreflightStatus.FAIL,
+                    detail="API authentication is required",
+                    roles=(PreflightRole.CONTROL_PLANE,),
+                ),
+            ),
+        )
+
+    monkeypatch.setattr("jb_orchestrator.cli.main.run_preflight", fake_preflight)
+
+    result = runner.invoke(app, ["system", "preflight", "--role", "control-plane"])
+
+    assert result.exit_code == 1
+    assert json.loads(result.stdout)["ready"] is False
