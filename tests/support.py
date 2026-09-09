@@ -154,6 +154,23 @@ class MemoryServiceAccountRepository:
             None,
         )
 
+    async def list(
+        self,
+        *,
+        enabled: bool | None = None,
+        key_prefix: str | None = None,
+        after_key: str | None = None,
+        limit: int = 100,
+    ) -> list[ServiceAccount]:
+        matches = sorted(self._store.service_accounts.values(), key=lambda account: account.key)
+        if enabled is not None:
+            matches = [account for account in matches if account.enabled == enabled]
+        if key_prefix is not None:
+            matches = [account for account in matches if account.key.startswith(key_prefix)]
+        if after_key is not None:
+            matches = [account for account in matches if account.key > after_key]
+        return matches[:limit]
+
     async def disable(self, account_id: UUID) -> None:
         account = self._store.service_accounts.get(account_id)
         if account is not None:
@@ -178,6 +195,19 @@ class MemoryServiceAccountCredentialRepository:
         ]
         matches.sort(key=lambda value: value.id)
         matches.sort(key=lambda value: value.created_at, reverse=True)
+        return matches
+
+    async def list_for_accounts(
+        self, account_ids: frozenset[UUID]
+    ) -> list[ServiceAccountCredential]:
+        matches = [
+            credential
+            for credential in self._store.service_account_credentials.values()
+            if credential.account_id in account_ids
+        ]
+        matches.sort(key=lambda value: value.id)
+        matches.sort(key=lambda value: value.created_at, reverse=True)
+        matches.sort(key=lambda value: value.account_id)
         return matches
 
     async def revoke(self, credential_id: UUID, revoked_at: datetime) -> None:

@@ -123,6 +123,60 @@ async def test_issue_rejects_duplicate_key_and_missing_project() -> None:
         )
 
 
+async def test_account_inventory_filters_pages_and_summarizes_credential_health() -> None:
+    issued_at = datetime(2026, 9, 1, tzinfo=UTC)
+    inspected_at = issued_at + timedelta(days=2)
+    store = MemoryStore()
+    service = SecurityService(lambda: MemoryUnitOfWork(store), clock=lambda: issued_at)
+    alpha = await service.issue(
+        key="alpha-client",
+        name="Alpha Client",
+        permissions={ApiPermission.PROJECT_READ},
+        all_projects=True,
+    )
+    expired = await service.issue_credential(
+        alpha.account.id,
+        expires_at=issued_at + timedelta(days=1),
+    )
+    revoked = await service.issue_credential(alpha.account.id)
+    await service.revoke_credential(alpha.account.id, revoked.credential.id)
+    await service.authenticate(alpha.token)
+    zeta = await service.issue(
+        key="zeta-client",
+        name="Zeta Client",
+        permissions={ApiPermission.PROJECT_READ},
+        all_projects=True,
+    )
+    await service.revoke(zeta.account.id)
+
+    inventory_service = SecurityService(lambda: MemoryUnitOfWork(store), clock=lambda: inspected_at)
+    listed = await inventory_service.list_account_inventory(
+        enabled=True,
+        key_prefix="alpha",
+        limit=10,
+    )
+    detail = await inventory_service.get_account_inventory(alpha.account.id)
+    after_alpha = await inventory_service.list_account_inventory(
+        after_key="alpha-client",
+        limit=10,
+    )
+
+    assert listed == [detail]
+    assert detail.credential_summary.total == 3
+    assert detail.credential_summary.active == 1
+    assert detail.credential_summary.usable == 1
+    assert detail.credential_summary.expired == 1
+    assert detail.credential_summary.revoked == 1
+    assert detail.credential_summary.last_used_at is not None
+    assert expired.credential.id in store.service_account_credentials
+    assert [item.account.key for item in after_alpha] == ["zeta-client"]
+    assert after_alpha[0].credential_summary.active == 1
+    assert after_alpha[0].credential_summary.usable == 0
+
+    with pytest.raises(ResourceNotFound, match="service account not found"):
+        await inventory_service.get_account_inventory(uuid4())
+
+
 async def test_resolve_project_id_traverses_scm_publication_owner() -> None:
     store = MemoryStore()
     execution = await managed_execution(store)

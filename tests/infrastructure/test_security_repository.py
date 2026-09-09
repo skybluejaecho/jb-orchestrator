@@ -28,6 +28,15 @@ async def test_service_account_round_trip_and_revocation() -> None:
 
     assert await security.authenticate(issued.token) is not None
     assert await security.authenticate(replacement.token) is not None
+    inventory = await security.list_account_inventory(
+        enabled=True,
+        key_prefix="open",
+        limit=10,
+    )
+    assert [item.account.id for item in inventory] == [issued.account.id]
+    assert inventory[0].credential_summary.total == 2
+    assert inventory[0].credential_summary.usable == 2
+    assert inventory[0].credential_summary.last_used_at is not None
     async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
         credentials = await unit_of_work.service_account_credentials.list_for_account(
             issued.account.id

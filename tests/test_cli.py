@@ -230,6 +230,56 @@ def test_credential_commands_use_control_plane_api(monkeypatch: MonkeyPatch) -> 
     ]
 
 
+def test_service_account_inventory_commands_use_control_plane_api(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    account_id = "00000000-0000-0000-0000-000000000001"
+    requests: list[tuple[str, str]] = []
+
+    def fake_request(
+        method: str,
+        url: str,
+        *,
+        json: dict[str, Any] | None,
+        headers: dict[str, str],
+        timeout: float,
+    ) -> httpx.Response:
+        del json, headers, timeout
+        requests.append((method, url))
+        request = httpx.Request(method, url)
+        payload: Any = {"id": account_id} if url.endswith(account_id) else [{"id": account_id}]
+        return httpx.Response(200, request=request, json=payload)
+
+    monkeypatch.setattr(httpx, "request", fake_request)
+
+    listed = runner.invoke(
+        app,
+        [
+            "auth",
+            "account",
+            "list",
+            "--disabled",
+            "--key-prefix",
+            "client",
+            "--after-key",
+            "client-alpha",
+            "--limit",
+            "25",
+        ],
+    )
+    shown = runner.invoke(app, ["auth", "account", "show", account_id])
+
+    assert listed.exit_code == shown.exit_code == 0
+    assert requests == [
+        (
+            "GET",
+            "http://127.0.0.1:8000/v1/service-accounts?"
+            "enabled=False&key_prefix=client&after_key=client-alpha&limit=25",
+        ),
+        ("GET", f"http://127.0.0.1:8000/v1/service-accounts/{account_id}"),
+    ]
+
+
 def test_mcp_config_uses_placeholder_instead_of_configured_secret(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
