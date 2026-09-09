@@ -288,6 +288,47 @@ def show_service_account(account_id: UUID) -> None:
     echo_json(call_api("GET", f"/v1/service-accounts/{account_id}"))
 
 
+@auth_app.command("doctor")
+def inspect_credential_readiness(
+    *,
+    issues_only: Annotated[
+        bool,
+        typer.Option(help="Return only accounts that require operator attention."),
+    ] = False,
+    key_prefix: Annotated[
+        str | None,
+        typer.Option(help="Inspect accounts whose stable key starts with this value."),
+    ] = None,
+    after_key: Annotated[
+        str | None,
+        typer.Option(help="Return accounts ordered after this exact key."),
+    ] = None,
+    limit: Annotated[int, typer.Option(min=1, max=500, help="Maximum accounts to return.")] = 100,
+    warning_seconds: Annotated[
+        int | None,
+        typer.Option(min=1, max=31_536_000, help="Override the expiry warning window."),
+    ] = None,
+) -> None:
+    """Inspect service-account credential expiry and authentication readiness."""
+
+    parameters: dict[str, str | int | bool] = {}
+    if issues_only:
+        parameters["issues_only"] = True
+    if key_prefix is not None:
+        parameters["key_prefix"] = key_prefix
+    if after_key is not None:
+        parameters["after_key"] = after_key
+    parameters["limit"] = limit
+    if warning_seconds is not None:
+        parameters["warning_seconds"] = warning_seconds
+    echo_json(
+        call_api(
+            "GET",
+            f"/v1/service-accounts/readiness?{urlencode(parameters)}",
+        )
+    )
+
+
 @credential_app.command("issue")
 def issue_service_account_credential(
     account_id: UUID,

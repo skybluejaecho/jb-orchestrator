@@ -29,6 +29,7 @@ from jb_orchestrator.api.schemas import (
     BudgetConfigure,
     BudgetResponse,
     CreatedRequestResponse,
+    CredentialReadinessResponse,
     DispatchedRequestResponse,
     ExternalExecutionResponse,
     IssuedServiceAccountCredentialResponse,
@@ -89,6 +90,7 @@ from jb_orchestrator.api.schemas import (
 from jb_orchestrator.application import (
     BudgetService,
     CreateUserRequest,
+    CredentialReadiness,
     DispatchProjectRequest,
     ExternalExecutionService,
     ModelCatalogService,
@@ -215,6 +217,23 @@ def _service_account_inventory_response(
     )
 
 
+def _credential_readiness_response(
+    readiness: CredentialReadiness,
+) -> CredentialReadinessResponse:
+    return CredentialReadinessResponse(
+        account=_service_account_inventory_response(
+            ServiceAccountInventory(
+                account=readiness.account,
+                credential_summary=readiness.credential_summary,
+            )
+        ),
+        status=readiness.status,
+        next_expires_at=readiness.next_expires_at,
+        checked_at=readiness.checked_at,
+        warning_seconds=readiness.warning_seconds,
+    )
+
+
 def _credential_event_response(event: DomainEvent) -> ServiceAccountCredentialEventResponse:
     if event.sequence is None:  # pragma: no cover - only persisted events are queried
         raise RuntimeError("credential audit event requires a persisted sequence")
@@ -262,6 +281,45 @@ async def list_service_accounts(
         _service_account_inventory_response(inventory)
         for inventory in await service.list_account_inventory(
             enabled=enabled,
+            key_prefix=key_prefix,
+            after_key=after_key,
+            limit=limit,
+        )
+    ]
+
+
+@router.get(
+    "/service-accounts/readiness",
+    response_model=list[CredentialReadinessResponse],
+)
+async def inspect_service_account_readiness(
+    service: SecurityServiceDependency,
+    issues_only: bool = Query(default=False),
+    key_prefix: str | None = Query(
+        default=None,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[a-z][a-z0-9._-]*$",
+    ),
+    after_key: str | None = Query(
+        default=None,
+        min_length=3,
+        max_length=64,
+        pattern=r"^[a-z][a-z0-9._-]{2,63}$",
+    ),
+    limit: int = Query(default=100, ge=1, le=500),
+    warning_seconds: int | None = Query(default=None, ge=1, le=31_536_000),
+) -> list[CredentialReadinessResponse]:
+    configured_warning = (
+        warning_seconds
+        if warning_seconds is not None
+        else get_settings().credential_expiry_warning_seconds
+    )
+    return [
+        _credential_readiness_response(readiness)
+        for readiness in await service.list_credential_readiness(
+            warning_seconds=configured_warning,
+            issues_only=issues_only,
             key_prefix=key_prefix,
             after_key=after_key,
             limit=limit,

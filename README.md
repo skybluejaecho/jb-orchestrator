@@ -774,6 +774,15 @@ ORCH-086 exposes a guarded service-account operations inventory:
 - latest issuance and use timestamps support operations without exposing bearer tokens or token digests
 - API and CLI remain read-only; account creation, policy mutation, and automatic rotation stay outside this boundary
 
+ORCH-087 adds read-only credential expiry and authentication readiness diagnostics:
+
+- every account is classified as `healthy`, `expiring_soon`, `expired`,
+  `no_usable_credential`, or `account_disabled` using one inspection timestamp
+- the configurable warning window defaults to seven days and can be overridden per diagnostic request
+- issue-only filtering scans bounded, key-ordered account pages without loading the entire inventory
+- the API and `jb auth doctor` expose aggregate lifecycle metadata but never bearer tokens or digests
+- diagnostics do not rotate, revoke, reactivate, or notify; remediation remains an explicit operator action
+
 ## Prerequisites
 
 - Python 3.12
@@ -838,7 +847,16 @@ digest가 포함되지 않으며 token 원문은 발급 응답에서 한 번만 
 uv run jb auth account list --enabled --key-prefix openclaw --limit 100
 uv run jb auth account list --after-key openclaw-control --limit 100
 uv run jb auth account show <account-uuid>
+uv run jb auth doctor --issues-only --key-prefix openclaw --limit 100
+uv run jb auth doctor --warning-seconds 259200
 ```
+
+Credential readiness의 기본 만료 경고 기간은 `JB_CREDENTIAL_EXPIRY_WARNING_SECONDS`로 설정하며
+기본값은 604800초(7일)입니다. 비활성 account는 credential 상태와 관계없이
+`account_disabled`, usable credential이 없고 만료 이력이 있으면 `expired`, usable credential이
+전혀 없으면 `no_usable_credential`로 분류합니다. 그 외에는 가장 가까운 활성 credential 만료가
+경고 기간 이내이면 `expiring_soon`, 아니면 `healthy`입니다. 진단 결과는 상태 변경을 수행하지
+않으므로 rotation과 폐기는 위 명령으로 명시적으로 진행합니다.
 
 ## Run
 

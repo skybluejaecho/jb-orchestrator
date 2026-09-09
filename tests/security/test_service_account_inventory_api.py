@@ -1,9 +1,11 @@
+from datetime import UTC, datetime, timedelta
+
 from httpx import ASGITransport, AsyncClient
 
 from jb_orchestrator.api.main import create_app
 from jb_orchestrator.application import OrchestrationService, SecurityService
 from jb_orchestrator.domain import Project
-from jb_orchestrator.security import ApiPermission
+from jb_orchestrator.security import ApiPermission, CredentialReadinessStatus
 from tests.support import MemoryStore, MemoryUnitOfWork
 
 
@@ -128,3 +130,67 @@ async def test_service_account_inventory_uses_key_cursor_and_enabled_filter() ->
     assert [account["key"] for account in response.json()] == ["client-zeta"]
     assert response.json()[0]["credential_summary"]["active"] == 1
     assert response.json()[0]["credential_summary"]["usable"] == 0
+
+
+async def test_global_admin_inspects_credential_readiness_without_secrets() -> None:
+    issued_at = datetime(2026, 9, 1, tzinfo=UTC)
+    checked_at = issued_at + timedelta(days=1)
+    store = MemoryStore()
+    project = Project(key="alpha", name="Alpha", repository_url="https://example.test/a.git")
+    store.projects[project.id] = project
+    uow = lambda: MemoryUnitOfWork(store)  # noqa: E731
+    issuer = SecurityService(uow, clock=lambda: issued_at)
+    admin = await issuer.issue(
+        key="global-admin",
+        name="Global Admin",
+        permissions={ApiPermission.PROJECT_ADMIN},
+        all_projects=True,
+    )
+    expiring = await issuer.issue(
+        key="client-expiring",
+        name="Expiring Client",
+        permissions={ApiPermission.PROJECT_READ},
+        all_projects=True,
+        expires_at=checked_at + timedelta(days=2),
+    )
+    scoped_admin = await issuer.issue(
+        key="scoped-admin",
+        name="Scoped Admin",
+        permissions={ApiPermission.PROJECT_ADMIN},
+        project_ids={project.id},
+    )
+    security = SecurityService(uow, clock=lambda: checked_at)
+    app = create_app(
+        service=OrchestrationService(uow),
+        security_service=security,
+        auth_enabled=True,
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get(
+            "/v1/service-accounts/readiness",
+            params={
+                "issues_only": "true",
+                "key_prefix": "client",
+                "warning_seconds": 3 * 24 * 60 * 60,
+                "limit": 10,
+            },
+            headers={"Authorization": f"Bearer {admin.token}"},
+        )
+        forbidden = await client.get(
+            "/v1/service-accounts/readiness",
+            headers={"Authorization": f"Bearer {scoped_admin.token}"},
+        )
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    payload = response.json()[0]
+    assert payload["account"]["id"] == str(expiring.account.id)
+    assert payload["status"] == CredentialReadinessStatus.EXPIRING_SOON
+    assert datetime.fromisoformat(payload["next_expires_at"].replace("Z", "+00:00")) == (
+        expiring.credential.expires_at
+    )
+    assert payload["warning_seconds"] == 3 * 24 * 60 * 60
+    assert "token" not in response.text
+    assert "token_digest" not in response.text
+    assert forbidden.status_code == 403

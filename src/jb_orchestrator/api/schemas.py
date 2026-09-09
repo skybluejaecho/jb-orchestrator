@@ -24,7 +24,7 @@ from jb_orchestrator.scm import (
     ScmPublicationFailureCode,
     ScmPublicationStatus,
 )
-from jb_orchestrator.security import ApiPermission
+from jb_orchestrator.security import ApiPermission, CredentialReadinessStatus
 from jb_orchestrator.skills import SkillSourceKind
 from jb_orchestrator.worker_presence import (
     WorkerKind,
@@ -87,6 +87,14 @@ class ServiceAccountInventoryResponse(BaseModel):
     enabled: bool
     created_at: datetime
     credential_summary: ServiceAccountCredentialSummaryResponse
+
+
+class CredentialReadinessResponse(BaseModel):
+    account: ServiceAccountInventoryResponse
+    status: CredentialReadinessStatus
+    next_expires_at: datetime | None
+    checked_at: datetime
+    warning_seconds: int
 
 
 class ServiceAccountCredentialResponse(BaseModel):

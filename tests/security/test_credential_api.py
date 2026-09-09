@@ -113,6 +113,8 @@ async def test_credential_management_is_unavailable_without_api_authentication()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get(f"/v1/service-accounts/{account.account.id}/credentials")
         inventory = await client.get("/v1/service-accounts")
+        readiness = await client.get("/v1/service-accounts/readiness")
 
     assert response.status_code == 503
     assert inventory.status_code == 503
+    assert readiness.status_code == 503
