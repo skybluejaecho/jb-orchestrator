@@ -765,6 +765,15 @@ ORCH-085 closes the process-level credential rotation boundary in the release sm
 - the audit ledger must attribute issuance to the original credential and revocation to its replacement
 - the structured smoke result reports only credential identifiers and verification states, never tokens
 
+ORCH-086 exposes a guarded service-account operations inventory:
+
+- global administrators can list and inspect stable account identity, permissions, scope, and activation
+- key-ordered cursor pagination and activation or key-prefix filters keep inventory reads bounded
+- credential summaries distinguish lifecycle-active credentials from credentials actually usable by an enabled account
+- active, expired, and revoked counts form a deterministic lifecycle partition at the inspection time
+- latest issuance and use timestamps support operations without exposing bearer tokens or token digests
+- API and CLI remain read-only; account creation, policy mutation, and automatic rotation stay outside this boundary
+
 ## Prerequisites
 
 - Python 3.12
@@ -822,6 +831,14 @@ uv run jb auth credential revoke <account-uuid> <old-credential-uuid>
 
 Credential 관리 API는 `JB_API_AUTH_ENABLED=true`일 때만 사용할 수 있습니다. 목록에는 token이나
 digest가 포함되지 않으며 token 원문은 발급 응답에서 한 번만 표시됩니다.
+전체 account 운영 현황은 동일한 global admin token으로 조회합니다. `active`는 credential 자체가
+만료·폐기되지 않은 수이고, `usable`은 account 활성 상태까지 반영해 실제 인증 가능한 수입니다.
+
+```powershell
+uv run jb auth account list --enabled --key-prefix openclaw --limit 100
+uv run jb auth account list --after-key openclaw-control --limit 100
+uv run jb auth account show <account-uuid>
+```
 
 ## Run
 
