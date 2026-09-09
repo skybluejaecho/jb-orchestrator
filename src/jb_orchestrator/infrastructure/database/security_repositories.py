@@ -77,6 +77,10 @@ class SqlAlchemyServiceAccountCredentialRepository:
         self._session = session
 
     async def add(self, credential: ServiceAccountCredential) -> None:
+        # ServiceAccountRecord and credential records intentionally have no ORM
+        # relationship. Flush a newly added account before PostgreSQL enforces
+        # the credential foreign key.
+        await self._session.flush()
         self._session.add(
             ServiceAccountCredentialRecord(
                 id=credential.id,

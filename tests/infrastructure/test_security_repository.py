@@ -1,3 +1,4 @@
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from jb_orchestrator.application import OrchestrationService, RegisterProject, SecurityService
@@ -8,6 +9,7 @@ from jb_orchestrator.security import ApiPermission
 async def test_service_account_round_trip_and_revocation() -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
+        await connection.execute(text("PRAGMA foreign_keys=ON"))
         await connection.run_sync(Base.metadata.create_all)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     orchestration = OrchestrationService(lambda: SqlAlchemyUnitOfWork(session_factory))
