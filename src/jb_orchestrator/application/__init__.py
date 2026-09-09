@@ -22,6 +22,7 @@ from jb_orchestrator.application.request_dispatch_services import (
 from jb_orchestrator.application.scm_publication_services import ScmPublicationService
 from jb_orchestrator.application.security_services import (
     CredentialInventorySummary,
+    CredentialReadiness,
     IssuedCredential,
     IssuedServiceAccount,
     SecurityService,
@@ -44,6 +45,7 @@ __all__ = [
     "CreateUserRequest",
     "CreatedRequest",
     "CredentialInventorySummary",
+    "CredentialReadiness",
     "DispatchProjectRequest",
     "DispatchedRequest",
     "ExternalExecutionService",

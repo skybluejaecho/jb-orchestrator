@@ -22,6 +22,14 @@ class ApiPermission(StrEnum):
     PROJECT_ADMIN = "project.admin"
 
 
+class CredentialReadinessStatus(StrEnum):
+    HEALTHY = "healthy"
+    EXPIRING_SOON = "expiring_soon"
+    EXPIRED = "expired"
+    NO_USABLE_CREDENTIAL = "no_usable_credential"
+    ACCOUNT_DISABLED = "account_disabled"
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ServiceAccount:
     key: str

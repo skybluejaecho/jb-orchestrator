@@ -14,6 +14,7 @@ from jb_orchestrator.domain import DomainEvent
 from jb_orchestrator.security import (
     ApiPermission,
     ApiPrincipal,
+    CredentialReadinessStatus,
     ServiceAccount,
     ServiceAccountCredential,
 )
@@ -47,6 +48,16 @@ class CredentialInventorySummary:
 class ServiceAccountInventory:
     account: ServiceAccount
     credential_summary: CredentialInventorySummary
+
+
+@dataclass(frozen=True, slots=True)
+class CredentialReadiness:
+    account: ServiceAccount
+    status: CredentialReadinessStatus
+    credential_summary: CredentialInventorySummary
+    next_expires_at: datetime | None
+    checked_at: datetime
+    warning_seconds: int
 
 
 class SecurityService:
@@ -186,6 +197,78 @@ class SecurityService:
                 account_id
             )
         return self._account_inventory(account, credentials, checked_at=checked_at)
+
+    async def list_credential_readiness(
+        self,
+        *,
+        warning_seconds: int,
+        issues_only: bool = False,
+        key_prefix: str | None = None,
+        after_key: str | None = None,
+        limit: int = 100,
+    ) -> list[CredentialReadiness]:
+        if warning_seconds <= 0:
+            raise ValueError("credential readiness warning must be greater than zero")
+        if limit <= 0:
+            raise ValueError("credential readiness limit must be greater than zero")
+        checked_at = self._now()
+        results: list[CredentialReadiness] = []
+        cursor = after_key
+        async with self._unit_of_work_factory() as unit_of_work:
+            while len(results) < limit:
+                accounts = await unit_of_work.service_accounts.list(
+                    key_prefix=key_prefix,
+                    after_key=cursor,
+                    limit=500,
+                )
+                if not accounts:
+                    break
+                credentials = await unit_of_work.service_account_credentials.list_for_accounts(
+                    frozenset(account.id for account in accounts)
+                )
+                credentials_by_account: dict[UUID, list[ServiceAccountCredential]] = {
+                    account.id: [] for account in accounts
+                }
+                for credential in credentials:
+                    credentials_by_account[credential.account_id].append(credential)
+                for account in accounts:
+                    readiness = self._credential_readiness(
+                        account,
+                        credentials_by_account[account.id],
+                        checked_at=checked_at,
+                        warning_seconds=warning_seconds,
+                    )
+                    if not issues_only or readiness.status is not CredentialReadinessStatus.HEALTHY:
+                        results.append(readiness)
+                        if len(results) == limit:
+                            return results
+                if len(accounts) < 500:
+                    break
+                cursor = accounts[-1].key
+        return results
+
+    async def get_credential_readiness(
+        self,
+        account_id: UUID,
+        *,
+        warning_seconds: int,
+    ) -> CredentialReadiness:
+        if warning_seconds <= 0:
+            raise ValueError("credential readiness warning must be greater than zero")
+        checked_at = self._now()
+        async with self._unit_of_work_factory() as unit_of_work:
+            account = await unit_of_work.service_accounts.get(account_id)
+            if account is None:
+                raise ResourceNotFound(f"service account not found: {account_id}")
+            credentials = await unit_of_work.service_account_credentials.list_for_account(
+                account_id
+            )
+        return self._credential_readiness(
+            account,
+            credentials,
+            checked_at=checked_at,
+            warning_seconds=warning_seconds,
+        )
 
     async def list_credential_events(
         self,
@@ -369,6 +452,22 @@ class SecurityService:
         *,
         checked_at: datetime,
     ) -> ServiceAccountInventory:
+        return ServiceAccountInventory(
+            account=account,
+            credential_summary=SecurityService._credential_summary(
+                account,
+                credentials,
+                checked_at=checked_at,
+            ),
+        )
+
+    @staticmethod
+    def _credential_summary(
+        account: ServiceAccount,
+        credentials: Collection[ServiceAccountCredential],
+        *,
+        checked_at: datetime,
+    ) -> CredentialInventorySummary:
         active = sum(credential.is_active(checked_at) for credential in credentials)
         revoked = sum(credential.revoked_at is not None for credential in credentials)
         expired = sum(
@@ -383,17 +482,55 @@ class SecurityService:
             for credential in credentials
             if credential.last_used_at is not None
         ]
-        return ServiceAccountInventory(
+        return CredentialInventorySummary(
+            total=len(credentials),
+            active=active,
+            usable=active if account.enabled else 0,
+            expired=expired,
+            revoked=revoked,
+            latest_created_at=max(created_values, default=None),
+            last_used_at=max(used_values, default=None),
+        )
+
+    @staticmethod
+    def _credential_readiness(
+        account: ServiceAccount,
+        credentials: Collection[ServiceAccountCredential],
+        *,
+        checked_at: datetime,
+        warning_seconds: int,
+    ) -> CredentialReadiness:
+        summary = SecurityService._credential_summary(
+            account,
+            credentials,
+            checked_at=checked_at,
+        )
+        active_expirations = [
+            credential.expires_at
+            for credential in credentials
+            if credential.is_active(checked_at) and credential.expires_at is not None
+        ]
+        next_expires_at = min(active_expirations, default=None)
+        if not account.enabled:
+            status = CredentialReadinessStatus.ACCOUNT_DISABLED
+        elif summary.usable == 0 and summary.expired > 0:
+            status = CredentialReadinessStatus.EXPIRED
+        elif summary.usable == 0:
+            status = CredentialReadinessStatus.NO_USABLE_CREDENTIAL
+        elif (
+            next_expires_at is not None
+            and (next_expires_at - checked_at).total_seconds() <= warning_seconds
+        ):
+            status = CredentialReadinessStatus.EXPIRING_SOON
+        else:
+            status = CredentialReadinessStatus.HEALTHY
+        return CredentialReadiness(
             account=account,
-            credential_summary=CredentialInventorySummary(
-                total=len(credentials),
-                active=active,
-                usable=active if account.enabled else 0,
-                expired=expired,
-                revoked=revoked,
-                latest_created_at=max(created_values, default=None),
-                last_used_at=max(used_values, default=None),
-            ),
+            status=status,
+            credential_summary=summary,
+            next_expires_at=next_expires_at,
+            checked_at=checked_at,
+            warning_seconds=warning_seconds,
         )
 
     @staticmethod
