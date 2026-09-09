@@ -300,6 +300,9 @@ def test_system_smoke_reports_process_boundary_result(monkeypatch: MonkeyPatch) 
             cancelled_execution_id="00000000-0000-0000-0000-000000000003",
             publication_id="00000000-0000-0000-0000-000000000004",
             review_url="https://github.local/system-smoke/repository/pull/53",
+            service_account_id="00000000-0000-0000-0000-000000000005",
+            retired_credential_id="00000000-0000-0000-0000-000000000006",
+            replacement_credential_id="00000000-0000-0000-0000-000000000007",
         )
 
     monkeypatch.setattr("jb_orchestrator.cli.main.run_system_smoke", fake_smoke)
@@ -326,6 +329,15 @@ def test_system_smoke_reports_process_boundary_result(monkeypatch: MonkeyPatch) 
     assert payload["executions"]["cancelled"]["status"] == "cancelled"
     assert payload["scm_publication"]["status"] == "succeeded"
     assert payload["scm_publication"]["provider"] == "github"
+    assert payload["credential_rotation"] == {
+        "service_account_id": "00000000-0000-0000-0000-000000000005",
+        "retired_credential_id": "00000000-0000-0000-0000-000000000006",
+        "replacement_credential_id": "00000000-0000-0000-0000-000000000007",
+        "authentication": "verified",
+        "revocation": "verified",
+        "audit": "verified",
+        "status": "succeeded",
+    }
 
 
 def test_release_check_command_reports_gate_result(monkeypatch: MonkeyPatch) -> None:

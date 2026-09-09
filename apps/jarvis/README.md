@@ -130,4 +130,6 @@ smoke executor는 외부 agent runtime을 호출하지 않으며 `JB_ENVIRONMENT
 거부한다. 알림 경계는 Jarvis route로 구독 생성과 설정, Delivery 및 Attempt 조회, 자동 재시도
 예약 취소와 즉시 재시도를 수행한 뒤 실제 Notification Worker와 서명 Webhook Stub의 결과를
 검증한다. Vinext 콜드 스타트를 고려한 기본 준비 제한은 60초이며 `--timeout-seconds`로 조정할 수
-있다.
+있다. Control Plane 인증 경계는 관리용 서비스 계정의 새 credential을 발급해 실제 요청으로
+검증한 뒤 기존 credential을 폐기한다. 이후 기존 token의 즉시 거부, 새 token의 활성 상태와
+발급·폐기 actor가 기록된 감사 원장을 함께 확인하며 token 원문은 최종 smoke 결과에 포함하지 않는다.

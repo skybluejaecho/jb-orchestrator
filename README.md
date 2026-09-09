@@ -756,6 +756,15 @@ ORCH-084 records credential lifecycle administration in the append-only event le
 - latest-first sequence pagination provides bounded operational history without a second audit database
 - successful authentication continues to update `last_used_at` without emitting a high-volume event
 
+ORCH-085 closes the process-level credential rotation boundary in the release smoke test:
+
+- the smoke setup account issues a replacement credential through the live authenticated API
+- the replacement token must authenticate before the original credential is revoked
+- the revoked token must be rejected immediately while the replacement remains active
+- credential inventory must expose the retired and active states without returning secret material
+- the audit ledger must attribute issuance to the original credential and revocation to its replacement
+- the structured smoke result reports only credential identifiers and verification states, never tokens
+
 ## Prerequisites
 
 - Python 3.12
