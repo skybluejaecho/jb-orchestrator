@@ -2,7 +2,7 @@
 
 from typing import cast
 
-from fastapi import Request
+from fastapi import HTTPException, Request, status
 
 from jb_orchestrator.application.budget_services import BudgetService
 from jb_orchestrator.application.external_execution_services import ExternalExecutionService
@@ -12,6 +12,7 @@ from jb_orchestrator.application.phase_pack_services import PhasePackCatalogServ
 from jb_orchestrator.application.project_observation_services import ProjectObservationService
 from jb_orchestrator.application.request_dispatch_services import RequestDispatchService
 from jb_orchestrator.application.scm_publication_services import ScmPublicationService
+from jb_orchestrator.application.security_services import SecurityService
 from jb_orchestrator.application.services import OrchestrationService
 from jb_orchestrator.application.skill_services import SkillCatalogService
 from jb_orchestrator.application.worker_presence_services import WorkerPresenceService
@@ -102,3 +103,15 @@ def get_notification_service(request: Request) -> NotificationService:
     """Return the project notification configuration and outbox service."""
 
     return cast(NotificationService, request.app.state.notification_service)
+
+
+def get_security_service(request: Request) -> SecurityService:
+    """Return authentication management only when bearer security is enabled."""
+
+    service = request.app.state.security_service
+    if not request.app.state.auth_enabled or service is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="service-account credential management requires API authentication",
+        )
+    return cast(SecurityService, service)

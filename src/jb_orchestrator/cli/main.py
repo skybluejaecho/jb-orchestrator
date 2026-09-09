@@ -3,7 +3,7 @@
 import asyncio
 import json
 from pathlib import Path
-from typing import Annotated, Any, cast
+from typing import Annotated, Any
 from uuid import UUID
 
 import httpx
@@ -38,6 +38,7 @@ request_app = typer.Typer(no_args_is_help=True, help="Submit and inspect user re
 run_app = typer.Typer(no_args_is_help=True, help="Inspect and control runs.")
 skill_app = typer.Typer(no_args_is_help=True, help="Inspect and prepare skills.")
 auth_app = typer.Typer(no_args_is_help=True, help="Manage API service accounts.")
+credential_app = typer.Typer(no_args_is_help=True, help="Rotate service-account credentials.")
 mcp_app = typer.Typer(no_args_is_help=True, help="Configure and verify the MCP adapter.")
 system_app = typer.Typer(no_args_is_help=True, help="Verify complete local system boundaries.")
 bundle_app = typer.Typer(no_args_is_help=True, help="Validate and apply orchestration bundles.")
@@ -46,6 +47,7 @@ app.add_typer(request_app, name="request")
 app.add_typer(run_app, name="run")
 app.add_typer(skill_app, name="skill")
 app.add_typer(auth_app, name="auth")
+auth_app.add_typer(credential_app, name="credential")
 app.add_typer(mcp_app, name="mcp")
 app.add_typer(system_app, name="system")
 app.add_typer(bundle_app, name="bundle")
@@ -55,7 +57,7 @@ class McpCommandError(RuntimeError):
     """An MCP-specific CLI operation failed."""
 
 
-def call_api(method: str, path: str, *, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+def call_api(method: str, path: str, *, payload: dict[str, Any] | None = None) -> Any:
     """Call the configured control-plane API and render failures consistently."""
 
     settings = get_settings()
@@ -74,10 +76,10 @@ def call_api(method: str, path: str, *, payload: dict[str, Any] | None = None) -
     except httpx.RequestError as exc:
         typer.echo(f"control-plane request failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
-    return cast(dict[str, Any], response.json())
+    return response.json()
 
 
-def echo_json(payload: dict[str, Any]) -> None:
+def echo_json(payload: Any) -> None:
     typer.echo(json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False))
 
 
@@ -244,6 +246,45 @@ def revoke_service_account(account_id: UUID) -> None:
 
     asyncio.run(security_service().revoke(account_id))
     echo_json({"account_id": str(account_id), "revoked": True})
+
+
+@credential_app.command("issue")
+def issue_service_account_credential(
+    account_id: UUID,
+    *,
+    expires_at: Annotated[
+        str | None,
+        typer.Option(help="Optional ISO-8601 expiration timestamp."),
+    ] = None,
+) -> None:
+    """Issue an additional bearer credential through the Control Plane."""
+
+    echo_json(
+        call_api(
+            "POST",
+            f"/v1/service-accounts/{account_id}/credentials",
+            payload={"expires_at": expires_at},
+        )
+    )
+
+
+@credential_app.command("list")
+def list_service_account_credentials(account_id: UUID) -> None:
+    """List credential metadata without exposing bearer secrets."""
+
+    echo_json(call_api("GET", f"/v1/service-accounts/{account_id}/credentials"))
+
+
+@credential_app.command("revoke")
+def revoke_service_account_credential(account_id: UUID, credential_id: UUID) -> None:
+    """Revoke one credential while leaving its service account enabled."""
+
+    echo_json(
+        call_api(
+            "DELETE",
+            f"/v1/service-accounts/{account_id}/credentials/{credential_id}",
+        )
+    )
 
 
 @mcp_app.command("config")

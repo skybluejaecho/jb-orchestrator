@@ -97,6 +97,12 @@ class SecurityService:
             await unit_of_work.commit()
         return issued
 
+    async def list_credentials(self, account_id: UUID) -> list[ServiceAccountCredential]:
+        async with self._unit_of_work_factory() as unit_of_work:
+            if await unit_of_work.service_accounts.get(account_id) is None:
+                raise ResourceNotFound(f"service account not found: {account_id}")
+            return await unit_of_work.service_account_credentials.list_for_account(account_id)
+
     async def authenticate(self, token: str) -> ApiPrincipal | None:
         credential_id = self._credential_id(token)
         if credential_id is None:
@@ -122,10 +128,12 @@ class SecurityService:
                 credential_id=credential.id,
             )
 
-    async def revoke_credential(self, credential_id: UUID) -> None:
+    async def revoke_credential(self, account_id: UUID, credential_id: UUID) -> None:
         async with self._unit_of_work_factory() as unit_of_work:
+            if await unit_of_work.service_accounts.get(account_id) is None:
+                raise ResourceNotFound(f"service account not found: {account_id}")
             credential = await unit_of_work.service_account_credentials.get(credential_id)
-            if credential is None:
+            if credential is None or credential.account_id != account_id:
                 raise ResourceNotFound(f"service account credential not found: {credential_id}")
             if credential.revoked_at is None:
                 await unit_of_work.service_account_credentials.revoke(credential_id, self._now())

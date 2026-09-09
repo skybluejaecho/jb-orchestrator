@@ -17,6 +17,7 @@ from jb_orchestrator.api.dependencies import (
     get_project_observation_service,
     get_request_dispatch_service,
     get_scm_publication_service,
+    get_security_service,
     get_skill_catalog_service,
     get_worker_presence_service,
     get_worker_readiness_service,
@@ -30,6 +31,7 @@ from jb_orchestrator.api.schemas import (
     CreatedRequestResponse,
     DispatchedRequestResponse,
     ExternalExecutionResponse,
+    IssuedServiceAccountCredentialResponse,
     ModelProfileCreate,
     ModelProfileResponse,
     NodeExecutionResponse,
@@ -47,10 +49,13 @@ from jb_orchestrator.api.schemas import (
     ProjectWorkflowBindingConfigure,
     ProjectWorkflowBindingResponse,
     ProjectWorkflowOptionsResponse,
+    RevokedServiceAccountCredentialResponse,
     RunResponse,
     ScmPublicationAttemptResponse,
     ScmPublicationCreate,
     ScmPublicationResponse,
+    ServiceAccountCredentialCreate,
+    ServiceAccountCredentialResponse,
     SkillCreate,
     SkillResponse,
     TaskArtifactResponse,
@@ -92,6 +97,7 @@ from jb_orchestrator.application import (
     RegisterProject,
     RequestDispatchService,
     ScmPublicationService,
+    SecurityService,
     SkillCatalogService,
     WorkerPresenceService,
     WorkerReadinessService,
@@ -115,6 +121,7 @@ from jb_orchestrator.phase_packs import (
     PhasePackDefinition,
     PhasePackReference,
 )
+from jb_orchestrator.security import ServiceAccountCredential
 from jb_orchestrator.skills import SkillDefinition, SkillReference
 from jb_orchestrator.worker_presence import (
     ProjectWorkerReadiness,
@@ -160,6 +167,71 @@ WorkerReadinessServiceDependency = Annotated[
     WorkerReadinessService, Depends(get_worker_readiness_service)
 ]
 NotificationServiceDependency = Annotated[NotificationService, Depends(get_notification_service)]
+SecurityServiceDependency = Annotated[SecurityService, Depends(get_security_service)]
+
+
+def _credential_response(
+    credential: ServiceAccountCredential,
+) -> ServiceAccountCredentialResponse:
+    return ServiceAccountCredentialResponse(
+        id=credential.id,
+        account_id=credential.account_id,
+        created_at=credential.created_at,
+        expires_at=credential.expires_at,
+        revoked_at=credential.revoked_at,
+        last_used_at=credential.last_used_at,
+        active=credential.is_active(),
+    )
+
+
+@router.post(
+    "/service-accounts/{account_id}/credentials",
+    response_model=IssuedServiceAccountCredentialResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def issue_service_account_credential(
+    account_id: UUID,
+    payload: ServiceAccountCredentialCreate,
+    service: SecurityServiceDependency,
+) -> IssuedServiceAccountCredentialResponse:
+    issued = await service.issue_credential(account_id, expires_at=payload.expires_at)
+    credential = _credential_response(issued.credential)
+    return IssuedServiceAccountCredentialResponse(
+        **credential.model_dump(),
+        token=issued.token,
+        warning="Store this token now; it cannot be retrieved later.",
+    )
+
+
+@router.get(
+    "/service-accounts/{account_id}/credentials",
+    response_model=list[ServiceAccountCredentialResponse],
+)
+async def list_service_account_credentials(
+    account_id: UUID,
+    service: SecurityServiceDependency,
+) -> list[ServiceAccountCredentialResponse]:
+    return [
+        _credential_response(credential)
+        for credential in await service.list_credentials(account_id)
+    ]
+
+
+@router.delete(
+    "/service-accounts/{account_id}/credentials/{credential_id}",
+    response_model=RevokedServiceAccountCredentialResponse,
+)
+async def revoke_service_account_credential(
+    account_id: UUID,
+    credential_id: UUID,
+    service: SecurityServiceDependency,
+) -> RevokedServiceAccountCredentialResponse:
+    await service.revoke_credential(account_id, credential_id)
+    return RevokedServiceAccountCredentialResponse(
+        account_id=account_id,
+        credential_id=credential_id,
+        revoked=True,
+    )
 
 
 @router.get("/workers", response_model=list[WorkerPresenceResponse])
