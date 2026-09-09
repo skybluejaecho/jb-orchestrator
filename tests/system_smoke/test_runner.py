@@ -13,6 +13,20 @@ from jb_orchestrator.system_smoke import (
 )
 
 
+def _inventory_payload(account_id: str) -> dict[str, object]:
+    return {
+        "id": account_id,
+        "key": "smoke-setup",
+        "credential_summary": {
+            "total": 2,
+            "active": 1,
+            "usable": 1,
+            "expired": 0,
+            "revoked": 1,
+        },
+    }
+
+
 def test_system_smoke_fails_closed_outside_test_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -67,6 +81,10 @@ def test_credential_rotation_smoke_verifies_authentication_revocation_and_audit(
                     {"id": original_id, "active": False},
                 ],
             )
+        if request.url.path == "/v1/service-accounts":
+            return httpx.Response(200, json=[_inventory_payload(account_id)])
+        if request.url.path == f"/v1/service-accounts/{account_id}":
+            return httpx.Response(200, json=_inventory_payload(account_id))
         return httpx.Response(
             200,
             json=[
@@ -90,7 +108,7 @@ def test_credential_rotation_smoke_verifies_authentication_revocation_and_audit(
     ) as client:
         result = _verify_credential_rotation(
             client,
-            _SmokeServiceAccount(account_id, original_id, "original-token"),
+            _SmokeServiceAccount(account_id, "smoke-setup", original_id, "original-token"),
         )
 
     assert result == replacement_id
@@ -99,6 +117,7 @@ def test_credential_rotation_smoke_verifies_authentication_revocation_and_audit(
 def test_credential_rotation_smoke_fails_when_revoked_token_remains_valid() -> None:
     identity = _SmokeServiceAccount(
         "00000000-0000-0000-0000-000000000001",
+        "smoke-setup",
         "00000000-0000-0000-0000-000000000002",
         "original-token",
     )

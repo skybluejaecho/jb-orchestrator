@@ -57,6 +57,8 @@ from jb_orchestrator.api.schemas import (
     ServiceAccountCredentialCreate,
     ServiceAccountCredentialEventResponse,
     ServiceAccountCredentialResponse,
+    ServiceAccountCredentialSummaryResponse,
+    ServiceAccountInventoryResponse,
     SkillCreate,
     SkillResponse,
     TaskArtifactResponse,
@@ -99,6 +101,7 @@ from jb_orchestrator.application import (
     RequestDispatchService,
     ScmPublicationService,
     SecurityService,
+    ServiceAccountInventory,
     SkillCatalogService,
     WorkerPresenceService,
     WorkerReadinessService,
@@ -186,6 +189,32 @@ def _credential_response(
     )
 
 
+def _service_account_inventory_response(
+    inventory: ServiceAccountInventory,
+) -> ServiceAccountInventoryResponse:
+    account = inventory.account
+    summary = inventory.credential_summary
+    return ServiceAccountInventoryResponse(
+        id=account.id,
+        key=account.key,
+        name=account.name,
+        permissions=tuple(sorted(account.permissions)),
+        project_ids=tuple(sorted(account.project_ids)),
+        all_projects=account.all_projects,
+        enabled=account.enabled,
+        created_at=account.created_at,
+        credential_summary=ServiceAccountCredentialSummaryResponse(
+            total=summary.total,
+            active=summary.active,
+            usable=summary.usable,
+            expired=summary.expired,
+            revoked=summary.revoked,
+            latest_created_at=summary.latest_created_at,
+            last_used_at=summary.last_used_at,
+        ),
+    )
+
+
 def _credential_event_response(event: DomainEvent) -> ServiceAccountCredentialEventResponse:
     if event.sequence is None:  # pragma: no cover - only persisted events are queried
         raise RuntimeError("credential audit event requires a persisted sequence")
@@ -206,6 +235,49 @@ def _credential_event_response(event: DomainEvent) -> ServiceAccountCredentialEv
         ),
         occurred_at=event.occurred_at,
     )
+
+
+@router.get(
+    "/service-accounts",
+    response_model=list[ServiceAccountInventoryResponse],
+)
+async def list_service_accounts(
+    service: SecurityServiceDependency,
+    enabled: bool | None = Query(default=None),
+    key_prefix: str | None = Query(
+        default=None,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[a-z][a-z0-9._-]*$",
+    ),
+    after_key: str | None = Query(
+        default=None,
+        min_length=3,
+        max_length=64,
+        pattern=r"^[a-z][a-z0-9._-]{2,63}$",
+    ),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[ServiceAccountInventoryResponse]:
+    return [
+        _service_account_inventory_response(inventory)
+        for inventory in await service.list_account_inventory(
+            enabled=enabled,
+            key_prefix=key_prefix,
+            after_key=after_key,
+            limit=limit,
+        )
+    ]
+
+
+@router.get(
+    "/service-accounts/{account_id}",
+    response_model=ServiceAccountInventoryResponse,
+)
+async def get_service_account(
+    account_id: UUID,
+    service: SecurityServiceDependency,
+) -> ServiceAccountInventoryResponse:
+    return _service_account_inventory_response(await service.get_account_inventory(account_id))
 
 
 @router.post(

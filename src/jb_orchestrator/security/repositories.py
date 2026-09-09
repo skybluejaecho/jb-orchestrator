@@ -14,6 +14,15 @@ class ServiceAccountRepository(Protocol):
 
     async def get_by_key(self, key: str) -> ServiceAccount | None: ...
 
+    async def list(
+        self,
+        *,
+        enabled: bool | None = None,
+        key_prefix: str | None = None,
+        after_key: str | None = None,
+        limit: int = 100,
+    ) -> list[ServiceAccount]: ...
+
     async def disable(self, account_id: UUID) -> None: ...
 
 
@@ -23,6 +32,10 @@ class ServiceAccountCredentialRepository(Protocol):
     async def get(self, credential_id: UUID) -> ServiceAccountCredential | None: ...
 
     async def list_for_account(self, account_id: UUID) -> list[ServiceAccountCredential]: ...
+
+    async def list_for_accounts(
+        self, account_ids: frozenset[UUID]
+    ) -> list[ServiceAccountCredential]: ...
 
     async def revoke(self, credential_id: UUID, revoked_at: datetime) -> None: ...
 

@@ -95,6 +95,7 @@ class SystemSmokeResult:
 @dataclass(frozen=True, slots=True)
 class _SmokeServiceAccount:
     account_id: str
+    account_key: str
     credential_id: str
     token: str
 
@@ -281,6 +282,7 @@ async def _issue_tokens(suffix: str) -> tuple[_SmokeServiceAccount, str]:
         return (
             _SmokeServiceAccount(
                 account_id=str(setup.account.id),
+                account_key=setup.account.key,
                 credential_id=str(setup.credential.id),
                 token=setup.token,
             ),
@@ -362,6 +364,38 @@ def _verify_credential_rotation(
         or issued_event.get("actor_credential_id") != identity.credential_id
     ):
         raise SystemSmokeError("credential issuance audit attribution is inconsistent")
+
+    inventory = _request(
+        api,
+        "GET",
+        f"/v1/service-accounts?key_prefix={identity.account_key}&limit=1",
+        headers=replacement_headers,
+    )
+    detail = _request(
+        api,
+        "GET",
+        f"/v1/service-accounts/{identity.account_id}",
+        headers=replacement_headers,
+    )
+    if (
+        not isinstance(inventory, list)
+        or len(inventory) != 1
+        or inventory[0].get("id") != identity.account_id
+        or detail.get("id") != identity.account_id
+        or inventory[0].get("key") != detail.get("key")
+    ):
+        raise SystemSmokeError("service-account inventory did not return the rotated account")
+    expected_summary = {"total": 2, "active": 1, "usable": 1, "expired": 0, "revoked": 1}
+    for account in (inventory[0], detail):
+        summary = account.get("credential_summary", {})
+        stable_summary = (
+            {key: summary.get(key) for key in expected_summary} if isinstance(summary, dict) else {}
+        )
+        if stable_summary != expected_summary:
+            raise SystemSmokeError("service-account inventory credential summary is inconsistent")
+    serialized_inventory = json.dumps([*inventory, detail])
+    if "token_digest" in serialized_inventory or replacement_token in serialized_inventory:
+        raise SystemSmokeError("service-account inventory exposed credential secret material")
     return replacement_id
 
 
