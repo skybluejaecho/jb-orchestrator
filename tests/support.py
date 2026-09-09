@@ -747,6 +747,24 @@ class MemoryEventRepository:
     async def get(self, event_id: UUID) -> DomainEvent | None:
         return next((event for event in self._store.events if event.id == event_id), None)
 
+    async def list_aggregate(
+        self,
+        *,
+        aggregate_type: str,
+        aggregate_id: UUID,
+        before_sequence: int | None = None,
+        limit: int = 100,
+    ) -> list[DomainEvent]:
+        events = [
+            event
+            for event in self._store.events
+            if event.aggregate_type == aggregate_type
+            and event.aggregate_id == aggregate_id
+            and event.sequence is not None
+            and (before_sequence is None or event.sequence < before_sequence)
+        ]
+        return sorted(events, key=lambda event: event.sequence or 0, reverse=True)[:limit]
+
     async def list_after(
         self,
         *,

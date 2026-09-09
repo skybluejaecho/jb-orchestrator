@@ -59,6 +59,10 @@ async def test_global_admin_rotates_service_account_credentials() -> None:
             f"{base_path}/{credential_id}",
             headers=admin_headers,
         )
+        audited = await client.get(
+            f"/v1/service-accounts/{client_account.account.id}/credential-events",
+            headers=admin_headers,
+        )
 
     assert forbidden.status_code == 403
     assert scoped_forbidden.status_code == 403
@@ -76,6 +80,17 @@ async def test_global_admin_rotates_service_account_credentials() -> None:
         "credential_id": credential_id,
         "revoked": True,
     }
+    assert audited.status_code == 200
+    assert [event["event_type"] for event in audited.json()] == [
+        "service_account.credential_revoked",
+        "service_account.credential_issued",
+        "service_account.credential_issued",
+    ]
+    assert audited.json()[0]["credential_id"] == credential_id
+    assert audited.json()[0]["actor_account_id"] == str(admin.account.id)
+    assert audited.json()[0]["actor_credential_id"] == str(admin.credential.id)
+    assert "token" not in audited.text
+    assert "token_digest" not in audited.text
     assert await security.authenticate(issued.json()["token"]) is None
 
 

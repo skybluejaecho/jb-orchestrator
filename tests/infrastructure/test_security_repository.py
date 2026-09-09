@@ -42,4 +42,21 @@ async def test_service_account_round_trip_and_revocation() -> None:
     assert await security.authenticate(replacement.token) is not None
     await security.revoke(issued.account.id)
     assert await security.authenticate(replacement.token) is None
+    events = await security.list_credential_events(issued.account.id)
+    assert [event.event_type for event in events] == [
+        "service_account.revoked",
+        "service_account.credential_revoked",
+        "service_account.credential_issued",
+        "service_account.credential_issued",
+    ]
+    assert events[0].sequence is not None
+    older = await security.list_credential_events(
+        issued.account.id,
+        before_sequence=events[0].sequence,
+        limit=2,
+    )
+    assert [event.event_type for event in older] == [
+        "service_account.credential_revoked",
+        "service_account.credential_issued",
+    ]
     await engine.dispose()
