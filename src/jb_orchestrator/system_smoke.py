@@ -44,6 +44,9 @@ class SystemSmokeResult:
     cancelled_execution_id: str
     publication_id: str
     review_url: str
+    service_account_id: str
+    retired_credential_id: str
+    replacement_credential_id: str
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -76,8 +79,24 @@ class SystemSmokeResult:
                 "review_url": self.review_url,
                 "status": "succeeded",
             },
+            "credential_rotation": {
+                "service_account_id": self.service_account_id,
+                "retired_credential_id": self.retired_credential_id,
+                "replacement_credential_id": self.replacement_credential_id,
+                "authentication": "verified",
+                "revocation": "verified",
+                "audit": "verified",
+                "status": "succeeded",
+            },
             "status": "ready",
         }
+
+
+@dataclass(frozen=True, slots=True)
+class _SmokeServiceAccount:
+    account_id: str
+    credential_id: str
+    token: str
 
 
 @dataclass(slots=True)
@@ -108,6 +127,11 @@ def _terminate_process_tree(process: subprocess.Popen[bytes]) -> None:
             check=False,
             capture_output=True,
         )
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
         return
     process_group = f"-{process.pid}"
     try:
@@ -229,7 +253,7 @@ def _request_execution(jarvis: httpx.Client, execution_id: str) -> dict[str, Any
     return cast(dict[str, Any], response.json())
 
 
-async def _issue_tokens(suffix: str) -> tuple[str, str]:
+async def _issue_tokens(suffix: str) -> tuple[_SmokeServiceAccount, str]:
     settings = get_settings()
     session_factory = create_session_factory(settings)
     security = SecurityService(lambda: SqlAlchemyUnitOfWork(session_factory))
@@ -254,9 +278,91 @@ async def _issue_tokens(suffix: str) -> tuple[str, str]:
             ),
             all_projects=True,
         )
-        return setup.token, jarvis.token
+        return (
+            _SmokeServiceAccount(
+                account_id=str(setup.account.id),
+                credential_id=str(setup.credential.id),
+                token=setup.token,
+            ),
+            jarvis.token,
+        )
     finally:
         await session_factory.kw["bind"].dispose()
+
+
+def _verify_credential_rotation(
+    api: httpx.Client,
+    identity: _SmokeServiceAccount,
+) -> str:
+    original_headers = {"Authorization": f"Bearer {identity.token}"}
+    issued = _request(
+        api,
+        "POST",
+        f"/v1/service-accounts/{identity.account_id}/credentials",
+        headers=original_headers,
+        payload={},
+    )
+    replacement_id = issued.get("id")
+    replacement_token = issued.get("token")
+    if not isinstance(replacement_id, str) or not isinstance(replacement_token, str):
+        raise SystemSmokeError("credential issue response omitted replacement identity")
+    if "token_digest" in issued:
+        raise SystemSmokeError("credential issue response exposed a token digest")
+
+    replacement_headers = {"Authorization": f"Bearer {replacement_token}"}
+    projects = _request(api, "GET", "/v1/projects", headers=replacement_headers)
+    if not isinstance(projects, list):
+        raise SystemSmokeError("replacement credential did not authenticate")
+
+    revoked = _request(
+        api,
+        "DELETE",
+        f"/v1/service-accounts/{identity.account_id}/credentials/{identity.credential_id}",
+        headers=replacement_headers,
+    )
+    if revoked.get("credential_id") != identity.credential_id or revoked.get("revoked") is not True:
+        raise SystemSmokeError("original credential was not revoked")
+
+    rejected = api.get("/v1/projects", headers=original_headers)
+    if rejected.status_code != 401:
+        raise SystemSmokeError(f"revoked credential remained usable: HTTP {rejected.status_code}")
+
+    credentials = _request(
+        api,
+        "GET",
+        f"/v1/service-accounts/{identity.account_id}/credentials",
+        headers=replacement_headers,
+    )
+    if not isinstance(credentials, list):
+        raise SystemSmokeError("credential inventory response is not a list")
+    by_id = {item.get("id"): item for item in credentials if isinstance(item, dict)}
+    if by_id.get(identity.credential_id, {}).get("active") is not False:
+        raise SystemSmokeError("credential inventory did not expose original revocation")
+    if by_id.get(replacement_id, {}).get("active") is not True:
+        raise SystemSmokeError("credential inventory did not expose active replacement")
+
+    events = _request(
+        api,
+        "GET",
+        f"/v1/service-accounts/{identity.account_id}/credential-events?limit=10",
+        headers=replacement_headers,
+    )
+    if not isinstance(events, list) or len(events) < 3:
+        raise SystemSmokeError("credential audit ledger omitted rotation events")
+    revoked_event, issued_event = events[:2]
+    if (
+        revoked_event.get("event_type") != "service_account.credential_revoked"
+        or revoked_event.get("credential_id") != identity.credential_id
+        or revoked_event.get("actor_credential_id") != replacement_id
+    ):
+        raise SystemSmokeError("credential revocation audit attribution is inconsistent")
+    if (
+        issued_event.get("event_type") != "service_account.credential_issued"
+        or issued_event.get("credential_id") != replacement_id
+        or issued_event.get("actor_credential_id") != identity.credential_id
+    ):
+        raise SystemSmokeError("credential issuance audit attribution is inconsistent")
+    return replacement_id
 
 
 async def _prepare_scm_execution(
@@ -441,9 +547,12 @@ def run_system_smoke(
     jarvis_root = project_root / "apps" / "jarvis"
     if not (jarvis_root / "node_modules").is_dir():
         raise SystemSmokeError("Jarvis dependencies are missing; run npm ci in apps/jarvis")
-    npm = shutil.which("npm")
-    if npm is None:
-        raise SystemSmokeError("npm is required for the Jarvis system smoke test")
+    node = shutil.which("node")
+    if node is None:
+        raise SystemSmokeError("Node.js is required for the Jarvis system smoke test")
+    vinext_cli = jarvis_root / "node_modules" / "vinext" / "dist" / "cli.js"
+    if not vinext_cli.is_file():
+        raise SystemSmokeError("Vinext CLI is missing; run npm ci in apps/jarvis")
     if shutil.which("git") is None:
         raise SystemSmokeError("git is required for the SCM system smoke test")
     try:
@@ -461,7 +570,7 @@ def run_system_smoke(
     _ensure_port_available(host, jarvis_port)
     suffix = uuid4().hex[:10]
     try:
-        setup_token, jarvis_token = asyncio.run(_issue_tokens(suffix))
+        setup_identity, jarvis_token = asyncio.run(_issue_tokens(suffix))
     except Exception as exc:
         raise SystemSmokeError(f"cannot issue smoke service accounts: {exc}") from exc
     base_environment = os.environ.copy()
@@ -519,7 +628,7 @@ def run_system_smoke(
                 process=api_process,
             )
 
-            setup_headers = {"Authorization": f"Bearer {setup_token}"}
+            setup_headers = {"Authorization": f"Bearer {setup_identity.token}"}
             workflow_key = f"system-smoke-{suffix}"
             project = _request(
                 api,
@@ -547,13 +656,22 @@ def run_system_smoke(
                 headers=setup_headers,
                 payload={"definition_key": workflow_key, "definition_version": 1},
             )
+            replacement_credential_id = _verify_credential_rotation(api, setup_identity)
             jarvis_environment = base_environment | {
                 "JARVIS_CONTROL_PLANE_URL": f"http://{host}:{api_port}",
                 "JARVIS_API_TOKEN": jarvis_token,
             }
             jarvis_process = _start_process(
                 "jarvis",
-                [npm, "run", "dev", "--", "--port", str(jarvis_port), "--hostname", host],
+                [
+                    node,
+                    str(vinext_cli),
+                    "dev",
+                    "--port",
+                    str(jarvis_port),
+                    "--hostname",
+                    host,
+                ],
                 cwd=jarvis_root,
                 environment=jarvis_environment,
                 log_directory=log_directory,
@@ -988,6 +1106,9 @@ def run_system_smoke(
                 second_id,
                 str(publication["id"]),
                 review_url,
+                setup_identity.account_id,
+                setup_identity.credential_id,
+                replacement_credential_id,
             )
         except SystemSmokeError:
             raise
