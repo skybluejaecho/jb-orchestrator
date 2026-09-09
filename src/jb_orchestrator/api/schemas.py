@@ -60,6 +60,33 @@ class ProjectResponse(BaseModel):
     updated_at: datetime
 
 
+class ServiceAccountCredentialCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expires_at: datetime | None = None
+
+
+class ServiceAccountCredentialResponse(BaseModel):
+    id: UUID
+    account_id: UUID
+    created_at: datetime
+    expires_at: datetime | None
+    revoked_at: datetime | None
+    last_used_at: datetime | None
+    active: bool
+
+
+class IssuedServiceAccountCredentialResponse(ServiceAccountCredentialResponse):
+    token: str
+    warning: str
+
+
+class RevokedServiceAccountCredentialResponse(BaseModel):
+    account_id: UUID
+    credential_id: UUID
+    revoked: bool
+
+
 class NotificationSubscriptionCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

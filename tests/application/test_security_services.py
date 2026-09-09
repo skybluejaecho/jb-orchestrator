@@ -58,7 +58,12 @@ async def test_multiple_credentials_expire_and_revoke_independently() -> None:
     assert await service.authenticate(second.token) is not None
     assert len(store.service_account_credentials) == 2
 
-    await service.revoke_credential(first.credential.id)
+    credentials = await service.list_credentials(first.account.id)
+    assert [credential.id for credential in credentials] == sorted(
+        (first.credential.id, second.credential.id)
+    )
+
+    await service.revoke_credential(first.account.id, first.credential.id)
 
     assert await service.authenticate(first.token) is None
     assert await service.authenticate(second.token) is not None
@@ -68,6 +73,17 @@ async def test_multiple_credentials_expire_and_revoke_independently() -> None:
         clock=lambda: now + timedelta(days=30),
     )
     assert await expired_service.authenticate(second.token) is None
+
+    other = await service.issue(
+        key="other-client",
+        name="Other Client",
+        permissions={ApiPermission.PROJECT_READ},
+        project_ids={project.id},
+    )
+    with pytest.raises(ResourceNotFound, match="credential not found"):
+        await service.revoke_credential(other.account.id, second.credential.id)
+    with pytest.raises(ResourceNotFound, match="service account not found"):
+        await service.list_credentials(uuid4())
 
 
 async def test_issue_rejects_duplicate_key_and_missing_project() -> None:

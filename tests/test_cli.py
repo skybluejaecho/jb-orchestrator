@@ -154,6 +154,69 @@ def test_control_plane_call_includes_configured_token(monkeypatch: MonkeyPatch) 
     assert captured["headers"] == {"Authorization": "Bearer secret-token"}
 
 
+def test_credential_commands_use_control_plane_api(monkeypatch: MonkeyPatch) -> None:
+    account_id = "00000000-0000-0000-0000-000000000001"
+    credential_id = "00000000-0000-0000-0000-000000000002"
+    requests: list[tuple[str, str, dict[str, Any] | None]] = []
+
+    def fake_request(
+        method: str,
+        url: str,
+        *,
+        json: dict[str, Any] | None,
+        headers: dict[str, str],
+        timeout: float,
+    ) -> httpx.Response:
+        del headers, timeout
+        requests.append((method, url, json))
+        request = httpx.Request(method, url)
+        if method == "POST":
+            payload: Any = {
+                "id": credential_id,
+                "account_id": account_id,
+                "token": "jbsa_token",
+            }
+            status_code = 201
+        elif method == "GET":
+            payload = [{"id": credential_id, "account_id": account_id}]
+            status_code = 200
+        else:
+            payload = {
+                "account_id": account_id,
+                "credential_id": credential_id,
+                "revoked": True,
+            }
+            status_code = 200
+        return httpx.Response(status_code, request=request, json=payload)
+
+    monkeypatch.setattr(httpx, "request", fake_request)
+
+    issued = runner.invoke(
+        app,
+        [
+            "auth",
+            "credential",
+            "issue",
+            account_id,
+            "--expires-at",
+            "2030-01-01T00:00:00+00:00",
+        ],
+    )
+    listed = runner.invoke(app, ["auth", "credential", "list", account_id])
+    revoked = runner.invoke(
+        app,
+        ["auth", "credential", "revoke", account_id, credential_id],
+    )
+
+    assert issued.exit_code == listed.exit_code == revoked.exit_code == 0
+    base_url = f"http://127.0.0.1:8000/v1/service-accounts/{account_id}/credentials"
+    assert requests == [
+        ("POST", base_url, {"expires_at": "2030-01-01T00:00:00+00:00"}),
+        ("GET", base_url, None),
+        ("DELETE", f"{base_url}/{credential_id}", None),
+    ]
+
+
 def test_mcp_config_uses_placeholder_instead_of_configured_secret(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:

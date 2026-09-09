@@ -37,7 +37,7 @@ async def test_service_account_round_trip_and_revocation() -> None:
         replacement.credential.id,
     }
     assert all(credential.last_used_at is not None for credential in credentials)
-    await security.revoke_credential(issued.credential.id)
+    await security.revoke_credential(issued.account.id, issued.credential.id)
     assert await security.authenticate(issued.token) is None
     assert await security.authenticate(replacement.token) is not None
     await security.revoke(issued.account.id)
