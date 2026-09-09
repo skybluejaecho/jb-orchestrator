@@ -282,6 +282,25 @@ class SqlAlchemyEventRepository:
         record = await self._session.scalar(select(EventRecord).where(EventRecord.id == event_id))
         return event_from_record(record) if record is not None else None
 
+    async def list_aggregate(
+        self,
+        *,
+        aggregate_type: str,
+        aggregate_id: UUID,
+        before_sequence: int | None = None,
+        limit: int = 100,
+    ) -> list[DomainEvent]:
+        statement = select(EventRecord).where(
+            EventRecord.aggregate_type == aggregate_type,
+            EventRecord.aggregate_id == aggregate_id,
+        )
+        if before_sequence is not None:
+            statement = statement.where(EventRecord.sequence < before_sequence)
+        records = await self._session.scalars(
+            statement.order_by(EventRecord.sequence.desc()).limit(limit)
+        )
+        return [event_from_record(record) for record in records]
+
     async def list_after(
         self,
         *,

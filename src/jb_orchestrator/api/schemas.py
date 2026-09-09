@@ -87,6 +87,18 @@ class RevokedServiceAccountCredentialResponse(BaseModel):
     revoked: bool
 
 
+class ServiceAccountCredentialEventResponse(BaseModel):
+    sequence: int
+    id: UUID
+    account_id: UUID
+    event_type: str
+    credential_id: UUID | None
+    expires_at: datetime | None
+    actor_account_id: UUID | None
+    actor_credential_id: UUID | None
+    occurred_at: datetime
+
+
 class NotificationSubscriptionCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

@@ -55,6 +55,7 @@ from jb_orchestrator.api.schemas import (
     ScmPublicationCreate,
     ScmPublicationResponse,
     ServiceAccountCredentialCreate,
+    ServiceAccountCredentialEventResponse,
     ServiceAccountCredentialResponse,
     SkillCreate,
     SkillResponse,
@@ -107,6 +108,7 @@ from jb_orchestrator.application import (
 )
 from jb_orchestrator.config import get_settings
 from jb_orchestrator.domain import (
+    DomainEvent,
     DomainValidationError,
     ProjectStatus,
     RequestOrigin,
@@ -184,17 +186,44 @@ def _credential_response(
     )
 
 
+def _credential_event_response(event: DomainEvent) -> ServiceAccountCredentialEventResponse:
+    if event.sequence is None:  # pragma: no cover - only persisted events are queried
+        raise RuntimeError("credential audit event requires a persisted sequence")
+    credential_id = event.payload.get("credential_id")
+    expires_at = event.payload.get("expires_at")
+    actor_account_id = event.payload.get("actor_account_id")
+    actor_credential_id = event.payload.get("actor_credential_id")
+    return ServiceAccountCredentialEventResponse(
+        sequence=event.sequence,
+        id=event.id,
+        account_id=event.aggregate_id,
+        event_type=event.event_type,
+        credential_id=UUID(credential_id) if isinstance(credential_id, str) else None,
+        expires_at=datetime.fromisoformat(expires_at) if isinstance(expires_at, str) else None,
+        actor_account_id=(UUID(actor_account_id) if isinstance(actor_account_id, str) else None),
+        actor_credential_id=(
+            UUID(actor_credential_id) if isinstance(actor_credential_id, str) else None
+        ),
+        occurred_at=event.occurred_at,
+    )
+
+
 @router.post(
     "/service-accounts/{account_id}/credentials",
     response_model=IssuedServiceAccountCredentialResponse,
     status_code=status.HTTP_201_CREATED,
 )
 async def issue_service_account_credential(
+    request: Request,
     account_id: UUID,
     payload: ServiceAccountCredentialCreate,
     service: SecurityServiceDependency,
 ) -> IssuedServiceAccountCredentialResponse:
-    issued = await service.issue_credential(account_id, expires_at=payload.expires_at)
+    issued = await service.issue_credential(
+        account_id,
+        expires_at=payload.expires_at,
+        actor=request.state.principal,
+    )
     credential = _credential_response(issued.credential)
     return IssuedServiceAccountCredentialResponse(
         **credential.model_dump(),
@@ -217,16 +246,41 @@ async def list_service_account_credentials(
     ]
 
 
+@router.get(
+    "/service-accounts/{account_id}/credential-events",
+    response_model=list[ServiceAccountCredentialEventResponse],
+)
+async def list_service_account_credential_events(
+    account_id: UUID,
+    service: SecurityServiceDependency,
+    before_sequence: int | None = Query(default=None, ge=1),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[ServiceAccountCredentialEventResponse]:
+    return [
+        _credential_event_response(event)
+        for event in await service.list_credential_events(
+            account_id,
+            before_sequence=before_sequence,
+            limit=limit,
+        )
+    ]
+
+
 @router.delete(
     "/service-accounts/{account_id}/credentials/{credential_id}",
     response_model=RevokedServiceAccountCredentialResponse,
 )
 async def revoke_service_account_credential(
+    request: Request,
     account_id: UUID,
     credential_id: UUID,
     service: SecurityServiceDependency,
 ) -> RevokedServiceAccountCredentialResponse:
-    await service.revoke_credential(account_id, credential_id)
+    await service.revoke_credential(
+        account_id,
+        credential_id,
+        actor=request.state.principal,
+    )
     return RevokedServiceAccountCredentialResponse(
         account_id=account_id,
         credential_id=credential_id,
