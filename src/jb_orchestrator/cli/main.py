@@ -4,6 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Annotated, Any
+from urllib.parse import urlencode
 from uuid import UUID
 
 import httpx
@@ -38,6 +39,7 @@ request_app = typer.Typer(no_args_is_help=True, help="Submit and inspect user re
 run_app = typer.Typer(no_args_is_help=True, help="Inspect and control runs.")
 skill_app = typer.Typer(no_args_is_help=True, help="Inspect and prepare skills.")
 auth_app = typer.Typer(no_args_is_help=True, help="Manage API service accounts.")
+account_app = typer.Typer(no_args_is_help=True, help="Inspect service-account identities.")
 credential_app = typer.Typer(no_args_is_help=True, help="Rotate service-account credentials.")
 mcp_app = typer.Typer(no_args_is_help=True, help="Configure and verify the MCP adapter.")
 system_app = typer.Typer(no_args_is_help=True, help="Verify complete local system boundaries.")
@@ -47,6 +49,7 @@ app.add_typer(request_app, name="request")
 app.add_typer(run_app, name="run")
 app.add_typer(skill_app, name="skill")
 app.add_typer(auth_app, name="auth")
+auth_app.add_typer(account_app, name="account")
 auth_app.add_typer(credential_app, name="credential")
 app.add_typer(mcp_app, name="mcp")
 app.add_typer(system_app, name="system")
@@ -246,6 +249,43 @@ def revoke_service_account(account_id: UUID) -> None:
 
     asyncio.run(security_service().revoke(account_id))
     echo_json({"account_id": str(account_id), "revoked": True})
+
+
+@account_app.command("list")
+def list_service_accounts(
+    *,
+    enabled: Annotated[
+        bool | None,
+        typer.Option("--enabled/--disabled", help="Filter by account activation state."),
+    ] = None,
+    key_prefix: Annotated[
+        str | None,
+        typer.Option(help="Filter accounts whose stable key starts with this value."),
+    ] = None,
+    after_key: Annotated[
+        str | None,
+        typer.Option(help="Return accounts ordered after this exact key."),
+    ] = None,
+    limit: Annotated[int, typer.Option(min=1, max=500, help="Maximum accounts to return.")] = 100,
+) -> None:
+    """List service-account policy and credential health without secrets."""
+
+    parameters: dict[str, str | int | bool] = {}
+    if enabled is not None:
+        parameters["enabled"] = enabled
+    if key_prefix is not None:
+        parameters["key_prefix"] = key_prefix
+    if after_key is not None:
+        parameters["after_key"] = after_key
+    parameters["limit"] = limit
+    echo_json(call_api("GET", f"/v1/service-accounts?{urlencode(parameters)}"))
+
+
+@account_app.command("show")
+def show_service_account(account_id: UUID) -> None:
+    """Show one service account and its credential health summary."""
+
+    echo_json(call_api("GET", f"/v1/service-accounts/{account_id}"))
 
 
 @credential_app.command("issue")

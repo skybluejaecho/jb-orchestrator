@@ -66,6 +66,26 @@ class SqlAlchemyServiceAccountRepository:
         )
         return account_from_record(record) if record is not None else None
 
+    async def list(
+        self,
+        *,
+        enabled: bool | None = None,
+        key_prefix: str | None = None,
+        after_key: str | None = None,
+        limit: int = 100,
+    ) -> list[ServiceAccount]:
+        statement = select(ServiceAccountRecord)
+        if enabled is not None:
+            statement = statement.where(ServiceAccountRecord.enabled == enabled)
+        if key_prefix is not None:
+            statement = statement.where(ServiceAccountRecord.key.startswith(key_prefix))
+        if after_key is not None:
+            statement = statement.where(ServiceAccountRecord.key > after_key)
+        records = await self._session.scalars(
+            statement.order_by(ServiceAccountRecord.key).limit(limit)
+        )
+        return [account_from_record(record) for record in records]
+
     async def disable(self, account_id: UUID) -> None:
         record = await self._session.get(ServiceAccountRecord, account_id)
         if record is not None:
@@ -102,6 +122,22 @@ class SqlAlchemyServiceAccountCredentialRepository:
             select(ServiceAccountCredentialRecord)
             .where(ServiceAccountCredentialRecord.account_id == account_id)
             .order_by(
+                ServiceAccountCredentialRecord.created_at.desc(),
+                ServiceAccountCredentialRecord.id,
+            )
+        )
+        return [credential_from_record(record) for record in records]
+
+    async def list_for_accounts(
+        self, account_ids: frozenset[UUID]
+    ) -> list[ServiceAccountCredential]:
+        if not account_ids:
+            return []
+        records = await self._session.scalars(
+            select(ServiceAccountCredentialRecord)
+            .where(ServiceAccountCredentialRecord.account_id.in_(account_ids))
+            .order_by(
+                ServiceAccountCredentialRecord.account_id,
                 ServiceAccountCredentialRecord.created_at.desc(),
                 ServiceAccountCredentialRecord.id,
             )

@@ -32,6 +32,23 @@ class IssuedCredential:
     token: str
 
 
+@dataclass(frozen=True, slots=True)
+class CredentialInventorySummary:
+    total: int
+    active: int
+    usable: int
+    expired: int
+    revoked: int
+    latest_created_at: datetime | None
+    last_used_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class ServiceAccountInventory:
+    account: ServiceAccount
+    credential_summary: CredentialInventorySummary
+
+
 class SecurityService:
     def __init__(
         self,
@@ -125,6 +142,50 @@ class SecurityService:
             if await unit_of_work.service_accounts.get(account_id) is None:
                 raise ResourceNotFound(f"service account not found: {account_id}")
             return await unit_of_work.service_account_credentials.list_for_account(account_id)
+
+    async def list_account_inventory(
+        self,
+        *,
+        enabled: bool | None = None,
+        key_prefix: str | None = None,
+        after_key: str | None = None,
+        limit: int = 100,
+    ) -> list[ServiceAccountInventory]:
+        checked_at = self._now()
+        async with self._unit_of_work_factory() as unit_of_work:
+            accounts = await unit_of_work.service_accounts.list(
+                enabled=enabled,
+                key_prefix=key_prefix,
+                after_key=after_key,
+                limit=limit,
+            )
+            credentials = await unit_of_work.service_account_credentials.list_for_accounts(
+                frozenset(account.id for account in accounts)
+            )
+        credentials_by_account: dict[UUID, list[ServiceAccountCredential]] = {
+            account.id: [] for account in accounts
+        }
+        for credential in credentials:
+            credentials_by_account[credential.account_id].append(credential)
+        return [
+            self._account_inventory(
+                account,
+                credentials_by_account[account.id],
+                checked_at=checked_at,
+            )
+            for account in accounts
+        ]
+
+    async def get_account_inventory(self, account_id: UUID) -> ServiceAccountInventory:
+        checked_at = self._now()
+        async with self._unit_of_work_factory() as unit_of_work:
+            account = await unit_of_work.service_accounts.get(account_id)
+            if account is None:
+                raise ResourceNotFound(f"service account not found: {account_id}")
+            credentials = await unit_of_work.service_account_credentials.list_for_account(
+                account_id
+            )
+        return self._account_inventory(account, credentials, checked_at=checked_at)
 
     async def list_credential_events(
         self,
@@ -299,6 +360,40 @@ class SecurityService:
                 ),
                 **SecurityService._actor_payload(actor),
             },
+        )
+
+    @staticmethod
+    def _account_inventory(
+        account: ServiceAccount,
+        credentials: Collection[ServiceAccountCredential],
+        *,
+        checked_at: datetime,
+    ) -> ServiceAccountInventory:
+        active = sum(credential.is_active(checked_at) for credential in credentials)
+        revoked = sum(credential.revoked_at is not None for credential in credentials)
+        expired = sum(
+            credential.revoked_at is None
+            and credential.expires_at is not None
+            and credential.expires_at <= checked_at
+            for credential in credentials
+        )
+        created_values = [credential.created_at for credential in credentials]
+        used_values = [
+            credential.last_used_at
+            for credential in credentials
+            if credential.last_used_at is not None
+        ]
+        return ServiceAccountInventory(
+            account=account,
+            credential_summary=CredentialInventorySummary(
+                total=len(credentials),
+                active=active,
+                usable=active if account.enabled else 0,
+                expired=expired,
+                revoked=revoked,
+                latest_created_at=max(created_values, default=None),
+                last_used_at=max(used_values, default=None),
+            ),
         )
 
     @staticmethod

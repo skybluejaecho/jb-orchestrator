@@ -24,6 +24,7 @@ from jb_orchestrator.scm import (
     ScmPublicationFailureCode,
     ScmPublicationStatus,
 )
+from jb_orchestrator.security import ApiPermission
 from jb_orchestrator.skills import SkillSourceKind
 from jb_orchestrator.worker_presence import (
     WorkerKind,
@@ -64,6 +65,28 @@ class ServiceAccountCredentialCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     expires_at: datetime | None = None
+
+
+class ServiceAccountCredentialSummaryResponse(BaseModel):
+    total: int
+    active: int
+    usable: int
+    expired: int
+    revoked: int
+    latest_created_at: datetime | None
+    last_used_at: datetime | None
+
+
+class ServiceAccountInventoryResponse(BaseModel):
+    id: UUID
+    key: str
+    name: str
+    permissions: tuple[ApiPermission, ...]
+    project_ids: tuple[UUID, ...]
+    all_projects: bool
+    enabled: bool
+    created_at: datetime
+    credential_summary: ServiceAccountCredentialSummaryResponse
 
 
 class ServiceAccountCredentialResponse(BaseModel):
