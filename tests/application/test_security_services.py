@@ -35,6 +35,12 @@ async def test_issue_authenticate_and_revoke_service_account() -> None:
 
     await service.revoke(issued.account.id)
     assert await service.authenticate(issued.token) is None
+    assert [event.event_type for event in store.events] == [
+        "service_account.credential_issued",
+        "service_account.revoked",
+    ]
+    await service.revoke(issued.account.id)
+    assert len(store.events) == 2
 
 
 async def test_multiple_credentials_expire_and_revoke_independently() -> None:
@@ -64,6 +70,9 @@ async def test_multiple_credentials_expire_and_revoke_independently() -> None:
     )
 
     await service.revoke_credential(first.account.id, first.credential.id)
+    event_count = len(store.events)
+    await service.revoke_credential(first.account.id, first.credential.id)
+    assert len(store.events) == event_count
 
     assert await service.authenticate(first.token) is None
     assert await service.authenticate(second.token) is not None

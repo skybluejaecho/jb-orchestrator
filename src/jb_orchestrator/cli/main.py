@@ -287,6 +287,29 @@ def revoke_service_account_credential(account_id: UUID, credential_id: UUID) -> 
     )
 
 
+@credential_app.command("audit")
+def list_service_account_credential_events(
+    account_id: UUID,
+    *,
+    before_sequence: Annotated[
+        int | None,
+        typer.Option(min=1, help="Return events older than this sequence."),
+    ] = None,
+    limit: Annotated[int, typer.Option(min=1, max=500, help="Maximum events to return.")] = 100,
+) -> None:
+    """List the latest credential lifecycle audit events."""
+
+    query = f"limit={limit}"
+    if before_sequence is not None:
+        query = f"before_sequence={before_sequence}&{query}"
+    echo_json(
+        call_api(
+            "GET",
+            f"/v1/service-accounts/{account_id}/credential-events?{query}",
+        )
+    )
+
+
 @mcp_app.command("config")
 def render_mcp_config(
     project_path: Annotated[

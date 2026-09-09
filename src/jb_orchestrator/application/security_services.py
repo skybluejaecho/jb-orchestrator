@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 
 from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNotFound
 from jb_orchestrator.application.unit_of_work import UnitOfWork
+from jb_orchestrator.domain import DomainEvent
 from jb_orchestrator.security import (
     ApiPermission,
     ApiPrincipal,
@@ -71,6 +72,15 @@ class SecurityService:
                     raise ResourceNotFound(f"project not found: {project_id}")
             await unit_of_work.service_accounts.add(account)
             await unit_of_work.service_account_credentials.add(issued.credential)
+            await unit_of_work.events.append(
+                self._credential_event(
+                    account_id=account.id,
+                    credential=issued.credential,
+                    event_type="service_account.credential_issued",
+                    occurred_at=issued_at,
+                    actor=None,
+                )
+            )
             await unit_of_work.commit()
         return IssuedServiceAccount(
             account=account,
@@ -79,7 +89,11 @@ class SecurityService:
         )
 
     async def issue_credential(
-        self, account_id: UUID, *, expires_at: datetime | None = None
+        self,
+        account_id: UUID,
+        *,
+        expires_at: datetime | None = None,
+        actor: ApiPrincipal | None = None,
     ) -> IssuedCredential:
         issued_at = self._now()
         async with self._unit_of_work_factory() as unit_of_work:
@@ -94,6 +108,15 @@ class SecurityService:
                 expires_at=expires_at,
             )
             await unit_of_work.service_account_credentials.add(issued.credential)
+            await unit_of_work.events.append(
+                self._credential_event(
+                    account_id=account.id,
+                    credential=issued.credential,
+                    event_type="service_account.credential_issued",
+                    occurred_at=issued_at,
+                    actor=actor,
+                )
+            )
             await unit_of_work.commit()
         return issued
 
@@ -102,6 +125,23 @@ class SecurityService:
             if await unit_of_work.service_accounts.get(account_id) is None:
                 raise ResourceNotFound(f"service account not found: {account_id}")
             return await unit_of_work.service_account_credentials.list_for_account(account_id)
+
+    async def list_credential_events(
+        self,
+        account_id: UUID,
+        *,
+        before_sequence: int | None = None,
+        limit: int = 100,
+    ) -> list[DomainEvent]:
+        async with self._unit_of_work_factory() as unit_of_work:
+            if await unit_of_work.service_accounts.get(account_id) is None:
+                raise ResourceNotFound(f"service account not found: {account_id}")
+            return await unit_of_work.events.list_aggregate(
+                aggregate_type="service_account",
+                aggregate_id=account_id,
+                before_sequence=before_sequence,
+                limit=limit,
+            )
 
     async def authenticate(self, token: str) -> ApiPrincipal | None:
         credential_id = self._credential_id(token)
@@ -128,7 +168,13 @@ class SecurityService:
                 credential_id=credential.id,
             )
 
-    async def revoke_credential(self, account_id: UUID, credential_id: UUID) -> None:
+    async def revoke_credential(
+        self,
+        account_id: UUID,
+        credential_id: UUID,
+        *,
+        actor: ApiPrincipal | None = None,
+    ) -> None:
         async with self._unit_of_work_factory() as unit_of_work:
             if await unit_of_work.service_accounts.get(account_id) is None:
                 raise ResourceNotFound(f"service account not found: {account_id}")
@@ -136,15 +182,37 @@ class SecurityService:
             if credential is None or credential.account_id != account_id:
                 raise ResourceNotFound(f"service account credential not found: {credential_id}")
             if credential.revoked_at is None:
-                await unit_of_work.service_account_credentials.revoke(credential_id, self._now())
+                revoked_at = self._now()
+                await unit_of_work.service_account_credentials.revoke(credential_id, revoked_at)
+                await unit_of_work.events.append(
+                    self._credential_event(
+                        account_id=account_id,
+                        credential=credential,
+                        event_type="service_account.credential_revoked",
+                        occurred_at=revoked_at,
+                        actor=actor,
+                    )
+                )
                 await unit_of_work.commit()
 
-    async def revoke(self, account_id: UUID) -> None:
+    async def revoke(self, account_id: UUID, *, actor: ApiPrincipal | None = None) -> None:
         async with self._unit_of_work_factory() as unit_of_work:
-            if await unit_of_work.service_accounts.get(account_id) is None:
+            account = await unit_of_work.service_accounts.get(account_id)
+            if account is None:
                 raise ResourceNotFound(f"service account not found: {account_id}")
-            await unit_of_work.service_accounts.disable(account_id)
-            await unit_of_work.commit()
+            if account.enabled:
+                revoked_at = self._now()
+                await unit_of_work.service_accounts.disable(account_id)
+                await unit_of_work.events.append(
+                    DomainEvent(
+                        aggregate_type="service_account",
+                        aggregate_id=account_id,
+                        event_type="service_account.revoked",
+                        occurred_at=revoked_at,
+                        payload=self._actor_payload(actor),
+                    )
+                )
+                await unit_of_work.commit()
 
     async def resolve_project_id(self, resource_type: str, resource_id: UUID) -> UUID | None:
         async with self._unit_of_work_factory() as unit_of_work:
@@ -209,6 +277,40 @@ class SecurityService:
             expires_at=expires_at,
         )
         return IssuedCredential(credential=credential, token=token)
+
+    @staticmethod
+    def _credential_event(
+        *,
+        account_id: UUID,
+        credential: ServiceAccountCredential,
+        event_type: str,
+        occurred_at: datetime,
+        actor: ApiPrincipal | None,
+    ) -> DomainEvent:
+        return DomainEvent(
+            aggregate_type="service_account",
+            aggregate_id=account_id,
+            event_type=event_type,
+            occurred_at=occurred_at,
+            payload={
+                "credential_id": str(credential.id),
+                "expires_at": (
+                    credential.expires_at.isoformat() if credential.expires_at is not None else None
+                ),
+                **SecurityService._actor_payload(actor),
+            },
+        )
+
+    @staticmethod
+    def _actor_payload(actor: ApiPrincipal | None) -> dict[str, str | None]:
+        return {
+            "actor_account_id": str(actor.account_id) if actor is not None else None,
+            "actor_credential_id": (
+                str(actor.credential_id)
+                if actor is not None and actor.credential_id is not None
+                else None
+            ),
+        }
 
     @staticmethod
     def _credential_id(token: str) -> UUID | None:

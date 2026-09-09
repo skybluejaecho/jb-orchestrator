@@ -74,6 +74,15 @@ class EventRepository(Protocol):
 
     async def get(self, event_id: UUID) -> DomainEvent | None: ...
 
+    async def list_aggregate(
+        self,
+        *,
+        aggregate_type: str,
+        aggregate_id: UUID,
+        before_sequence: int | None = None,
+        limit: int = 100,
+    ) -> list[DomainEvent]: ...
+
     async def list_after(
         self,
         *,

@@ -177,8 +177,11 @@ def test_credential_commands_use_control_plane_api(monkeypatch: MonkeyPatch) -> 
                 "token": "jbsa_token",
             }
             status_code = 201
-        elif method == "GET":
+        elif method == "GET" and "/credential-events" not in url:
             payload = [{"id": credential_id, "account_id": account_id}]
+            status_code = 200
+        elif method == "GET":
+            payload = [{"sequence": 3, "event_type": "service_account.credential_revoked"}]
             status_code = 200
         else:
             payload = {
@@ -203,16 +206,26 @@ def test_credential_commands_use_control_plane_api(monkeypatch: MonkeyPatch) -> 
         ],
     )
     listed = runner.invoke(app, ["auth", "credential", "list", account_id])
+    audited = runner.invoke(
+        app,
+        ["auth", "credential", "audit", account_id, "--before-sequence", "4", "--limit", "20"],
+    )
     revoked = runner.invoke(
         app,
         ["auth", "credential", "revoke", account_id, credential_id],
     )
 
-    assert issued.exit_code == listed.exit_code == revoked.exit_code == 0
+    assert issued.exit_code == listed.exit_code == audited.exit_code == revoked.exit_code == 0
     base_url = f"http://127.0.0.1:8000/v1/service-accounts/{account_id}/credentials"
     assert requests == [
         ("POST", base_url, {"expires_at": "2030-01-01T00:00:00+00:00"}),
         ("GET", base_url, None),
+        (
+            "GET",
+            f"http://127.0.0.1:8000/v1/service-accounts/{account_id}/"
+            "credential-events?before_sequence=4&limit=20",
+            None,
+        ),
         ("DELETE", f"{base_url}/{credential_id}", None),
     ]
 

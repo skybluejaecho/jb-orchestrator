@@ -747,6 +747,15 @@ ORCH-083 exposes guarded service-account credential rotation:
 - CLI credential commands use the Control Plane API, while the original account issue command remains
   a direct-database bootstrap boundary
 
+ORCH-084 records credential lifecycle administration in the append-only event ledger:
+
+- credential issuance, individual revocation, and account-wide revocation are committed with an audit event
+- authenticated management events identify both the acting service account and exact credential
+- bootstrap operations remain attributable as system actions without inventing an operator identity
+- audit responses never contain bearer tokens or token digests
+- latest-first sequence pagination provides bounded operational history without a second audit database
+- successful authentication continues to update `last_used_at` without emitting a high-volume event
+
 ## Prerequisites
 
 - Python 3.12
@@ -798,6 +807,7 @@ CLI의 `JB_API_TOKEN`으로 설정한 뒤 다음 명령을 사용합니다. 첫 
 uv run jb auth credential issue <account-uuid> `
   --expires-at 2026-12-31T15:00:00Z
 uv run jb auth credential list <account-uuid>
+uv run jb auth credential audit <account-uuid> --limit 100
 uv run jb auth credential revoke <account-uuid> <old-credential-uuid>
 ```
 
