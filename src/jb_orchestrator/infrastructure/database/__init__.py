@@ -35,6 +35,7 @@ from jb_orchestrator.infrastructure.database.models import (
     RunRecord,
     ScmPublicationAttemptRecord,
     ScmPublicationRecord,
+    ServiceAccountCredentialRecord,
     ServiceAccountRecord,
     SkillDefinitionRecord,
     TaskArtifactRecord,
@@ -65,6 +66,7 @@ from jb_orchestrator.infrastructure.database.scm_publication_repositories import
     SqlAlchemyScmPublicationRepository,
 )
 from jb_orchestrator.infrastructure.database.security_repositories import (
+    SqlAlchemyServiceAccountCredentialRepository,
     SqlAlchemyServiceAccountRepository,
 )
 from jb_orchestrator.infrastructure.database.session import create_session_factory
@@ -105,6 +107,7 @@ __all__ = [
     "RunRecord",
     "ScmPublicationAttemptRecord",
     "ScmPublicationRecord",
+    "ServiceAccountCredentialRecord",
     "ServiceAccountRecord",
     "SkillDefinitionRecord",
     "SqlAlchemyBudgetAccountRepository",
@@ -122,6 +125,7 @@ __all__ = [
     "SqlAlchemyRunRepository",
     "SqlAlchemyScmPublicationAttemptRepository",
     "SqlAlchemyScmPublicationRepository",
+    "SqlAlchemyServiceAccountCredentialRepository",
     "SqlAlchemyServiceAccountRepository",
     "SqlAlchemySkillRepository",
     "SqlAlchemyTaskArtifactRepository",

@@ -20,7 +20,11 @@ from jb_orchestrator.application.request_dispatch_services import (
     WorkflowComposition,
 )
 from jb_orchestrator.application.scm_publication_services import ScmPublicationService
-from jb_orchestrator.application.security_services import IssuedServiceAccount, SecurityService
+from jb_orchestrator.application.security_services import (
+    IssuedCredential,
+    IssuedServiceAccount,
+    SecurityService,
+)
 from jb_orchestrator.application.services import CreatedRequest, OrchestrationService
 from jb_orchestrator.application.skill_services import SkillCatalogService
 from jb_orchestrator.application.task_dispatch import TaskDispatchService
@@ -40,6 +44,7 @@ __all__ = [
     "DispatchProjectRequest",
     "DispatchedRequest",
     "ExternalExecutionService",
+    "IssuedCredential",
     "IssuedServiceAccount",
     "ModelCatalogService",
     "NodeSkillAddon",

@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -23,15 +24,50 @@ async def test_issue_authenticate_and_revoke_service_account() -> None:
         project_ids={project.id},
     )
 
-    assert issued.token.startswith(f"jbsa_{issued.account.id.hex}.")
-    assert issued.token not in issued.account.token_digest
+    assert issued.token.startswith(f"jbsa_{issued.credential.id.hex}.")
+    assert issued.token not in issued.credential.token_digest
     principal = await service.authenticate(issued.token)
     assert principal is not None
+    assert principal.credential_id == issued.credential.id
     assert principal.allows(ApiPermission.REQUEST_DISPATCH, project.id)
+    assert store.service_account_credentials[issued.credential.id].last_used_at is not None
     assert await service.authenticate(f"{issued.token}wrong") is None
 
     await service.revoke(issued.account.id)
     assert await service.authenticate(issued.token) is None
+
+
+async def test_multiple_credentials_expire_and_revoke_independently() -> None:
+    now = datetime(2026, 9, 9, tzinfo=UTC)
+    store = MemoryStore()
+    project = Project(key="alpha", name="Alpha", repository_url="https://example.test/a.git")
+    store.projects[project.id] = project
+    service = SecurityService(lambda: MemoryUnitOfWork(store), clock=lambda: now)
+    first = await service.issue(
+        key="jarvis",
+        name="Jarvis",
+        permissions={ApiPermission.PROJECT_READ},
+        project_ids={project.id},
+    )
+    second = await service.issue_credential(
+        first.account.id,
+        expires_at=now + timedelta(days=30),
+    )
+
+    assert await service.authenticate(first.token) is not None
+    assert await service.authenticate(second.token) is not None
+    assert len(store.service_account_credentials) == 2
+
+    await service.revoke_credential(first.credential.id)
+
+    assert await service.authenticate(first.token) is None
+    assert await service.authenticate(second.token) is not None
+
+    expired_service = SecurityService(
+        lambda: MemoryUnitOfWork(store),
+        clock=lambda: now + timedelta(days=30),
+    )
+    assert await expired_service.authenticate(second.token) is None
 
 
 async def test_issue_rejects_duplicate_key_and_missing_project() -> None:

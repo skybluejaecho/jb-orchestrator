@@ -230,6 +230,7 @@ def issue_service_account(
     echo_json(
         {
             "account_id": str(issued.account.id),
+            "credential_id": str(issued.credential.id),
             "key": issued.account.key,
             "token": issued.token,
             "warning": "Store this token now; it cannot be retrieved later.",
