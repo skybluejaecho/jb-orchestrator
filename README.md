@@ -738,6 +738,15 @@ ORCH-082 separates stable service-account identity from revocable bearer credent
 - credential rotation and revocation management endpoints are intentionally deferred to a separate
   operational API/CLI change
 
+ORCH-083 exposes guarded service-account credential rotation:
+
+- only an authenticated `project.admin` account with `all_projects` scope can use the management API
+- operators can issue, list, and individually revoke credentials without changing account policy
+- list responses expose lifecycle metadata but never token digests or bearer secrets
+- the new bearer token is returned only by the issue response
+- CLI credential commands use the Control Plane API, while the original account issue command remains
+  a direct-database bootstrap boundary
+
 ## Prerequisites
 
 - Python 3.12
@@ -780,6 +789,20 @@ uv run jb auth issue `
 `JB_API_TOKEN=<발급된-token>`을 설정합니다. `JB_API_AUTH_ENABLED=false`인 서버는
 `127.0.0.1`, `localhost`, `::1` 외 주소에 바인딩되지 않습니다. 계정을 폐기하려면
 `uv run jb auth revoke <account-uuid>`를 실행합니다.
+
+추가 credential의 무중단 rotation에는 `project.admin`과 `all_projects`를 가진 운영자 token을
+CLI의 `JB_API_TOKEN`으로 설정한 뒤 다음 명령을 사용합니다. 첫 명령에서 반환되는 새 token을
+클라이언트 secret 저장소에 적용하고 정상 연결을 확인한 후에만 기존 credential을 폐기합니다.
+
+```powershell
+uv run jb auth credential issue <account-uuid> `
+  --expires-at 2026-12-31T15:00:00Z
+uv run jb auth credential list <account-uuid>
+uv run jb auth credential revoke <account-uuid> <old-credential-uuid>
+```
+
+Credential 관리 API는 `JB_API_AUTH_ENABLED=true`일 때만 사용할 수 있습니다. 목록에는 token이나
+digest가 포함되지 않으며 token 원문은 발급 응답에서 한 번만 표시됩니다.
 
 ## Run
 
