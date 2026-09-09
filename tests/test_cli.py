@@ -268,8 +268,24 @@ def test_service_account_inventory_commands_use_control_plane_api(
         ],
     )
     shown = runner.invoke(app, ["auth", "account", "show", account_id])
+    diagnosed = runner.invoke(
+        app,
+        [
+            "auth",
+            "doctor",
+            "--issues-only",
+            "--key-prefix",
+            "client",
+            "--after-key",
+            "client-alpha",
+            "--limit",
+            "25",
+            "--warning-seconds",
+            "86400",
+        ],
+    )
 
-    assert listed.exit_code == shown.exit_code == 0
+    assert listed.exit_code == shown.exit_code == diagnosed.exit_code == 0
     assert requests == [
         (
             "GET",
@@ -277,6 +293,12 @@ def test_service_account_inventory_commands_use_control_plane_api(
             "enabled=False&key_prefix=client&after_key=client-alpha&limit=25",
         ),
         ("GET", f"http://127.0.0.1:8000/v1/service-accounts/{account_id}"),
+        (
+            "GET",
+            "http://127.0.0.1:8000/v1/service-accounts/readiness?"
+            "issues_only=True&key_prefix=client&after_key=client-alpha&limit=25&"
+            "warning_seconds=86400",
+        ),
     ]
 
 

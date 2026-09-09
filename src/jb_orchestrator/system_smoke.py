@@ -396,6 +396,22 @@ def _verify_credential_rotation(
     serialized_inventory = json.dumps([*inventory, detail])
     if "token_digest" in serialized_inventory or replacement_token in serialized_inventory:
         raise SystemSmokeError("service-account inventory exposed credential secret material")
+    readiness = _request(
+        api,
+        "GET",
+        f"/v1/service-accounts/readiness?key_prefix={identity.account_key}&limit=1",
+        headers=replacement_headers,
+    )
+    if (
+        not isinstance(readiness, list)
+        or len(readiness) != 1
+        or readiness[0].get("status") != "healthy"
+        or readiness[0].get("account", {}).get("id") != identity.account_id
+    ):
+        raise SystemSmokeError("service-account credential readiness is inconsistent")
+    serialized_readiness = json.dumps(readiness)
+    if "token_digest" in serialized_readiness or replacement_token in serialized_readiness:
+        raise SystemSmokeError("credential readiness exposed secret material")
     return replacement_id
 
 

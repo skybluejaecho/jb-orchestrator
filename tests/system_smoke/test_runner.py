@@ -83,6 +83,16 @@ def test_credential_rotation_smoke_verifies_authentication_revocation_and_audit(
             )
         if request.url.path == "/v1/service-accounts":
             return httpx.Response(200, json=[_inventory_payload(account_id)])
+        if request.url.path == "/v1/service-accounts/readiness":
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "status": "healthy",
+                        "account": _inventory_payload(account_id),
+                    }
+                ],
+            )
         if request.url.path == f"/v1/service-accounts/{account_id}":
             return httpx.Response(200, json=_inventory_payload(account_id))
         return httpx.Response(

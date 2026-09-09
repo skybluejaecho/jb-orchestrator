@@ -6,7 +6,7 @@ import pytest
 from jb_orchestrator.application import ScmPublicationService, SecurityService
 from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNotFound
 from jb_orchestrator.domain import Project
-from jb_orchestrator.security import ApiPermission
+from jb_orchestrator.security import ApiPermission, CredentialReadinessStatus
 from tests.scm.test_publication_service import managed_execution
 from tests.support import MemoryStore, MemoryUnitOfWork
 
@@ -175,6 +175,84 @@ async def test_account_inventory_filters_pages_and_summarizes_credential_health(
 
     with pytest.raises(ResourceNotFound, match="service account not found"):
         await inventory_service.get_account_inventory(uuid4())
+
+
+async def test_credential_readiness_classifies_health_and_filters_issues() -> None:
+    issued_at = datetime(2026, 9, 1, tzinfo=UTC)
+    checked_at = issued_at + timedelta(days=2)
+    store = MemoryStore()
+    service = SecurityService(lambda: MemoryUnitOfWork(store), clock=lambda: issued_at)
+    healthy = await service.issue(
+        key="a-healthy",
+        name="Healthy",
+        permissions={ApiPermission.PROJECT_READ},
+        all_projects=True,
+    )
+    expiring = await service.issue(
+        key="b-expiring",
+        name="Expiring",
+        permissions={ApiPermission.PROJECT_READ},
+        all_projects=True,
+        expires_at=checked_at + timedelta(days=3),
+    )
+    expired = await service.issue(
+        key="c-expired",
+        name="Expired",
+        permissions={ApiPermission.PROJECT_READ},
+        all_projects=True,
+        expires_at=issued_at + timedelta(days=1),
+    )
+    revoked = await service.issue(
+        key="d-revoked",
+        name="Revoked",
+        permissions={ApiPermission.PROJECT_READ},
+        all_projects=True,
+    )
+    await service.revoke_credential(revoked.account.id, revoked.credential.id)
+    disabled = await service.issue(
+        key="e-disabled",
+        name="Disabled",
+        permissions={ApiPermission.PROJECT_READ},
+        all_projects=True,
+    )
+    await service.revoke(disabled.account.id)
+    readiness_service = SecurityService(lambda: MemoryUnitOfWork(store), clock=lambda: checked_at)
+
+    all_accounts = await readiness_service.list_credential_readiness(
+        warning_seconds=7 * 24 * 60 * 60,
+        limit=10,
+    )
+    issues = await readiness_service.list_credential_readiness(
+        warning_seconds=7 * 24 * 60 * 60,
+        issues_only=True,
+        after_key=healthy.account.key,
+        limit=10,
+    )
+    detail = await readiness_service.get_credential_readiness(
+        expiring.account.id,
+        warning_seconds=7 * 24 * 60 * 60,
+    )
+
+    assert {item.account.key: item.status for item in all_accounts} == {
+        "a-healthy": CredentialReadinessStatus.HEALTHY,
+        "b-expiring": CredentialReadinessStatus.EXPIRING_SOON,
+        "c-expired": CredentialReadinessStatus.EXPIRED,
+        "d-revoked": CredentialReadinessStatus.NO_USABLE_CREDENTIAL,
+        "e-disabled": CredentialReadinessStatus.ACCOUNT_DISABLED,
+    }
+    assert [item.account.key for item in issues] == [
+        "b-expiring",
+        "c-expired",
+        "d-revoked",
+        "e-disabled",
+    ]
+    assert detail.next_expires_at == expiring.credential.expires_at
+    assert detail.checked_at == checked_at
+    assert detail.warning_seconds == 7 * 24 * 60 * 60
+    assert expired.credential.id in store.service_account_credentials
+
+    with pytest.raises(ValueError, match="warning"):
+        await readiness_service.list_credential_readiness(warning_seconds=0)
 
 
 async def test_resolve_project_id_traverses_scm_publication_owner() -> None:
