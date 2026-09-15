@@ -17,10 +17,15 @@ def component_versions(root: Path) -> dict[str, str]:
     jarvis_package = json.loads(
         (root / "apps" / "jarvis" / "package.json").read_text(encoding="utf-8")
     )
-    return {
+    versions = {
         "runtime": str(pyproject["project"]["version"]),
         "jarvis": str(jarvis_package["version"]),
     }
+    for adapter in ("openclaw", "github", "webhook"):
+        adapter_path = root / "adapters" / adapter / "pyproject.toml"
+        adapter_project = tomllib.loads(adapter_path.read_text(encoding="utf-8"))
+        versions[adapter] = str(adapter_project["project"]["version"])
+    return versions
 
 
 def verify_version(tag: str, root: Path) -> str:

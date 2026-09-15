@@ -18,7 +18,9 @@ def load_workflow(path: Path) -> dict[str, object]:
     return loaded
 
 
-def write_component_versions(root: Path, runtime: str, jarvis: str) -> None:
+def write_component_versions(
+    root: Path, runtime: str, jarvis: str, adapter_versions: dict[str, str] | None = None
+) -> None:
     (root / "apps" / "jarvis").mkdir(parents=True, exist_ok=True)
     (root / "pyproject.toml").write_text(
         f'[project]\nname = "fixture"\nversion = "{runtime}"\n', encoding="utf-8"
@@ -26,19 +28,37 @@ def write_component_versions(root: Path, runtime: str, jarvis: str) -> None:
     (root / "apps" / "jarvis" / "package.json").write_text(
         json.dumps({"version": jarvis}), encoding="utf-8"
     )
+    for adapter in ("openclaw", "github", "webhook"):
+        adapter_root = root / "adapters" / adapter
+        adapter_root.mkdir(parents=True, exist_ok=True)
+        version = (adapter_versions or {}).get(adapter, runtime)
+        (adapter_root / "pyproject.toml").write_text(
+            f'[project]\nname = "fixture-{adapter}"\nversion = "{version}"\n',
+            encoding="utf-8",
+        )
 
 
 def test_release_version_requires_a_stable_matching_version(tmp_path: Path) -> None:
     write_component_versions(tmp_path, "1.2.3", "1.2.3")
 
     assert verify_version("v1.2.3", tmp_path) == "1.2.3"
-    assert component_versions(tmp_path) == {"runtime": "1.2.3", "jarvis": "1.2.3"}
+    assert component_versions(tmp_path) == {
+        "runtime": "1.2.3",
+        "jarvis": "1.2.3",
+        "openclaw": "1.2.3",
+        "github": "1.2.3",
+        "webhook": "1.2.3",
+    }
 
     with pytest.raises(ValueError, match="stable SemVer"):
         verify_version("v1.2.3-rc.1", tmp_path)
 
     write_component_versions(tmp_path, "1.2.3", "1.2.4")
     with pytest.raises(ValueError, match=r"jarvis=1\.2\.4"):
+        verify_version("v1.2.3", tmp_path)
+
+    write_component_versions(tmp_path, "1.2.3", "1.2.3", adapter_versions={"webhook": "1.2.3.dev0"})
+    with pytest.raises(ValueError, match=r"webhook=1\.2\.3\.dev0"):
         verify_version("v1.2.3", tmp_path)
 
 
