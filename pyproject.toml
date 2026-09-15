@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "jb-orchestrator"
-version = "0.1.0.dev0"
+version = "0.1.0"
 description = "A local-first orchestration core for agent workflows."
 readme = "README.md"
 requires-python = ">=3.12"
