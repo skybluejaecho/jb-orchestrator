@@ -35,7 +35,7 @@ npm test
 
 ## Live inspection
 
-Start or provide an OpenClaw Gateway, then set its shared bootstrap credential in the current
+Start or provide an OpenClaw Gateway, then set its shared Gateway credential in the current
 shell. Do not put credentials in a committed file. The first attempt creates a persistent Ed25519
 identity and can return `PAIRING_REQUIRED` with a request ID.
 
@@ -52,9 +52,11 @@ openclaw devices list
 openclaw devices approve <requestId>
 ```
 
-Run `npm run inspect` again with the bootstrap credential. The Gateway-issued device token is saved
+Run `npm run inspect` again with the shared Gateway credential. `OPENCLAW_GATEWAY_TOKEN` maps to
+protocol `auth.token`, not the short-lived setup-code field `auth.bootstrapToken`. The
+Gateway-issued device token is saved
 under `JB_OPENCLAW_DEVICE_STATE_DIR` (default `.jb-orchestrator/openclaw-device`). Later processes
-reuse that scoped token, so the shared bootstrap credential can be removed from the worker
+reuse that scoped token, so the shared Gateway credential can be removed from the worker
 environment after pairing.
 
 For a remote Gateway, use `wss://` and configure `OPENCLAW_GATEWAY_TLS_FINGERPRINT`. Keep the device

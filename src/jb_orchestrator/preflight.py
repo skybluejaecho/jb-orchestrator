@@ -306,9 +306,9 @@ def _openclaw_checks(environment: Mapping[str, str], project_root: Path) -> list
         _check(
             "openclaw.credentials",
             PreflightStatus.PASS if has_credential or has_device_token else PreflightStatus.FAIL,
-            "bootstrap credential or stored device token is available"
+            "shared Gateway credential or stored device token is available"
             if has_credential or has_device_token
-            else "bootstrap credential or stored device token is required",
+            else "shared Gateway credential or stored device token is required",
             role,
         ),
     ]

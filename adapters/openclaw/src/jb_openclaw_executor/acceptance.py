@@ -162,7 +162,7 @@ def local_diagnostics(
     has_device_state = (state_dir / "device-tokens.json").is_file()
     if not has_bootstrap and not has_device_state:
         raise OpenClawAcceptanceError(
-            "a bootstrap credential or stored OpenClaw device token is required"
+            "a shared Gateway credential or stored OpenClaw device token is required"
         )
     return {
         "bridge_path": str(resolved_bridge),
