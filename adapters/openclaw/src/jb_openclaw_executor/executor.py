@@ -55,12 +55,22 @@ class OpenClawExecutor:
         if execution.is_terminal:
             return self._stored_result(execution)
         if execution.external_run_id is None:
-            accepted = await self._bridge.start(
-                self._start_request(claim, execution, cwd=assignment.cwd)
-            )
-            external_run_id = accepted.get("runId")
-            if not isinstance(external_run_id, str) or not external_run_id:
-                raise RuntimeError("OpenClaw agent response did not include runId")
+            try:
+                accepted = await self._bridge.start(
+                    self._start_request(claim, execution, cwd=assignment.cwd)
+                )
+                external_run_id = accepted.get("runId")
+                if not isinstance(external_run_id, str) or not external_run_id:
+                    raise RuntimeError("OpenClaw agent response did not include runId")
+            except Exception as exc:
+                await self._service.finish(
+                    claim.idempotency_key,
+                    ExternalExecutionStatus.FAILED,
+                    failure_reason=(
+                        f"OpenClaw run start failed before acceptance ({type(exc).__name__})"
+                    ),
+                )
+                raise
             execution = await self._service.accept(claim.idempotency_key, external_run_id)
 
         if execution.external_run_id is None:
