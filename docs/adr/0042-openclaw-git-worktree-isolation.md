@@ -1,6 +1,6 @@
 # ADR 0042: Isolate mutating OpenClaw tasks with deterministic Git worktrees
 
-- Status: Accepted
+- Status: Superseded by ADR 0085 for the v0.1 OpenClaw Gateway adapter
 - Date: 2026-09-04
 
 ## Context

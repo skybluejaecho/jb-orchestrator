@@ -374,6 +374,10 @@ ORCH-044 exposes external agent ownership in Jarvis:
 
 ORCH-045 adds opt-in Git worktree isolation for OpenClaw tasks:
 
+> This pre-release design is superseded for the v0.1 Gateway adapter by ADR 0085. The pinned
+> OpenClaw Gateway permits dynamic `cwd` only for plugin-owned subagent runs, so v0.1 uses
+> preconfigured agent workspaces and rejects `cwd`/`git_worktree` workflows before dispatch.
+
 - mutating parallel nodes can run in deterministic execution/node/visit-specific worktrees
 - retries validate and reuse the same branch and path instead of creating duplicate workspaces
 - repository access is restricted to configured roots and worktrees must live outside repositories

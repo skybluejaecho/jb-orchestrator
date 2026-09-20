@@ -672,6 +672,17 @@ class WorkflowOptionResponse(BaseModel):
     edges: tuple[WorkflowEdgePayload, ...]
     phase_packs: tuple["WorkflowPhasePackSummaryResponse", ...] = ()
     skills: tuple["WorkflowSkillSummaryResponse", ...] = ()
+    compatible: bool
+    compatibility_issues: tuple["WorkflowCompatibilityIssueResponse", ...] = ()
+
+
+class WorkflowCompatibilityIssueResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    code: str
+    node_key: str
+    executor_key: str
+    message: str
 
 
 class WorkflowPhasePackSummaryResponse(BaseModel):

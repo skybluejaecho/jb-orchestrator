@@ -41,6 +41,8 @@ workflows:
       - key: implement
         kind: task
         executor_key: openclaw
+        configuration:
+          agent_id: example-project-worker
         phase_pack:
           key: implementation
           version: 1

@@ -36,6 +36,11 @@ from jb_orchestrator.application.worker_presence_services import (
     WorkerPresenceView,
 )
 from jb_orchestrator.application.worker_readiness_services import WorkerReadinessService
+from jb_orchestrator.application.workflow_compatibility import (
+    WorkflowCompatibility,
+    WorkflowCompatibilityIssue,
+    assess_workflow_compatibility,
+)
 from jb_orchestrator.application.workflow_services import WorkflowService
 from jb_orchestrator.application.workspace_operation_services import WorkspaceOperationService
 
@@ -69,7 +74,10 @@ __all__ = [
     "WorkerPresenceService",
     "WorkerPresenceView",
     "WorkerReadinessService",
+    "WorkflowCompatibility",
+    "WorkflowCompatibilityIssue",
     "WorkflowComposition",
     "WorkflowService",
     "WorkspaceOperationService",
+    "assess_workflow_compatibility",
 ]

@@ -27,6 +27,9 @@ class FakeBridge:
             "usage": {"inputTokens": 120, "outputTokens": 30},
         }
 
+    async def inspect(self) -> dict[str, Any]:
+        return {"agents": [], "sessions": []}
+
     async def start(self, request: dict[str, Any]) -> dict[str, Any]:
         self.starts.append(request)
         return {"runId": "openclaw-run-1", "acceptedAt": 1234}
@@ -38,6 +41,18 @@ class FakeBridge:
     async def cancel(self, run_id: str) -> dict[str, Any]:
         self.cancels.append(run_id)
         return {"ok": True}
+
+
+class FailingStartBridge(FakeBridge):
+    async def start(self, request: dict[str, Any]) -> dict[str, Any]:
+        self.starts.append(request)
+        raise RuntimeError("provider rejected the start request")
+
+
+class MissingRunIdBridge(FakeBridge):
+    async def start(self, request: dict[str, Any]) -> dict[str, Any]:
+        self.starts.append(request)
+        return {"acceptedAt": 1234}
 
 
 class FakeWorkspace:
@@ -135,7 +150,7 @@ async def test_executor_persists_run_and_normalizes_terminal_result() -> None:
     assert result.output["provider"] == "openclaw"
 
 
-async def test_executor_starts_new_run_in_prepared_workspace() -> None:
+async def test_executor_does_not_forward_prepared_workspace_as_gateway_cwd() -> None:
     store = MemoryStore()
     bridge = FakeBridge()
     workspace = FakeWorkspace("C:/worktrees/review")
@@ -148,7 +163,7 @@ async def test_executor_starts_new_run_in_prepared_workspace() -> None:
     await executor.execute(task_claim())
 
     assert len(workspace.claims) == 1
-    assert bridge.starts[0]["cwd"] == "C:/worktrees/review"
+    assert "cwd" not in bridge.starts[0]
     mapping = store.external_executions[next(iter(store.external_executions))]
     assert mapping.workspace_path == "C:/worktrees/review"
     assert mapping.workspace_repository_path == "C:/projects/delivery"
@@ -171,7 +186,7 @@ async def test_executor_reprepares_workspace_for_starting_mapping_after_restart(
     await executor.execute(claim)
 
     assert len(workspace.claims) == 1
-    assert bridge.starts[0]["cwd"] == "C:/worktrees/review"
+    assert "cwd" not in bridge.starts[0]
 
 
 async def test_executor_promotes_structured_terminal_output_to_phase_artifact() -> None:
@@ -209,6 +224,45 @@ async def test_executor_returns_persisted_terminal_result_without_duplicate_star
     assert first == second
     assert len(bridge.starts) == 1
     assert len(bridge.waits) == 1
+
+
+async def test_executor_marks_mapping_failed_when_provider_rejects_start() -> None:
+    store = MemoryStore()
+    bridge = FailingStartBridge()
+    executor = OpenClawExecutor(ExternalExecutionService(lambda: MemoryUnitOfWork(store)), bridge)
+    claim = task_claim()
+
+    try:
+        await executor.execute(claim)
+    except RuntimeError as exc:
+        assert "provider rejected" in str(exc)
+    else:
+        raise AssertionError("executor did not propagate the provider start failure")
+
+    mapping = store.external_executions[claim.idempotency_key]
+    assert mapping.status is ExternalExecutionStatus.FAILED
+    assert mapping.external_run_id is None
+    assert mapping.completed_at is not None
+    assert mapping.failure_reason == ("OpenClaw run start failed before acceptance (RuntimeError)")
+
+
+async def test_executor_marks_mapping_failed_when_start_response_has_no_run_id() -> None:
+    store = MemoryStore()
+    bridge = MissingRunIdBridge()
+    executor = OpenClawExecutor(ExternalExecutionService(lambda: MemoryUnitOfWork(store)), bridge)
+    claim = task_claim()
+
+    try:
+        await executor.execute(claim)
+    except RuntimeError as exc:
+        assert "did not include runId" in str(exc)
+    else:
+        raise AssertionError("executor accepted a start response without a run id")
+
+    mapping = store.external_executions[claim.idempotency_key]
+    assert mapping.status is ExternalExecutionStatus.FAILED
+    assert mapping.external_run_id is None
+    assert mapping.failure_reason == ("OpenClaw run start failed before acceptance (RuntimeError)")
 
 
 async def test_executor_resumes_waiting_for_an_active_run_after_restart() -> None:

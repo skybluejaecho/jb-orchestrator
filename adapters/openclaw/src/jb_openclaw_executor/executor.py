@@ -38,7 +38,7 @@ class OpenClawExecutor:
             f"agent:{agent_id or 'main'}:jb:{claim.execution_id}:{claim.node_key}"
         )
         execution = await self._service.get(claim.idempotency_key)
-        assignment = WorkspaceAssignment(cwd=self._optional_string(claim.configuration, "cwd"))
+        assignment = WorkspaceAssignment(cwd=None)
         if execution is None or (not execution.is_terminal and execution.external_run_id is None):
             assignment = await self._workspace.prepare(claim)
         if execution is None:
@@ -55,12 +55,20 @@ class OpenClawExecutor:
         if execution.is_terminal:
             return self._stored_result(execution)
         if execution.external_run_id is None:
-            accepted = await self._bridge.start(
-                self._start_request(claim, execution, cwd=assignment.cwd)
-            )
-            external_run_id = accepted.get("runId")
-            if not isinstance(external_run_id, str) or not external_run_id:
-                raise RuntimeError("OpenClaw agent response did not include runId")
+            try:
+                accepted = await self._bridge.start(self._start_request(claim, execution))
+                external_run_id = accepted.get("runId")
+                if not isinstance(external_run_id, str) or not external_run_id:
+                    raise RuntimeError("OpenClaw agent response did not include runId")
+            except Exception as exc:
+                await self._service.finish(
+                    claim.idempotency_key,
+                    ExternalExecutionStatus.FAILED,
+                    failure_reason=(
+                        f"OpenClaw run start failed before acceptance ({type(exc).__name__})"
+                    ),
+                )
+                raise
             execution = await self._service.accept(claim.idempotency_key, external_run_id)
 
         if execution.external_run_id is None:
@@ -113,8 +121,6 @@ class OpenClawExecutor:
         self,
         claim: TaskClaim,
         execution: ExternalExecution,
-        *,
-        cwd: str | None,
     ) -> dict[str, Any]:
         request: dict[str, Any] = {
             "message": self._prompt(claim),
@@ -124,7 +130,6 @@ class OpenClawExecutor:
         }
         optional = {
             "agentId": execution.external_agent_id,
-            "cwd": cwd,
             "thinking": self._optional_string(claim.configuration, "thinking"),
         }
         request.update({key: value for key, value in optional.items() if value is not None})
