@@ -1,9 +1,8 @@
-"""Fail-closed Git worktree allocation for OpenClaw task nodes."""
+"""Fail-closed workspace policy and legacy worktree cleanup for OpenClaw tasks."""
 
 import asyncio
 import hashlib
 import os
-import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -70,84 +69,19 @@ class OpenClawWorkspaceManager:
     def _prepare_sync(self, claim: TaskClaim) -> WorkspaceAssignment:
         mode = _optional_string(claim.configuration, "workspace_mode") or "shared"
         source_value = _optional_string(claim.configuration, "cwd")
-        if mode == "shared":
-            return WorkspaceAssignment(cwd=source_value)
-        if mode != WORKTREE_MODE:
+        if mode == WORKTREE_MODE:
+            raise OpenClawWorkspaceError(
+                "git_worktree mode is not supported by the OpenClaw Gateway adapter; "
+                "use an OpenClaw agent with a preconfigured project workspace"
+            )
+        if mode != "shared":
             raise OpenClawWorkspaceError(f"unsupported OpenClaw workspace mode: {mode}")
-        if source_value is None:
-            raise OpenClawWorkspaceError("git_worktree mode requires node configuration cwd")
-        base_ref = _optional_string(claim.configuration, "workspace_base_ref")
-        if base_ref is None:
+        if source_value is not None:
             raise OpenClawWorkspaceError(
-                "git_worktree mode requires an explicit workspace_base_ref"
+                "node-level cwd is not supported by the OpenClaw Gateway adapter; "
+                "configure the project workspace on the selected OpenClaw agent"
             )
-        if self._workspace_root is None:
-            raise OpenClawWorkspaceError("git_worktree mode requires JB_OPENCLAW_WORKSPACE_ROOT")
-        if not self._repository_roots:
-            raise OpenClawWorkspaceError("git_worktree mode requires JB_OPENCLAW_REPOSITORY_ROOTS")
-
-        source = Path(source_value).resolve()
-        repository = Path(self._git(source, "rev-parse", "--show-toplevel")).resolve()
-        if source != repository:
-            raise OpenClawWorkspaceError("configured cwd must be the Git repository root")
-        if not any(repository.is_relative_to(root) for root in self._repository_roots):
-            raise OpenClawWorkspaceError(
-                f"repository is outside JB_OPENCLAW_REPOSITORY_ROOTS: {repository}"
-            )
-        workspace_root = self._workspace_root
-        if workspace_root.is_relative_to(repository) or repository.is_relative_to(workspace_root):
-            raise OpenClawWorkspaceError(
-                "JB_OPENCLAW_WORKSPACE_ROOT and the source repository must not contain each other"
-            )
-        base_commit = self._git(
-            repository,
-            "rev-parse",
-            "--verify",
-            "--end-of-options",
-            f"{base_ref}^{{commit}}",
-        )
-
-        slug = _slug(claim.node_key)
-        execution_key = claim.execution_id.hex[:12]
-        destination = (workspace_root / execution_key / f"{slug}-v{claim.visit_count}").resolve()
-        if not destination.is_relative_to(workspace_root):
-            raise OpenClawWorkspaceError("resolved worktree path escaped its configured root")
-        branch = f"jb/{execution_key}/{slug}-v{claim.visit_count}"
-
-        if destination.exists():
-            actual_root = Path(self._git(destination, "rev-parse", "--show-toplevel")).resolve()
-            actual_branch = self._git(destination, "branch", "--show-current")
-            if actual_root != destination or actual_branch != branch:
-                raise OpenClawWorkspaceError(
-                    f"existing workspace does not match its deterministic assignment: {destination}"
-                )
-        else:
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            branch_exists = (
-                self._git_returncode(
-                    repository,
-                    "show-ref",
-                    "--verify",
-                    "--quiet",
-                    f"refs/heads/{branch}",
-                )
-                == 0
-            )
-            arguments = ["worktree", "add"]
-            if branch_exists:
-                arguments.extend([str(destination), branch])
-            else:
-                arguments.extend(["-b", branch, str(destination), base_commit])
-            self._git(repository, *arguments)
-
-        return WorkspaceAssignment(
-            cwd=str(destination),
-            path=str(destination),
-            repository_path=str(repository),
-            branch=branch,
-            base_ref=base_commit,
-            scope=self.scope,
-        )
+        return WorkspaceAssignment(cwd=None)
 
     @property
     def scope(self) -> str | None:
@@ -339,10 +273,3 @@ class OpenClawWorkspaceManager:
 def _optional_string(configuration: dict[str, Any], key: str) -> str | None:
     value = configuration.get(key)
     return value.strip() if isinstance(value, str) and value.strip() else None
-
-
-def _slug(value: str) -> str:
-    normalized = re.sub(r"[^a-zA-Z0-9._-]+", "-", value).strip("-.").lower()
-    if not normalized:
-        raise OpenClawWorkspaceError("node key cannot produce a safe workspace name")
-    return normalized[:48]

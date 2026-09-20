@@ -55,7 +55,27 @@ def _external_execution(claim: TaskClaim, assignment: WorkspaceAssignment) -> Ex
     )
 
 
-async def test_git_worktree_assignment_is_isolated_and_retry_stable(tmp_path: Path) -> None:
+def _legacy_worktree_assignment(
+    manager: OpenClawWorkspaceManager,
+    repository: Path,
+    workspace: Path,
+    *,
+    branch: str = "jb/execution/review-v1",
+) -> WorkspaceAssignment:
+    base_commit = _git(repository, "rev-parse", "develop")
+    workspace.parent.mkdir(parents=True, exist_ok=True)
+    _git(repository, "worktree", "add", "-b", branch, str(workspace), base_commit)
+    return WorkspaceAssignment(
+        cwd=str(workspace),
+        path=str(workspace),
+        repository_path=str(repository),
+        branch=branch,
+        base_ref=base_commit,
+        scope=manager.scope,
+    )
+
+
+async def test_git_worktree_mode_is_rejected_before_allocation(tmp_path: Path) -> None:
     repositories = tmp_path / "repositories"
     repositories.mkdir()
     repository = _repository(repositories / "project")
@@ -73,73 +93,27 @@ async def test_git_worktree_assignment_is_isolated_and_retry_stable(tmp_path: Pa
         repository_roots=(repositories,),
     )
 
-    first = await manager.prepare(claim)
-    second = await manager.prepare(claim)
-
-    assert first == second
-    assert first.path is not None
-    assert Path(first.path).is_dir()
-    assert Path(first.path) != repository
-    assert claim.execution_id.hex[:12] in first.path
-    assert first.branch == _git(Path(first.path), "branch", "--show-current")
-    expected_commit = _git(repository, "rev-parse", "develop")
-    assert first.base_ref == expected_commit
-    assert first.scope == manager.scope
-    assert first.scope is not None
-    assert _git(Path(first.path), "rev-parse", "HEAD") == expected_commit
-
-
-async def test_parallel_nodes_receive_different_worktrees(tmp_path: Path) -> None:
-    repositories = tmp_path / "repositories"
-    repositories.mkdir()
-    repository = _repository(repositories / "project")
-    manager = OpenClawWorkspaceManager(
-        workspace_root=tmp_path / "worktrees",
-        repository_roots=(repositories,),
-    )
-    common = {
-        "cwd": str(repository),
-        "workspace_mode": "git_worktree",
-        "workspace_base_ref": "develop",
-    }
-    first_claim = replace(task_claim(), node_key="implementation", configuration=common)
-    second_claim = replace(task_claim(), node_key="verification", configuration=common)
-
-    first = await manager.prepare(first_claim)
-    second = await manager.prepare(second_claim)
-
-    assert first.path != second.path
-    assert first.branch != second.branch
-
-
-async def test_git_worktree_rejects_repository_outside_allowlist(tmp_path: Path) -> None:
-    repository = _repository(tmp_path / "project")
-    allowed = tmp_path / "allowed"
-    allowed.mkdir()
-    claim = replace(
-        task_claim(),
-        configuration={
-            "cwd": str(repository),
-            "workspace_mode": "git_worktree",
-            "workspace_base_ref": "develop",
-        },
-    )
-    manager = OpenClawWorkspaceManager(
-        workspace_root=tmp_path / "worktrees",
-        repository_roots=(allowed,),
-    )
-
-    with pytest.raises(OpenClawWorkspaceError, match="outside"):
+    with pytest.raises(OpenClawWorkspaceError, match="not supported"):
         await manager.prepare(claim)
 
+    assert not workspace_root.exists()
 
-async def test_shared_workspace_preserves_existing_behavior() -> None:
+
+async def test_shared_workspace_rejects_node_level_cwd() -> None:
     claim = replace(task_claim(), configuration={"cwd": "C:/projects/shared"})
     manager = OpenClawWorkspaceManager(workspace_root=None, repository_roots=())
 
-    assignment = await manager.prepare(claim)
+    with pytest.raises(OpenClawWorkspaceError, match="node-level cwd"):
+        await manager.prepare(claim)
 
-    assert assignment.cwd == "C:/projects/shared"
+
+async def test_shared_workspace_uses_preconfigured_agent_workspace() -> None:
+    manager = OpenClawWorkspaceManager(workspace_root=None, repository_roots=())
+
+    assignment = await manager.prepare(task_claim())
+
+    assert assignment.cwd is None
+    assert assignment.path is None
     assert assignment.branch is None
 
 
@@ -151,15 +125,12 @@ async def test_cleanup_requires_clean_branch_merged_into_target(tmp_path: Path) 
         workspace_root=tmp_path / "worktrees",
         repository_roots=(repositories,),
     )
-    claim = replace(
-        task_claim(),
-        configuration={
-            "cwd": str(repository),
-            "workspace_mode": "git_worktree",
-            "workspace_base_ref": "develop",
-        },
+    claim = task_claim()
+    assignment = _legacy_worktree_assignment(
+        manager,
+        repository,
+        tmp_path / "worktrees" / "review-v1",
     )
-    assignment = await manager.prepare(claim)
     assert assignment.path is not None
     workspace = Path(assignment.path)
     (workspace / "result.txt").write_text("done\n", encoding="utf-8")

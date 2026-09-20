@@ -38,7 +38,7 @@ class OpenClawExecutor:
             f"agent:{agent_id or 'main'}:jb:{claim.execution_id}:{claim.node_key}"
         )
         execution = await self._service.get(claim.idempotency_key)
-        assignment = WorkspaceAssignment(cwd=self._optional_string(claim.configuration, "cwd"))
+        assignment = WorkspaceAssignment(cwd=None)
         if execution is None or (not execution.is_terminal and execution.external_run_id is None):
             assignment = await self._workspace.prepare(claim)
         if execution is None:
@@ -56,9 +56,7 @@ class OpenClawExecutor:
             return self._stored_result(execution)
         if execution.external_run_id is None:
             try:
-                accepted = await self._bridge.start(
-                    self._start_request(claim, execution, cwd=assignment.cwd)
-                )
+                accepted = await self._bridge.start(self._start_request(claim, execution))
                 external_run_id = accepted.get("runId")
                 if not isinstance(external_run_id, str) or not external_run_id:
                     raise RuntimeError("OpenClaw agent response did not include runId")
@@ -123,8 +121,6 @@ class OpenClawExecutor:
         self,
         claim: TaskClaim,
         execution: ExternalExecution,
-        *,
-        cwd: str | None,
     ) -> dict[str, Any]:
         request: dict[str, Any] = {
             "message": self._prompt(claim),
@@ -134,7 +130,6 @@ class OpenClawExecutor:
         }
         optional = {
             "agentId": execution.external_agent_id,
-            "cwd": cwd,
             "thinking": self._optional_string(claim.configuration, "thinking"),
         }
         request.update({key: value for key, value in optional.items() if value is not None})

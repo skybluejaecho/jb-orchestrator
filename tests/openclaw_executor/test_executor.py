@@ -150,7 +150,7 @@ async def test_executor_persists_run_and_normalizes_terminal_result() -> None:
     assert result.output["provider"] == "openclaw"
 
 
-async def test_executor_starts_new_run_in_prepared_workspace() -> None:
+async def test_executor_does_not_forward_prepared_workspace_as_gateway_cwd() -> None:
     store = MemoryStore()
     bridge = FakeBridge()
     workspace = FakeWorkspace("C:/worktrees/review")
@@ -163,7 +163,7 @@ async def test_executor_starts_new_run_in_prepared_workspace() -> None:
     await executor.execute(task_claim())
 
     assert len(workspace.claims) == 1
-    assert bridge.starts[0]["cwd"] == "C:/worktrees/review"
+    assert "cwd" not in bridge.starts[0]
     mapping = store.external_executions[next(iter(store.external_executions))]
     assert mapping.workspace_path == "C:/worktrees/review"
     assert mapping.workspace_repository_path == "C:/projects/delivery"
@@ -186,7 +186,7 @@ async def test_executor_reprepares_workspace_for_starting_mapping_after_restart(
     await executor.execute(claim)
 
     assert len(workspace.claims) == 1
-    assert bridge.starts[0]["cwd"] == "C:/worktrees/review"
+    assert "cwd" not in bridge.starts[0]
 
 
 async def test_executor_promotes_structured_terminal_output_to_phase_artifact() -> None:
