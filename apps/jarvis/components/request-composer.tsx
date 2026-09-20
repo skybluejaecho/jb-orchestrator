@@ -23,6 +23,11 @@ import {
   prepareDispatchAttempt,
   type DispatchAttempt,
 } from '@/lib/dispatch-attempt';
+import {
+  isWorkflowDispatchBlocked,
+  workflowCompatibilityGuidance,
+  type WorkflowCompatibility,
+} from '@/lib/workflow-compatibility';
 
 type ProjectSummary = {
   id: string;
@@ -30,7 +35,7 @@ type ProjectSummary = {
   name: string;
 };
 
-type WorkflowOption = {
+type WorkflowOption = WorkflowCompatibility & {
   id: string;
   key: string;
   version: number;
@@ -167,6 +172,7 @@ export function RequestComposer({
     workflowValue === DEFAULT_WORKFLOW
       ? currentWorkflowOptions?.default_workflow
       : selectedWorkflow;
+  const workflowDispatchBlocked = isWorkflowDispatchBlocked(displayedWorkflow);
   const workflowContextKey =
     project && displayedWorkflow
       ? `${project.id}:${displayedWorkflow.key}@${displayedWorkflow.version}`
@@ -392,6 +398,7 @@ export function RequestComposer({
                   value={`${workflow.key}@${workflow.version}`}
                 >
                   {workflow.key}@{workflow.version}
+                  {workflow.compatible ? '' : ' · 실행 불가'}
                 </NativeSelectOption>
               ))}
             </NativeSelect>
@@ -436,7 +443,8 @@ export function RequestComposer({
               !project ||
               !prompt.trim() ||
               submitting ||
-              requiresWorkflowSelection
+              requiresWorkflowSelection ||
+              workflowDispatchBlocked
             }
             className="h-10 gap-2 bg-cyan-300 text-slate-950 hover:bg-cyan-200 xl:mb-0.5"
           >
@@ -451,6 +459,25 @@ export function RequestComposer({
             {submitting ? '제출 중' : '워크플로 시작'}
           </Button>
         </form>
+        {workflowDispatchBlocked && displayedWorkflow && (
+          <section
+            id="workflow-compatibility-warning"
+            role="alert"
+            className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/8 px-3 py-2.5 text-sm leading-6 text-amber-50"
+          >
+            <p className="font-medium">
+              현재 구성으로는 이 워크플로를 실행할 수 없습니다.
+            </p>
+            <ul className="mt-1 list-disc space-y-1 pl-5 text-xs text-amber-100/75">
+              {displayedWorkflow.compatibility_issues.map((issue) => (
+                <li key={`${issue.node_key}:${issue.code}`}>
+                  <span className="font-medium">{issue.node_key}</span> ·{' '}
+                  {workflowCompatibilityGuidance(issue)}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
         {error && (
           <p
             role="alert"
