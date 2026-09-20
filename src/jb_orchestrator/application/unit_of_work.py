@@ -3,23 +3,43 @@
 from types import TracebackType
 from typing import Protocol, Self
 
+from jb_orchestrator.artifacts import TaskArtifactRepository
 from jb_orchestrator.budgets.repositories import (
     BudgetAccountRepository,
     BudgetReservationRepository,
     UsageRecordRepository,
 )
+from jb_orchestrator.domain.dispatches import RequestDispatchReceiptRepository
 from jb_orchestrator.domain.repositories import (
     EventRepository,
     ProjectRepository,
     RunRepository,
     UserRequestRepository,
 )
+from jb_orchestrator.external_executions import ExternalExecutionRepository
 from jb_orchestrator.model_routing.repositories import ModelProfileRepository
+from jb_orchestrator.notifications import (
+    NotificationDeliveryAttemptRepository,
+    NotificationDeliveryRepository,
+    NotificationSubscriptionRepository,
+)
+from jb_orchestrator.phase_packs import PhasePackRepository
+from jb_orchestrator.scm import ScmPublicationAttemptRepository, ScmPublicationRepository
+from jb_orchestrator.security import (
+    ServiceAccountCredentialRepository,
+    ServiceAccountRepository,
+)
 from jb_orchestrator.skills.repositories import SkillRepository
+from jb_orchestrator.worker_presence import (
+    WorkerInstanceRepository,
+    WorkerReadinessAlertRepository,
+)
+from jb_orchestrator.workflows.bindings import ProjectWorkflowBindingRepository
 from jb_orchestrator.workflows.repositories import (
     WorkflowDefinitionRepository,
     WorkflowExecutionRepository,
 )
+from jb_orchestrator.workspace_operations import WorkspaceOperationRepository
 
 
 class UnitOfWork(Protocol):
@@ -32,13 +52,22 @@ class UnitOfWork(Protocol):
     def requests(self) -> UserRequestRepository: ...
 
     @property
+    def request_dispatch_receipts(self) -> RequestDispatchReceiptRepository: ...
+
+    @property
     def runs(self) -> RunRepository: ...
 
     @property
     def events(self) -> EventRepository: ...
 
     @property
+    def artifacts(self) -> TaskArtifactRepository: ...
+
+    @property
     def skills(self) -> SkillRepository: ...
+
+    @property
+    def phase_packs(self) -> PhasePackRepository: ...
 
     @property
     def model_profiles(self) -> ModelProfileRepository: ...
@@ -53,10 +82,46 @@ class UnitOfWork(Protocol):
     def usage_records(self) -> UsageRecordRepository: ...
 
     @property
+    def external_executions(self) -> ExternalExecutionRepository: ...
+
+    @property
+    def workspace_operations(self) -> WorkspaceOperationRepository: ...
+
+    @property
+    def scm_publications(self) -> ScmPublicationRepository: ...
+
+    @property
+    def scm_publication_attempts(self) -> ScmPublicationAttemptRepository: ...
+
+    @property
+    def worker_instances(self) -> WorkerInstanceRepository: ...
+
+    @property
+    def worker_readiness_alerts(self) -> WorkerReadinessAlertRepository: ...
+
+    @property
+    def notification_subscriptions(self) -> NotificationSubscriptionRepository: ...
+
+    @property
+    def notification_deliveries(self) -> NotificationDeliveryRepository: ...
+
+    @property
+    def notification_delivery_attempts(self) -> NotificationDeliveryAttemptRepository: ...
+
+    @property
     def workflow_definitions(self) -> WorkflowDefinitionRepository: ...
 
     @property
     def workflow_executions(self) -> WorkflowExecutionRepository: ...
+
+    @property
+    def project_workflow_bindings(self) -> ProjectWorkflowBindingRepository: ...
+
+    @property
+    def service_accounts(self) -> ServiceAccountRepository: ...
+
+    @property
+    def service_account_credentials(self) -> ServiceAccountCredentialRepository: ...
 
     async def __aenter__(self) -> Self: ...
 

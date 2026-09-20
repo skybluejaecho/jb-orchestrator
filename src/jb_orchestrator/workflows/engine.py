@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 
 from jb_orchestrator.workflows.exceptions import WorkflowExecutionError
 from jb_orchestrator.workflows.models import (
+    EdgeDefinition,
     NodeExecution,
     NodeExecutionStatus,
     NodeKind,
@@ -108,7 +109,7 @@ class WorkflowEngine:
         node.updated_at = changed_at
         self._clear_lease(node)
         self._touch(execution, changed_at)
-        self._route(execution, node_key, outcome, changed_at)
+        self._route(execution, node_key, outcome, changed_at, output=output)
 
     def fail_task(
         self,
@@ -205,16 +206,65 @@ class WorkflowEngine:
         source: str,
         outcome: NodeOutcome,
         changed_at: datetime,
+        *,
+        output: dict[str, Any] | None = None,
     ) -> None:
-        target = execution.snapshot.target(source, outcome)
-        if target is None:
-            self._fail(execution, f"no edge for {source}:{outcome}", changed_at)
+        edges = execution.snapshot.route_edges(source, outcome)
+        targets = self._select_targets(edges, output)
+        if not targets:
+            reason = (
+                f"no matching edge for {source}:{outcome}"
+                if edges
+                else f"no edge for {source}:{outcome}"
+            )
+            self._fail(execution, reason, changed_at)
             return
-        self._activate(execution, target, changed_at)
+        for target in targets:
+            self._activate(execution, target, changed_at)
+            if execution.is_terminal:
+                return
+
+    @classmethod
+    def _select_targets(
+        cls,
+        edges: tuple[EdgeDefinition, ...],
+        output: dict[str, Any] | None,
+    ) -> tuple[str, ...]:
+        conditional = [edge for edge in edges if edge.condition is not None]
+        if not conditional:
+            return tuple(sorted(edge.target for edge in edges))
+        for edge in conditional:
+            condition = edge.condition
+            if condition is not None:
+                found, value = cls._json_pointer(output or {}, condition.path)
+                if found and type(value) is type(condition.equals) and value == condition.equals:
+                    return (edge.target,)
+        default = next((edge for edge in edges if edge.condition is None), None)
+        return (default.target,) if default is not None else ()
+
+    @staticmethod
+    def _json_pointer(document: dict[str, Any], pointer: str) -> tuple[bool, Any]:
+        value: Any = document
+        for token in pointer.split("/")[1:]:
+            key = token.replace("~1", "/").replace("~0", "~")
+            if isinstance(value, dict) and key in value:
+                value = value[key]
+                continue
+            if isinstance(value, list) and (
+                key == "0" or (key and key[0] != "0" and key.isascii() and key.isdigit())
+            ):
+                index = int(key)
+                if index < len(value):
+                    value = value[index]
+                    continue
+            return False, None
+        return True, value
 
     def _activate(self, execution: WorkflowExecution, node_key: str, changed_at: datetime) -> None:
         node = self._node_execution(execution, node_key)
         definition = execution.snapshot.node(node_key)
+        if definition.kind is NodeKind.JOIN and not self._join_is_ready(execution, node_key):
+            return
         if node.visit_count >= definition.max_visits:
             self._fail(execution, f"node visit limit exceeded: {node_key}", changed_at)
             return
@@ -233,21 +283,51 @@ class WorkflowEngine:
         elif definition.kind is NodeKind.APPROVAL:
             node.status = NodeExecutionStatus.AWAITING_APPROVAL
             execution.status = WorkflowStatus.AWAITING_APPROVAL
+        elif definition.kind in {NodeKind.FORK, NodeKind.JOIN}:
+            node.status = NodeExecutionStatus.SUCCEEDED
+            node.outcome = NodeOutcome.SUCCESS
+            node.completed_at = changed_at
+            self._touch(execution, changed_at)
+            self._route(execution, node_key, NodeOutcome.SUCCESS, changed_at)
+            return
         else:
             node.status = NodeExecutionStatus.SUCCEEDED
             node.outcome = NodeOutcome.SUCCESS
             node.completed_at = changed_at
             execution.status = definition.terminal_status or WorkflowStatus.FAILED
             execution.completed_at = changed_at
+            self._cancel_active_nodes(execution, changed_at)
             if execution.status is WorkflowStatus.FAILED:
                 execution.failure_reason = f"workflow reached failure terminal: {node_key}"
         self._touch(execution, changed_at)
 
     def _fail(self, execution: WorkflowExecution, reason: str, changed_at: datetime) -> None:
+        self._cancel_active_nodes(execution, changed_at)
         execution.status = WorkflowStatus.FAILED
         execution.failure_reason = reason
         execution.completed_at = changed_at
         self._touch(execution, changed_at)
+
+    @staticmethod
+    def _join_is_ready(execution: WorkflowExecution, node_key: str) -> bool:
+        sources = execution.snapshot.incoming_sources(node_key)
+        return all(
+            execution.nodes[source].status is NodeExecutionStatus.SUCCEEDED for source in sources
+        )
+
+    @classmethod
+    def _cancel_active_nodes(cls, execution: WorkflowExecution, changed_at: datetime) -> None:
+        for node in execution.nodes.values():
+            if node.status not in {
+                NodeExecutionStatus.READY,
+                NodeExecutionStatus.RUNNING,
+                NodeExecutionStatus.AWAITING_APPROVAL,
+            }:
+                continue
+            node.status = NodeExecutionStatus.CANCELLED
+            node.completed_at = changed_at
+            node.updated_at = changed_at
+            cls._clear_lease(node)
 
     @staticmethod
     def _node_execution(execution: WorkflowExecution, node_key: str) -> NodeExecution:

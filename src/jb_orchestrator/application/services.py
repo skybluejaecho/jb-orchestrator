@@ -7,8 +7,10 @@ from uuid import UUID
 from jb_orchestrator.application.budget_services import release_run_reservations
 from jb_orchestrator.application.commands import CreateUserRequest, RegisterProject
 from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNotFound
+from jb_orchestrator.application.execution_lifecycle import synchronize_execution_lifecycle
 from jb_orchestrator.application.unit_of_work import UnitOfWork
 from jb_orchestrator.domain import DomainEvent, Project, ProjectStatus, Run, RunStatus, UserRequest
+from jb_orchestrator.workflows import WorkflowEngine
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,8 +24,13 @@ class CreatedRequest:
 class OrchestrationService:
     """Coordinates domain rules and persistence transactions."""
 
-    def __init__(self, unit_of_work_factory: Callable[[], UnitOfWork]) -> None:
+    def __init__(
+        self,
+        unit_of_work_factory: Callable[[], UnitOfWork],
+        engine: WorkflowEngine | None = None,
+    ) -> None:
         self._unit_of_work_factory = unit_of_work_factory
+        self._engine = engine or WorkflowEngine()
 
     async def register_project(self, command: RegisterProject) -> Project:
         project = Project(
@@ -101,9 +108,11 @@ class OrchestrationService:
 
     async def approve_run(self, run_id: UUID) -> Run:
         async with self._unit_of_work_factory() as unit_of_work:
-            run = await unit_of_work.runs.get(run_id)
+            run = await unit_of_work.runs.get_for_update(run_id)
             if run is None:
                 raise ResourceNotFound(f"run not found: {run_id}")
+            if await unit_of_work.workflow_executions.get_by_run(run_id) is not None:
+                raise ResourceConflict("workflow approvals must resolve a specific approval node")
             run.transition_to(RunStatus.READY)
             await unit_of_work.runs.save(run)
             await unit_of_work.events.append(
@@ -119,10 +128,32 @@ class OrchestrationService:
 
     async def cancel_run(self, run_id: UUID) -> Run:
         async with self._unit_of_work_factory() as unit_of_work:
-            run = await unit_of_work.runs.get(run_id)
+            execution = await unit_of_work.workflow_executions.get_by_run_for_update(run_id)
+            if execution is not None:
+                if execution.is_terminal:
+                    raise ResourceConflict(f"terminal run cannot be cancelled: {run_id}")
+                self._engine.cancel(execution)
+                await release_run_reservations(unit_of_work, run_id, reason="run_cancelled")
+                await unit_of_work.workflow_executions.save(execution)
+                await unit_of_work.events.append(
+                    DomainEvent(
+                        aggregate_type="workflow_execution",
+                        aggregate_id=execution.id,
+                        event_type="workflow.cancelled",
+                        payload={"status": execution.status.value, "source": "run"},
+                    )
+                )
+                await synchronize_execution_lifecycle(unit_of_work, execution)
+                run = await unit_of_work.runs.get(run_id)
+                if run is None:
+                    raise ResourceNotFound(f"run not found: {run_id}")
+                await unit_of_work.commit()
+                return run
+
+            run = await unit_of_work.runs.get_for_update(run_id)
             if run is None:
                 raise ResourceNotFound(f"run not found: {run_id}")
-            request = await unit_of_work.requests.get(run.request_id)
+            request = await unit_of_work.requests.get_for_update(run.request_id)
             if request is None:
                 raise ResourceNotFound(f"request not found: {run.request_id}")
             await release_run_reservations(unit_of_work, run.id, reason="run_cancelled")

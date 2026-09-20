@@ -1,5 +1,7 @@
 # ADR 0004: Use PostgreSQL row locks and leases for task dispatch
 
+> 병렬 Workflow의 aggregate 잠금 범위는 ADR 0018에서 보완한다.
+
 - Status: Accepted
 - Date: 2026-09-01
 

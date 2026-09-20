@@ -1,0 +1,135 @@
+# Jarvis local dashboard
+
+Jarvis는 jb-orchestrator의 진실의 원천이 아니라 로컬 관찰 UI다. 프로젝트, 요청 및
+Workflow 상태를 Control Plane API에서 읽고 프로젝트 SSE stream으로 변경을 감지한다.
+
+## Local setup
+
+Jarvis는 프로젝트 상태를 조회하고 사용자의 요청을 제출하며 명시적인 승인 결정을
+처리하고 실행을 취소하며 작업공간 검토 명령을 등록하므로 `project.read`,
+`request.dispatch`, `workflow.approve`, `run.cancel`, `workspace.manage`, `scm.publish`,
+`notification.manage`, `all_projects` 범위를 가진 전용 서비스 계정을 사용한다.
+
+```powershell
+uv run jb auth issue `
+  --key jarvis-local `
+  --name "Jarvis Local Dashboard" `
+  --permission project.read `
+  --permission request.dispatch `
+  --permission workflow.approve `
+  --permission run.cancel `
+  --permission workspace.manage `
+  --permission scm.publish `
+  --permission notification.manage `
+  --all-projects
+
+Copy-Item apps/jarvis/.env.example apps/jarvis/.env.local
+```
+
+발급된 token을 `.env.local`의 `JARVIS_API_TOKEN`에 넣은 뒤 실행한다.
+
+```powershell
+Set-Location apps/jarvis
+npm install
+npm run dev
+```
+
+브라우저에는 API token을 전달하지 않는다. Vinext server route가 token을 보관하고
+Control Plane으로 요청을 proxy한다. 요청 작성 화면은 프로젝트 기본 Workflow 또는 등록된
+정확한 Workflow 버전을 선택할 수 있다. 선택하지 않으면 기본 binding을 사용하며 선택해도
+프로젝트 기본값 자체는 변경되지 않는다. 선택한 Workflow의 노드, Phase Pack, Skill source는
+제출 전에 읽기 전용 구성 미리보기로 표시된다. 등록된 최신 Skill은 task 노드마다 선택적으로
+추가할 수 있으며 해당 요청의 Snapshot에만 고정된다. 요청 제출은 `jarvis` ingress와 멱등성 key를 사용한다.
+요청 내용을 입력하면 등록된 Workflow 구성에서 결정적으로 계산한 추천 후보와 신뢰도를 조회할 수
+있다. 높은 신뢰도는 첫 후보를 선택하고, 근거가 부족한 추천은 사용자가 정확한 Workflow 버전을
+확인해야 한다. 추천 ID와 실제 선택은 Control Plane이 다시 검증하고 DB 이벤트에 기록한다.
+실행을 선택하면 노드 상태와 산출물뿐 아니라 Control Plane의 외부 실행 원장도 함께 조회한다.
+외부 런타임 영역에는 노드별 executor, agent ID, session key, run ID와 현재 상태가 표시된다.
+표시 값은 OpenClaw 자체 메모리를 추측한 것이 아니라 Worker가 DB에 기록한 실행 매핑이다.
+격리된 Git worktree가 할당된 실행은 생성된 branch, base ref와 로컬 path도 함께 표시한다.
+안전한 cleanup이 완료되면 DB의 release 시각을 반영해 해당 worktree가 정리됐음을 표시한다.
+범위가 등록된 worktree는 프로젝트 기본 브랜치를 기준으로 검사를 요청하고, 외부 실행이
+종료된 뒤 전체 외부 실행 UUID를 정확히 입력해야 정리를 요청할 수 있다. 실제 Git 작업은
+동일한 scope의 `jb-openclaw workspace worker`가 수행하며 Jarvis는 작업 상태를 낙관적으로
+변경하지 않는다.
+종료되었고 아직 정리되지 않은 worktree는 GitHub PR 게시 요청을 등록할 수 있다. 대상 브랜치,
+PR 제목과 본문을 확인한 뒤 요청하며, Jarvis는 PostgreSQL 게시 원장의 대기·처리·성공·실패
+상태를 표시한다. 성공 URL은 HTTPS일 때만 외부 링크로 제공된다. 실제 push와 PR 생성은 동일한
+scope를 담당하는 `jb-scm-worker`가 수행한다.
+게시 실패는 같은 원장 레코드를 `pending`으로 되돌려 명시적으로 재시도할 수 있다. 화면은 누적
+시도 횟수를 표시하며 성공한 게시, 실행 중인 게시, 정리되었거나 branch가 달라진 worktree는
+재시도하지 않는다. 재시도는 자동 반복되지 않으며 운영자가 실패 원인을 확인한 뒤 선택한다.
+실패 원장은 공급자 중립 분류 코드와 재시도 가능 여부를 함께 제공한다. Jarvis는 이를 이용해
+일시적인 공급자 장애에는 `재시도 가능`, 안전성 또는 결과 검증 실패에는 수동 확인 안내를
+표시하며 공급자 오류 문자열을 정책으로 해석하지 않는다.
+SCM Worker에서 자동 재시도를 명시적으로 활성화한 경우 실패 원장에 다음 실행 시각과 한도가
+저장된다. Jarvis는 이 예약을 표시할 뿐 브라우저 타이머로 재요청하지 않으므로 화면을 닫거나
+Worker를 재시작해도 PostgreSQL 원장이 재시도 시점을 결정한다.
+예약된 게시에는 `예약 취소`와 `지금 재시도`가 함께 표시된다. 예약 취소는 실패 증거와 누적
+시도를 보존한 채 자동 실행만 중단하고, 지금 재시도는 기존 명시적 retry API로 즉시 pending
+상태를 만든다. 두 동작 모두 Jarvis 서버 프록시가 `scm.publish` 권한으로 수행한다.
+게시의 `시도 이력`을 펼치면 Control Plane의 시도별 원장을 최신순으로 조회한다. 최초 실행,
+수동·자동 재시도, 임대 만료 회수와 각 Worker·처리 시간·실패 분류를 표시하며 내부 임대 토큰은
+브라우저에 전달하지 않는다.
+프로젝트 알림 전송 패널은 Control Plane의 최근 Delivery와 시도별 원장을 표시한다. 실패 항목은
+같은 Delivery identity로 즉시 재시도할 수 있고, 자동 재시도가 예약된 항목은 실패 증거를 보존한
+채 예약만 취소할 수 있다. Jarvis는 알림 이벤트에 맞춰 원장을 다시 조회하며 브라우저 자체
+타이머로 전송을 실행하지 않는다. 실제 claim과 외부 전송은 계속 Notification Worker가 담당한다.
+알림 구독 패널에서는 설치형 provider key, Worker가 해석할 목적지 참조와 readiness 이벤트 범위를
+등록할 수 있다. 기존 구독의 이벤트 필터와 활성화 상태도 변경할 수 있지만 실제 endpoint URL,
+인증 정보와 서명 secret은 입력하거나 표시하지 않는다. 이 값들은 계속 Notification Worker 환경의
+destination resolver가 소유한다.
+구독 입력과 기존 구독에는 해당 provider capability를 가진 Notification Worker의 현재 상태가
+표시된다. 온라인, 응답 지연·종료, 지원 Worker 없음 상태를 구분하지만 계획된 배포 전에 설정할 수
+있도록 등록 자체는 차단하지 않는다. Delivery 화면은 상태·provider·이벤트 필터를 제공하고 자동
+재시도 예약과 실패 항목을 먼저 배치한다.
+Worker 현황판은 실행·Workspace·SCM Worker가 PostgreSQL에 기록한 process heartbeat를 30초마다
+조회한다. 온라인, heartbeat 임계값을 넘긴 응답 지연, 정상 종료를 구분하고 hostname·PID·지원
+capability·workspace scope를 표시한다. 작업 lease 상태와 Worker process 상태는 독립적으로
+해석한다.
+작업 배정 진단은 선택한 프로젝트의 READY 노드가 요구하는 executor와 최신 실행 Worker
+capability를 비교한다. 지원 Worker가 전혀 없는 경우와 등록됐지만 stale 또는 종료된 경우를
+구분하며, 문제가 없는 READY 작업은 처리 가능한 online Worker가 있음을 표시한다. 이 화면은
+관찰 전용이며 Worker를 자동으로 시작하거나 노드 소유권을 변경하지 않는다.
+배정 진단 평가는 READY 발생 단위의 경보를 PostgreSQL 원장에 한 번만 생성한다. 반복 평가는 최초
+감지 시각을 보존하며, Worker가 복구되면 경보를 삭제하지 않고 해소 상태로 전환한다. 화면은 경보
+지속 시간에 따른 주의·긴급 상태와 필요한 capability의 Worker 시작 또는 재시작 안내를 표시한다.
+평가는 별도의 `jb-readiness-monitor` 프로세스가 수행하며 Jarvis는 원장을 읽기만 한다. 따라서
+브라우저를 닫아도 경보 생성·해소와 critical 전환 이벤트가 계속 기록된다.
+승인 대기 노드는 승인 또는 반려를 한 번 더 확인한 뒤 처리한다. 진행 중인 실행을 취소하려면
+화면에 표시된 실행 식별 문구를 정확하게 입력해야 한다. Jarvis는 로컬 실행만 지원하며 외부
+네트워크 공개나 Sites 배포는 별도 사용자 인증 계층을 추가하기 전에는 허용하지 않는다.
+
+## Checks
+
+```powershell
+npm run format:check
+npm run lint
+npm test
+npm run build
+```
+
+계약 테스트는 Control Plane을 실제로 실행하지 않고 server proxy의 인증 header, 오류 전달,
+dispatch payload, 멱등 재시도 규칙, 실행 상세·산출물·외부 실행 조회, 승인 결정, 실행 취소와
+SCM 게시와 알림 Delivery 관찰·복구 계약을 검증한다. 동일한 검사는 GitHub Actions의 `Jarvis`
+job에서 모든 `develop` 및 `main` PR과 push에 실행된다.
+
+## System smoke
+
+실제 PostgreSQL, Control Plane, Worker와 Jarvis process 사이의 계약은 저장소 root에서 다음
+명령으로 검증한다. 반드시 비어 있는 일회용 test database를 사용해야 한다.
+
+```powershell
+$env:JB_ENVIRONMENT = "test"
+uv run alembic upgrade head
+uv run --with-editable . --with-editable adapters/github --with-editable adapters/webhook `
+  --with-editable tools/system-smoke-executor jb system smoke
+```
+
+smoke executor는 외부 agent runtime을 호출하지 않으며 `JB_ENVIRONMENT=test`가 아니면 시작을
+거부한다. 알림 경계는 Jarvis route로 구독 생성과 설정, Delivery 및 Attempt 조회, 자동 재시도
+예약 취소와 즉시 재시도를 수행한 뒤 실제 Notification Worker와 서명 Webhook Stub의 결과를
+검증한다. Vinext 콜드 스타트를 고려한 기본 준비 제한은 60초이며 `--timeout-seconds`로 조정할 수
+있다. Control Plane 인증 경계는 관리용 서비스 계정의 새 credential을 발급해 실제 요청으로
+검증한 뒤 기존 credential을 폐기한다. 이후 기존 token의 즉시 거부, 새 token의 활성 상태와
+발급·폐기 actor가 기록된 감사 원장을 함께 확인하며 token 원문은 최종 smoke 결과에 포함하지 않는다.

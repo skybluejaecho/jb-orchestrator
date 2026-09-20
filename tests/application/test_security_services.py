@@ -1,0 +1,276 @@
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
+
+import pytest
+
+from jb_orchestrator.application import ScmPublicationService, SecurityService
+from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNotFound
+from jb_orchestrator.domain import Project
+from jb_orchestrator.security import ApiPermission, CredentialReadinessStatus
+from tests.scm.test_publication_service import managed_execution
+from tests.support import MemoryStore, MemoryUnitOfWork
+
+
+async def test_issue_authenticate_and_revoke_service_account() -> None:
+    store = MemoryStore()
+    project = Project(key="alpha", name="Alpha", repository_url="https://example.test/a.git")
+    store.projects[project.id] = project
+    service = SecurityService(lambda: MemoryUnitOfWork(store))
+
+    issued = await service.issue(
+        key="openclaw",
+        name="OpenClaw",
+        permissions={ApiPermission.PROJECT_READ, ApiPermission.REQUEST_DISPATCH},
+        project_ids={project.id},
+    )
+
+    assert issued.token.startswith(f"jbsa_{issued.credential.id.hex}.")
+    assert issued.token not in issued.credential.token_digest
+    principal = await service.authenticate(issued.token)
+    assert principal is not None
+    assert principal.credential_id == issued.credential.id
+    assert principal.allows(ApiPermission.REQUEST_DISPATCH, project.id)
+    assert store.service_account_credentials[issued.credential.id].last_used_at is not None
+    assert await service.authenticate(f"{issued.token}wrong") is None
+
+    await service.revoke(issued.account.id)
+    assert await service.authenticate(issued.token) is None
+    assert [event.event_type for event in store.events] == [
+        "service_account.credential_issued",
+        "service_account.revoked",
+    ]
+    await service.revoke(issued.account.id)
+    assert len(store.events) == 2
+
+
+async def test_multiple_credentials_expire_and_revoke_independently() -> None:
+    now = datetime(2026, 9, 9, tzinfo=UTC)
+    store = MemoryStore()
+    project = Project(key="alpha", name="Alpha", repository_url="https://example.test/a.git")
+    store.projects[project.id] = project
+    service = SecurityService(lambda: MemoryUnitOfWork(store), clock=lambda: now)
+    first = await service.issue(
+        key="jarvis",
+        name="Jarvis",
+        permissions={ApiPermission.PROJECT_READ},
+        project_ids={project.id},
+    )
+    second = await service.issue_credential(
+        first.account.id,
+        expires_at=now + timedelta(days=30),
+    )
+
+    assert await service.authenticate(first.token) is not None
+    assert await service.authenticate(second.token) is not None
+    assert len(store.service_account_credentials) == 2
+
+    credentials = await service.list_credentials(first.account.id)
+    assert [credential.id for credential in credentials] == sorted(
+        (first.credential.id, second.credential.id)
+    )
+
+    await service.revoke_credential(first.account.id, first.credential.id)
+    event_count = len(store.events)
+    await service.revoke_credential(first.account.id, first.credential.id)
+    assert len(store.events) == event_count
+
+    assert await service.authenticate(first.token) is None
+    assert await service.authenticate(second.token) is not None
+
+    expired_service = SecurityService(
+        lambda: MemoryUnitOfWork(store),
+        clock=lambda: now + timedelta(days=30),
+    )
+    assert await expired_service.authenticate(second.token) is None
+
+    other = await service.issue(
+        key="other-client",
+        name="Other Client",
+        permissions={ApiPermission.PROJECT_READ},
+        project_ids={project.id},
+    )
+    with pytest.raises(ResourceNotFound, match="credential not found"):
+        await service.revoke_credential(other.account.id, second.credential.id)
+    with pytest.raises(ResourceNotFound, match="service account not found"):
+        await service.list_credentials(uuid4())
+
+
+async def test_issue_rejects_duplicate_key_and_missing_project() -> None:
+    store = MemoryStore()
+    service = SecurityService(lambda: MemoryUnitOfWork(store))
+
+    with pytest.raises(ResourceNotFound, match="project not found"):
+        await service.issue(
+            key="missing-project",
+            name="Missing",
+            permissions={ApiPermission.PROJECT_READ},
+            project_ids={uuid4()},
+        )
+
+    first = await service.issue(
+        key="global-admin",
+        name="Global Admin",
+        permissions={ApiPermission.PROJECT_ADMIN},
+        all_projects=True,
+    )
+    assert first.account.all_projects
+    with pytest.raises(ResourceConflict, match="already exists"):
+        await service.issue(
+            key="global-admin",
+            name="Duplicate",
+            permissions={ApiPermission.PROJECT_ADMIN},
+            all_projects=True,
+        )
+
+
+async def test_account_inventory_filters_pages_and_summarizes_credential_health() -> None:
+    issued_at = datetime(2026, 9, 1, tzinfo=UTC)
+    inspected_at = issued_at + timedelta(days=2)
+    store = MemoryStore()
+    service = SecurityService(lambda: MemoryUnitOfWork(store), clock=lambda: issued_at)
+    alpha = await service.issue(
+        key="alpha-client",
+        name="Alpha Client",
+        permissions={ApiPermission.PROJECT_READ},
+        all_projects=True,
+    )
+    expired = await service.issue_credential(
+        alpha.account.id,
+        expires_at=issued_at + timedelta(days=1),
+    )
+    revoked = await service.issue_credential(alpha.account.id)
+    await service.revoke_credential(alpha.account.id, revoked.credential.id)
+    await service.authenticate(alpha.token)
+    zeta = await service.issue(
+        key="zeta-client",
+        name="Zeta Client",
+        permissions={ApiPermission.PROJECT_READ},
+        all_projects=True,
+    )
+    await service.revoke(zeta.account.id)
+
+    inventory_service = SecurityService(lambda: MemoryUnitOfWork(store), clock=lambda: inspected_at)
+    listed = await inventory_service.list_account_inventory(
+        enabled=True,
+        key_prefix="alpha",
+        limit=10,
+    )
+    detail = await inventory_service.get_account_inventory(alpha.account.id)
+    after_alpha = await inventory_service.list_account_inventory(
+        after_key="alpha-client",
+        limit=10,
+    )
+
+    assert listed == [detail]
+    assert detail.credential_summary.total == 3
+    assert detail.credential_summary.active == 1
+    assert detail.credential_summary.usable == 1
+    assert detail.credential_summary.expired == 1
+    assert detail.credential_summary.revoked == 1
+    assert detail.credential_summary.last_used_at is not None
+    assert expired.credential.id in store.service_account_credentials
+    assert [item.account.key for item in after_alpha] == ["zeta-client"]
+    assert after_alpha[0].credential_summary.active == 1
+    assert after_alpha[0].credential_summary.usable == 0
+
+    with pytest.raises(ResourceNotFound, match="service account not found"):
+        await inventory_service.get_account_inventory(uuid4())
+
+
+async def test_credential_readiness_classifies_health_and_filters_issues() -> None:
+    issued_at = datetime(2026, 9, 1, tzinfo=UTC)
+    checked_at = issued_at + timedelta(days=2)
+    store = MemoryStore()
+    service = SecurityService(lambda: MemoryUnitOfWork(store), clock=lambda: issued_at)
+    healthy = await service.issue(
+        key="a-healthy",
+        name="Healthy",
+        permissions={ApiPermission.PROJECT_READ},
+        all_projects=True,
+    )
+    expiring = await service.issue(
+        key="b-expiring",
+        name="Expiring",
+        permissions={ApiPermission.PROJECT_READ},
+        all_projects=True,
+        expires_at=checked_at + timedelta(days=3),
+    )
+    expired = await service.issue(
+        key="c-expired",
+        name="Expired",
+        permissions={ApiPermission.PROJECT_READ},
+        all_projects=True,
+        expires_at=issued_at + timedelta(days=1),
+    )
+    revoked = await service.issue(
+        key="d-revoked",
+        name="Revoked",
+        permissions={ApiPermission.PROJECT_READ},
+        all_projects=True,
+    )
+    await service.revoke_credential(revoked.account.id, revoked.credential.id)
+    disabled = await service.issue(
+        key="e-disabled",
+        name="Disabled",
+        permissions={ApiPermission.PROJECT_READ},
+        all_projects=True,
+    )
+    await service.revoke(disabled.account.id)
+    readiness_service = SecurityService(lambda: MemoryUnitOfWork(store), clock=lambda: checked_at)
+
+    all_accounts = await readiness_service.list_credential_readiness(
+        warning_seconds=7 * 24 * 60 * 60,
+        limit=10,
+    )
+    issues = await readiness_service.list_credential_readiness(
+        warning_seconds=7 * 24 * 60 * 60,
+        issues_only=True,
+        after_key=healthy.account.key,
+        limit=10,
+    )
+    detail = await readiness_service.get_credential_readiness(
+        expiring.account.id,
+        warning_seconds=7 * 24 * 60 * 60,
+    )
+
+    assert {item.account.key: item.status for item in all_accounts} == {
+        "a-healthy": CredentialReadinessStatus.HEALTHY,
+        "b-expiring": CredentialReadinessStatus.EXPIRING_SOON,
+        "c-expired": CredentialReadinessStatus.EXPIRED,
+        "d-revoked": CredentialReadinessStatus.NO_USABLE_CREDENTIAL,
+        "e-disabled": CredentialReadinessStatus.ACCOUNT_DISABLED,
+    }
+    assert [item.account.key for item in issues] == [
+        "b-expiring",
+        "c-expired",
+        "d-revoked",
+        "e-disabled",
+    ]
+    assert detail.next_expires_at == expiring.credential.expires_at
+    assert detail.checked_at == checked_at
+    assert detail.warning_seconds == 7 * 24 * 60 * 60
+    assert expired.credential.id in store.service_account_credentials
+
+    with pytest.raises(ValueError, match="warning"):
+        await readiness_service.list_credential_readiness(warning_seconds=0)
+
+
+async def test_resolve_project_id_traverses_scm_publication_owner() -> None:
+    store = MemoryStore()
+    execution = await managed_execution(store)
+    publication, _ = await ScmPublicationService(lambda: MemoryUnitOfWork(store)).request(
+        execution.id,
+        provider_key="github",
+        target_branch="develop",
+        title="Review feature",
+        body="",
+        idempotency_key="publish-1",
+        requested_by="jarvis",
+    )
+
+    project_id = await SecurityService(lambda: MemoryUnitOfWork(store)).resolve_project_id(
+        "scm_publication", publication.id
+    )
+
+    assert project_id is not None
+    assert project_id in store.projects

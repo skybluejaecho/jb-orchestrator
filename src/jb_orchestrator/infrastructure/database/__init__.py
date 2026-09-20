@@ -1,10 +1,19 @@
 """SQLAlchemy persistence adapters."""
 
+from jb_orchestrator.infrastructure.database.artifact_repositories import (
+    SqlAlchemyTaskArtifactRepository,
+)
 from jb_orchestrator.infrastructure.database.base import Base
 from jb_orchestrator.infrastructure.database.budget_repositories import (
     SqlAlchemyBudgetAccountRepository,
     SqlAlchemyBudgetReservationRepository,
     SqlAlchemyUsageRecordRepository,
+)
+from jb_orchestrator.infrastructure.database.dispatch_repositories import (
+    SqlAlchemyRequestDispatchReceiptRepository,
+)
+from jb_orchestrator.infrastructure.database.external_execution_repositories import (
+    SqlAlchemyExternalExecutionRepository,
 )
 from jb_orchestrator.infrastructure.database.model_repositories import (
     SqlAlchemyModelProfileRepository,
@@ -13,15 +22,38 @@ from jb_orchestrator.infrastructure.database.models import (
     BudgetAccountRecord,
     BudgetReservationRecord,
     EventRecord,
+    ExternalExecutionRecord,
     ModelProfileRecord,
     NodeExecutionRecord,
+    NotificationDeliveryAttemptRecord,
+    NotificationDeliveryRecord,
+    NotificationSubscriptionRecord,
+    PhasePackDefinitionRecord,
     ProjectRecord,
+    ProjectWorkflowBindingRecord,
+    RequestDispatchReceiptRecord,
     RunRecord,
+    ScmPublicationAttemptRecord,
+    ScmPublicationRecord,
+    ServiceAccountCredentialRecord,
+    ServiceAccountRecord,
     SkillDefinitionRecord,
+    TaskArtifactRecord,
     UsageRecordRecord,
     UserRequestRecord,
+    WorkerInstanceRecord,
+    WorkerReadinessAlertRecord,
     WorkflowDefinitionRecord,
     WorkflowExecutionRecord,
+    WorkspaceOperationRecord,
+)
+from jb_orchestrator.infrastructure.database.notification_repositories import (
+    SqlAlchemyNotificationDeliveryAttemptRepository,
+    SqlAlchemyNotificationDeliveryRepository,
+    SqlAlchemyNotificationSubscriptionRepository,
+)
+from jb_orchestrator.infrastructure.database.phase_pack_repositories import (
+    SqlAlchemyPhasePackRepository,
 )
 from jb_orchestrator.infrastructure.database.repositories import (
     SqlAlchemyEventRepository,
@@ -29,12 +61,32 @@ from jb_orchestrator.infrastructure.database.repositories import (
     SqlAlchemyRunRepository,
     SqlAlchemyUserRequestRepository,
 )
+from jb_orchestrator.infrastructure.database.scm_publication_repositories import (
+    SqlAlchemyScmPublicationAttemptRepository,
+    SqlAlchemyScmPublicationRepository,
+)
+from jb_orchestrator.infrastructure.database.security_repositories import (
+    SqlAlchemyServiceAccountCredentialRepository,
+    SqlAlchemyServiceAccountRepository,
+)
 from jb_orchestrator.infrastructure.database.session import create_session_factory
 from jb_orchestrator.infrastructure.database.skill_repositories import SqlAlchemySkillRepository
 from jb_orchestrator.infrastructure.database.unit_of_work import SqlAlchemyUnitOfWork
+from jb_orchestrator.infrastructure.database.worker_presence_repositories import (
+    SqlAlchemyWorkerInstanceRepository,
+)
+from jb_orchestrator.infrastructure.database.worker_readiness_alert_repositories import (
+    SqlAlchemyWorkerReadinessAlertRepository,
+)
+from jb_orchestrator.infrastructure.database.workflow_binding_repositories import (
+    SqlAlchemyProjectWorkflowBindingRepository,
+)
 from jb_orchestrator.infrastructure.database.workflow_repositories import (
     SqlAlchemyWorkflowDefinitionRepository,
     SqlAlchemyWorkflowExecutionRepository,
+)
+from jb_orchestrator.infrastructure.database.workspace_operation_repositories import (
+    SqlAlchemyWorkspaceOperationRepository,
 )
 
 __all__ = [
@@ -42,26 +94,56 @@ __all__ = [
     "BudgetAccountRecord",
     "BudgetReservationRecord",
     "EventRecord",
+    "ExternalExecutionRecord",
     "ModelProfileRecord",
     "NodeExecutionRecord",
+    "NotificationDeliveryAttemptRecord",
+    "NotificationDeliveryRecord",
+    "NotificationSubscriptionRecord",
+    "PhasePackDefinitionRecord",
     "ProjectRecord",
+    "ProjectWorkflowBindingRecord",
+    "RequestDispatchReceiptRecord",
     "RunRecord",
+    "ScmPublicationAttemptRecord",
+    "ScmPublicationRecord",
+    "ServiceAccountCredentialRecord",
+    "ServiceAccountRecord",
     "SkillDefinitionRecord",
     "SqlAlchemyBudgetAccountRepository",
     "SqlAlchemyBudgetReservationRepository",
     "SqlAlchemyEventRepository",
+    "SqlAlchemyExternalExecutionRepository",
     "SqlAlchemyModelProfileRepository",
+    "SqlAlchemyNotificationDeliveryAttemptRepository",
+    "SqlAlchemyNotificationDeliveryRepository",
+    "SqlAlchemyNotificationSubscriptionRepository",
+    "SqlAlchemyPhasePackRepository",
     "SqlAlchemyProjectRepository",
+    "SqlAlchemyProjectWorkflowBindingRepository",
+    "SqlAlchemyRequestDispatchReceiptRepository",
     "SqlAlchemyRunRepository",
+    "SqlAlchemyScmPublicationAttemptRepository",
+    "SqlAlchemyScmPublicationRepository",
+    "SqlAlchemyServiceAccountCredentialRepository",
+    "SqlAlchemyServiceAccountRepository",
     "SqlAlchemySkillRepository",
+    "SqlAlchemyTaskArtifactRepository",
     "SqlAlchemyUnitOfWork",
     "SqlAlchemyUsageRecordRepository",
     "SqlAlchemyUserRequestRepository",
+    "SqlAlchemyWorkerInstanceRepository",
+    "SqlAlchemyWorkerReadinessAlertRepository",
     "SqlAlchemyWorkflowDefinitionRepository",
     "SqlAlchemyWorkflowExecutionRepository",
+    "SqlAlchemyWorkspaceOperationRepository",
+    "TaskArtifactRecord",
     "UsageRecordRecord",
     "UserRequestRecord",
+    "WorkerInstanceRecord",
+    "WorkerReadinessAlertRecord",
     "WorkflowDefinitionRecord",
     "WorkflowExecutionRecord",
+    "WorkspaceOperationRecord",
     "create_session_factory",
 ]

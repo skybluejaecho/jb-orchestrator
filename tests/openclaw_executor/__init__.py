@@ -1,0 +1,1 @@
+"""OpenClaw executor adapter tests."""

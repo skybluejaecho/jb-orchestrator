@@ -1,8 +1,11 @@
+import asyncio
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from uuid import UUID, uuid4
+
+import pytest
 
 from jb_orchestrator.application import BudgetService, TaskDispatchService
 from jb_orchestrator.budgets import BudgetReservationStatus, UsageKind
@@ -52,6 +55,38 @@ class FakeExecutor:
         return result
 
 
+class BlockingExecutor:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.claims: list[TaskClaim] = []
+        self.cancel_claims: list[TaskClaim] = []
+        self.locally_cancelled = False
+
+    async def execute(self, claim: TaskClaim) -> TaskResult:
+        self.claims.append(claim)
+        self.started.set()
+        try:
+            await self.release.wait()
+        except asyncio.CancelledError:
+            self.locally_cancelled = True
+            raise
+        return TaskResult(outcome=NodeOutcome.SUCCESS)
+
+    async def cancel(self, claim: TaskClaim) -> None:
+        self.cancel_claims.append(claim)
+
+
+class FailingHeartbeatDispatch(TaskDispatchService):
+    async def heartbeat(
+        self,
+        claim: TaskClaim,
+        *,
+        at: datetime | None = None,
+    ) -> WorkflowExecution:
+        raise RuntimeError("database unavailable")
+
+
 def running_execution(
     *,
     max_attempts: int = 2,
@@ -59,6 +94,7 @@ def running_execution(
     skills: tuple[SkillDefinition, ...] = (),
     run_id: UUID | None = None,
     model_selection: ModelSelection | None = None,
+    timeout_seconds: int = 10,
 ) -> WorkflowExecution:
     definition = WorkflowDefinition(
         key="worker-flow",
@@ -69,7 +105,7 @@ def running_execution(
                 key="work",
                 kind=NodeKind.TASK,
                 max_attempts=max_attempts,
-                timeout_seconds=10,
+                timeout_seconds=timeout_seconds,
                 executor_key=executor_key,
                 instructions="Produce the requested artifact.",
                 configuration={"model": "test-model"},
@@ -136,6 +172,122 @@ async def test_worker_executes_claim_and_persists_result() -> None:
     assert executor.claims[0].instructions == "Produce the requested artifact."
     assert executor.claims[0].configuration == {"model": "test-model"}
     assert [event.event_type for event in store.events] == ["task.claimed", "task.completed"]
+
+
+async def test_worker_renews_lease_while_executor_is_running() -> None:
+    store = MemoryStore()
+    execution = running_execution()
+    store.workflow_executions[execution.id] = execution
+    executor = BlockingExecutor()
+    runtime = WorkerRuntime(
+        "worker-a",
+        TaskDispatchService(lambda: MemoryUnitOfWork(store)),
+        ExecutorRegistry({"fake": executor}),
+        heartbeat_interval_seconds=0.01,
+    )
+
+    run_task = asyncio.create_task(runtime.run_once())
+    await executor.started.wait()
+    for _ in range(100):
+        if any(event.event_type == "task.lease_renewed" for event in store.events):
+            break
+        await asyncio.sleep(0.005)
+    else:
+        raise AssertionError("worker did not renew the active task lease")
+    executor.release.set()
+
+    assert await run_task is True
+    assert execution.status is WorkflowStatus.SUCCEEDED
+    assert not executor.cancel_claims
+
+
+async def test_heartbeat_failure_cancels_executor_and_retries_task() -> None:
+    store = MemoryStore()
+    execution = running_execution(max_attempts=2)
+    store.workflow_executions[execution.id] = execution
+    executor = BlockingExecutor()
+    runtime = WorkerRuntime(
+        "worker-a",
+        FailingHeartbeatDispatch(lambda: MemoryUnitOfWork(store)),
+        ExecutorRegistry({"fake": executor}),
+        heartbeat_interval_seconds=0.01,
+    )
+
+    assert await runtime.run_once() is True
+
+    assert executor.locally_cancelled is True
+    assert executor.cancel_claims == executor.claims
+    assert execution.nodes["work"].status is NodeExecutionStatus.READY
+    assert store.events[-1].event_type == "task.failed"
+    assert "heartbeat failed" in str(store.events[-1].payload["reason"])
+
+
+async def test_executor_timeout_runs_optional_provider_cancellation() -> None:
+    store = MemoryStore()
+    execution = running_execution(max_attempts=2, timeout_seconds=1)
+    store.workflow_executions[execution.id] = execution
+    executor = BlockingExecutor()
+    runtime = WorkerRuntime(
+        "worker-a",
+        TaskDispatchService(lambda: MemoryUnitOfWork(store)),
+        ExecutorRegistry({"fake": executor}),
+        heartbeat_interval_seconds=0.1,
+        cancellation_timeout_seconds=0.1,
+    )
+
+    assert await runtime.run_once() is True
+
+    assert executor.locally_cancelled is True
+    assert executor.cancel_claims == executor.claims
+    assert execution.nodes["work"].status is NodeExecutionStatus.READY
+    assert store.events[-1].payload["reason"] == "executor timed out"
+
+
+async def test_stop_event_cancels_active_executor_before_worker_exits() -> None:
+    store = MemoryStore()
+    execution = running_execution(max_attempts=2)
+    store.workflow_executions[execution.id] = execution
+    executor = BlockingExecutor()
+    runtime = WorkerRuntime(
+        "worker-a",
+        TaskDispatchService(lambda: MemoryUnitOfWork(store)),
+        ExecutorRegistry({"fake": executor}),
+        heartbeat_interval_seconds=0.01,
+    )
+    stop = asyncio.Event()
+
+    worker_task = asyncio.create_task(runtime.run(stop))
+    await executor.started.wait()
+    stop.set()
+    await asyncio.wait_for(worker_task, timeout=1)
+
+    assert executor.locally_cancelled is True
+    assert executor.cancel_claims == executor.claims
+    assert execution.nodes["work"].status is NodeExecutionStatus.READY
+    assert store.events[-1].payload["reason"] == "worker stop requested during executor run"
+
+
+async def test_runtime_cancellation_cleans_up_executor_and_persists_failure() -> None:
+    store = MemoryStore()
+    execution = running_execution(max_attempts=2)
+    store.workflow_executions[execution.id] = execution
+    executor = BlockingExecutor()
+    runtime = WorkerRuntime(
+        "worker-a",
+        TaskDispatchService(lambda: MemoryUnitOfWork(store)),
+        ExecutorRegistry({"fake": executor}),
+    )
+
+    run_task = asyncio.create_task(runtime.run_once())
+    await executor.started.wait()
+    run_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await run_task
+
+    assert executor.locally_cancelled is True
+    assert executor.cancel_claims == executor.claims
+    assert execution.nodes["work"].status is NodeExecutionStatus.READY
+    assert store.events[-1].payload["reason"] == "worker runtime cancelled"
 
 
 async def test_worker_materializes_verified_skills_before_executor(

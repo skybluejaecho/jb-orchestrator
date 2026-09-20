@@ -4,6 +4,8 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.pytest-tmp/
+.pytest-*/
 .mypy_cache/
 .ruff_cache/
 .coverage
@@ -15,3 +17,7 @@ dist/
 build/
 *.egg-info/
 .jb-orchestrator/
+deploy/server/.env
+deploy/server/runtime/
+deploy/clients/jarvis/.env
+node_modules/

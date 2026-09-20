@@ -4,9 +4,9 @@ from typing import Protocol
 from uuid import UUID
 
 from jb_orchestrator.domain.events import DomainEvent
-from jb_orchestrator.domain.projects import Project
-from jb_orchestrator.domain.requests import UserRequest
-from jb_orchestrator.domain.runs import Run
+from jb_orchestrator.domain.projects import Project, ProjectStatus
+from jb_orchestrator.domain.requests import RequestStatus, UserRequest
+from jb_orchestrator.domain.runs import Run, RunStatus
 
 
 class ProjectRepository(Protocol):
@@ -18,6 +18,14 @@ class ProjectRepository(Protocol):
 
     async def get_by_key(self, key: str) -> Project | None: ...
 
+    async def list(
+        self,
+        *,
+        status: ProjectStatus | None = None,
+        after: Project | None = None,
+        limit: int = 100,
+    ) -> list[Project]: ...
+
 
 class UserRequestRepository(Protocol):
     """User request persistence contract."""
@@ -26,7 +34,17 @@ class UserRequestRepository(Protocol):
 
     async def get(self, request_id: UUID) -> UserRequest | None: ...
 
+    async def get_for_update(self, request_id: UUID) -> UserRequest | None: ...
+
     async def save(self, request: UserRequest) -> None: ...
+
+    async def list_by_project(
+        self,
+        project_id: UUID,
+        *,
+        status: RequestStatus | None = None,
+        limit: int = 100,
+    ) -> list[UserRequest]: ...
 
 
 class RunRepository(Protocol):
@@ -36,10 +54,47 @@ class RunRepository(Protocol):
 
     async def get(self, run_id: UUID) -> Run | None: ...
 
+    async def get_for_update(self, run_id: UUID) -> Run | None: ...
+
     async def save(self, run: Run) -> None: ...
+
+    async def list_by_request(
+        self,
+        request_id: UUID,
+        *,
+        status: RunStatus | None = None,
+        limit: int = 100,
+    ) -> list[Run]: ...
 
 
 class EventRepository(Protocol):
     """Append-only domain event persistence contract."""
 
     async def append(self, event: DomainEvent) -> None: ...
+
+    async def get(self, event_id: UUID) -> DomainEvent | None: ...
+
+    async def list_aggregate(
+        self,
+        *,
+        aggregate_type: str,
+        aggregate_id: UUID,
+        before_sequence: int | None = None,
+        limit: int = 100,
+    ) -> list[DomainEvent]: ...
+
+    async def list_after(
+        self,
+        *,
+        aggregate_type: str,
+        after: DomainEvent | None = None,
+        limit: int = 100,
+    ) -> list[DomainEvent]: ...
+
+    async def list_project_after(
+        self,
+        *,
+        project_id: UUID,
+        after: DomainEvent | None = None,
+        limit: int = 100,
+    ) -> list[DomainEvent]: ...

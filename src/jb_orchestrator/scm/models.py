@@ -1,0 +1,382 @@
+"""Provider-neutral source-control publication models."""
+
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from enum import StrEnum
+from typing import Any, Protocol, runtime_checkable
+from uuid import UUID, uuid4
+
+from jb_orchestrator.domain.exceptions import DomainValidationError, InvalidStateTransition
+
+MAX_AUTOMATIC_RETRY_LIMIT = 10
+
+
+class ScmPublicationStatus(StrEnum):
+    PENDING = "pending"
+    CLAIMED = "claimed"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class ScmPublicationFailureCode(StrEnum):
+    """Stable, provider-neutral reason categories for failed publications."""
+
+    WORKSPACE_STATE = "workspace_state"
+    PROVIDER_REJECTED = "provider_rejected"
+    PROVIDER_UNAVAILABLE = "provider_unavailable"
+    TIMEOUT = "timeout"
+    RESULT_MISMATCH = "result_mismatch"
+    UNEXPECTED = "unexpected"
+
+
+class ScmPublicationAttemptStatus(StrEnum):
+    CLAIMED = "claimed"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class ScmPublicationAttemptTrigger(StrEnum):
+    INITIAL = "initial"
+    MANUAL = "manual"
+    AUTOMATIC = "automatic"
+    LEASE_RECOVERY = "lease_recovery"
+
+
+class ScmPublisherFailure(RuntimeError):
+    """Typed adapter failure that can safely cross the publisher boundary."""
+
+    def __init__(self, reason: str, *, code: ScmPublicationFailureCode, retryable: bool) -> None:
+        super().__init__(reason)
+        self.code = code
+        self.retryable = retryable
+
+
+@dataclass(slots=True, kw_only=True)
+class ScmPublication:
+    """One idempotent, leaseable request to publish a managed branch for review."""
+
+    external_execution_id: UUID
+    provider_key: str
+    repository: str
+    source_branch: str
+    target_branch: str
+    title: str
+    body: str
+    workspace_scope: str
+    idempotency_key: str
+    requested_by: str
+    id: UUID = field(default_factory=uuid4)
+    status: ScmPublicationStatus = ScmPublicationStatus.PENDING
+    worker_id: str | None = None
+    lease_token: UUID | None = None
+    lease_expires_at: datetime | None = None
+    result: dict[str, Any] | None = None
+    failure_reason: str | None = None
+    failure_code: ScmPublicationFailureCode | None = None
+    failure_retryable: bool | None = None
+    attempt_count: int = 0
+    automatic_retry_limit: int = 0
+    next_attempt_at: datetime | None = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    completed_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "provider_key",
+            "repository",
+            "source_branch",
+            "target_branch",
+            "title",
+            "workspace_scope",
+            "idempotency_key",
+            "requested_by",
+        ):
+            normalized = getattr(self, field_name).strip()
+            if not normalized:
+                raise DomainValidationError(f"SCM publication {field_name} must not be empty")
+            setattr(self, field_name, normalized)
+        self.body = self.body.strip()
+        if self.source_branch == self.target_branch:
+            raise DomainValidationError(
+                "SCM publication source_branch and target_branch must differ"
+            )
+        if self.attempt_count < 0:
+            raise DomainValidationError("SCM publication attempt_count must not be negative")
+        if not 0 <= self.automatic_retry_limit <= MAX_AUTOMATIC_RETRY_LIMIT:
+            raise DomainValidationError(
+                f"SCM publication automatic_retry_limit must be between 0 and "
+                f"{MAX_AUTOMATIC_RETRY_LIMIT}"
+            )
+
+    @property
+    def is_terminal(self) -> bool:
+        return self.status in {ScmPublicationStatus.SUCCEEDED, ScmPublicationStatus.FAILED}
+
+    def claim(
+        self, worker_id: str, *, lease_seconds: int, at: datetime | None = None
+    ) -> ScmPublicationAttemptTrigger:
+        changed_at = at or datetime.now(UTC)
+        trigger = self.claim_trigger(at=changed_at)
+        scheduled_retry = (
+            self.status is ScmPublicationStatus.FAILED
+            and self.failure_retryable is True
+            and self.next_attempt_at is not None
+            and self._as_utc(self.next_attempt_at) <= self._as_utc(changed_at)
+            and self.attempt_count <= self.automatic_retry_limit
+        )
+        if self.is_terminal and not scheduled_retry:
+            raise InvalidStateTransition("terminal SCM publication cannot be claimed")
+        if not worker_id.strip() or lease_seconds <= 0:
+            raise DomainValidationError("SCM publication claim requires worker and positive lease")
+        self.status = ScmPublicationStatus.CLAIMED
+        self.attempt_count += 1
+        self.worker_id = worker_id.strip()
+        self.lease_token = uuid4()
+        self.lease_expires_at = changed_at + timedelta(seconds=lease_seconds)
+        if scheduled_retry:
+            self.failure_reason = None
+            self.failure_code = None
+            self.failure_retryable = None
+            self.completed_at = None
+            self.next_attempt_at = None
+        self.updated_at = changed_at
+        return trigger
+
+    def claim_trigger(self, *, at: datetime | None = None) -> ScmPublicationAttemptTrigger:
+        changed_at = at or datetime.now(UTC)
+        if (
+            self.status is ScmPublicationStatus.CLAIMED
+            and self.lease_expires_at is not None
+            and self._as_utc(self.lease_expires_at) <= self._as_utc(changed_at)
+        ):
+            return ScmPublicationAttemptTrigger.LEASE_RECOVERY
+        if self.status is ScmPublicationStatus.FAILED:
+            return ScmPublicationAttemptTrigger.AUTOMATIC
+        if self.attempt_count > 0:
+            return ScmPublicationAttemptTrigger.MANUAL
+        return ScmPublicationAttemptTrigger.INITIAL
+
+    def retry(self, *, at: datetime | None = None) -> None:
+        if self.status is not ScmPublicationStatus.FAILED:
+            raise InvalidStateTransition("only failed SCM publication can be retried")
+        changed_at = at or datetime.now(UTC)
+        self.status = ScmPublicationStatus.PENDING
+        self.worker_id = None
+        self.lease_token = None
+        self.lease_expires_at = None
+        self.result = None
+        self.failure_reason = None
+        self.failure_code = None
+        self.failure_retryable = None
+        self.automatic_retry_limit = 0
+        self.next_attempt_at = None
+        self.completed_at = None
+        self.updated_at = changed_at
+
+    def cancel_automatic_retry(self, *, at: datetime | None = None) -> bool:
+        if self.status is not ScmPublicationStatus.FAILED:
+            raise InvalidStateTransition(
+                "automatic retry can only be cancelled for failed SCM publication"
+            )
+        if self.next_attempt_at is None:
+            return False
+        changed_at = at or datetime.now(UTC)
+        self.automatic_retry_limit = 0
+        self.next_attempt_at = None
+        self.updated_at = changed_at
+        return True
+
+    def succeed(
+        self, lease_token: UUID, result: dict[str, Any], *, at: datetime | None = None
+    ) -> None:
+        self._require_claim(lease_token)
+        changed_at = at or datetime.now(UTC)
+        self.status = ScmPublicationStatus.SUCCEEDED
+        self.result = result
+        self.failure_reason = None
+        self.failure_code = None
+        self.failure_retryable = None
+        self.next_attempt_at = None
+        self.lease_expires_at = None
+        self.completed_at = changed_at
+        self.updated_at = changed_at
+
+    def fail(
+        self,
+        lease_token: UUID,
+        reason: str,
+        *,
+        code: ScmPublicationFailureCode = ScmPublicationFailureCode.UNEXPECTED,
+        retryable: bool = False,
+        automatic_retry_limit: int = 0,
+        next_attempt_at: datetime | None = None,
+        at: datetime | None = None,
+    ) -> None:
+        self._require_claim(lease_token)
+        normalized = reason.strip()
+        if not normalized:
+            raise DomainValidationError("SCM publication failure reason must not be empty")
+        if not 0 <= automatic_retry_limit <= MAX_AUTOMATIC_RETRY_LIMIT:
+            raise DomainValidationError(
+                f"automatic retry limit must be between 0 and {MAX_AUTOMATIC_RETRY_LIMIT}"
+            )
+        if next_attempt_at is not None and (
+            not retryable or self.attempt_count > automatic_retry_limit
+        ):
+            raise DomainValidationError("scheduled SCM retry requires an available retry attempt")
+        changed_at = at or datetime.now(UTC)
+        self.status = ScmPublicationStatus.FAILED
+        self.failure_reason = normalized
+        self.failure_code = code
+        self.failure_retryable = retryable
+        self.automatic_retry_limit = automatic_retry_limit
+        self.next_attempt_at = next_attempt_at
+        self.lease_expires_at = None
+        self.completed_at = changed_at
+        self.updated_at = changed_at
+
+    def _require_claim(self, lease_token: UUID) -> None:
+        if self.status is not ScmPublicationStatus.CLAIMED or self.lease_token != lease_token:
+            raise InvalidStateTransition("SCM publication lease is not owned by this worker")
+
+    @staticmethod
+    def _as_utc(value: datetime) -> datetime:
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+@dataclass(frozen=True, slots=True)
+class ScmPublicationClaim:
+    publication: ScmPublication
+    trigger: ScmPublicationAttemptTrigger
+
+
+@dataclass(slots=True, kw_only=True)
+class ScmPublicationAttempt:
+    publication_id: UUID
+    attempt_number: int
+    trigger: ScmPublicationAttemptTrigger
+    worker_id: str
+    lease_token: UUID
+    id: UUID = field(default_factory=uuid4)
+    status: ScmPublicationAttemptStatus = ScmPublicationAttemptStatus.CLAIMED
+    result: dict[str, Any] | None = None
+    failure_reason: str | None = None
+    failure_code: ScmPublicationFailureCode | None = None
+    failure_retryable: bool | None = None
+    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    finished_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        self.worker_id = self.worker_id.strip()
+        if not self.worker_id:
+            raise DomainValidationError("SCM publication attempt worker_id must not be empty")
+        if self.attempt_number < 1:
+            raise DomainValidationError("SCM publication attempt_number must be positive")
+
+    def succeed(
+        self, lease_token: UUID, result: dict[str, Any], *, at: datetime | None = None
+    ) -> None:
+        self._require_claim(lease_token)
+        self.status = ScmPublicationAttemptStatus.SUCCEEDED
+        self.result = result
+        self.finished_at = at or datetime.now(UTC)
+
+    def fail(
+        self,
+        lease_token: UUID,
+        reason: str,
+        *,
+        code: ScmPublicationFailureCode,
+        retryable: bool,
+        at: datetime | None = None,
+    ) -> None:
+        self._require_claim(lease_token)
+        normalized = reason.strip()
+        if not normalized:
+            raise DomainValidationError("SCM publication attempt failure reason must not be empty")
+        self.status = ScmPublicationAttemptStatus.FAILED
+        self.failure_reason = normalized
+        self.failure_code = code
+        self.failure_retryable = retryable
+        self.finished_at = at or datetime.now(UTC)
+
+    def _require_claim(self, lease_token: UUID) -> None:
+        if (
+            self.status is not ScmPublicationAttemptStatus.CLAIMED
+            or self.lease_token != lease_token
+        ):
+            raise InvalidStateTransition("SCM publication attempt lease is not owned")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ScmPublicationRequest:
+    """A credential-free request to publish one branch for human review."""
+
+    repository: str
+    workspace_path: str
+    source_branch: str
+    target_branch: str
+    title: str
+    body: str
+    idempotency_key: str
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "repository",
+            "workspace_path",
+            "source_branch",
+            "target_branch",
+            "title",
+            "idempotency_key",
+        ):
+            value = getattr(self, field_name)
+            normalized = value.strip()
+            if not normalized:
+                raise DomainValidationError(f"SCM publication {field_name} must not be empty")
+            object.__setattr__(self, field_name, normalized)
+        object.__setattr__(self, "body", self.body.strip())
+        if self.source_branch == self.target_branch:
+            raise DomainValidationError(
+                "SCM publication source_branch and target_branch must differ"
+            )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ScmPublicationResult:
+    """Stable identifiers returned after a branch is published for review."""
+
+    provider: str
+    repository: str
+    source_branch: str
+    target_branch: str
+    review_url: str
+    review_id: str
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "provider",
+            "repository",
+            "source_branch",
+            "target_branch",
+            "review_url",
+            "review_id",
+        ):
+            value = getattr(self, field_name)
+            normalized = value.strip()
+            if not normalized:
+                raise DomainValidationError(
+                    f"SCM publication result {field_name} must not be empty"
+                )
+            object.__setattr__(self, field_name, normalized)
+
+
+@runtime_checkable
+class ScmPublisher(Protocol):
+    """Adapter-owned authenticated boundary for push and review creation.
+
+    Implementations obtain credentials from their own runtime environment. Credentials must never
+    be embedded in :class:`ScmPublicationRequest` or persisted as orchestration data.
+    """
+
+    async def publish_review(self, request: ScmPublicationRequest) -> ScmPublicationResult: ...

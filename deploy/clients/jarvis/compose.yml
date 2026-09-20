@@ -1,0 +1,30 @@
+name: jb-jarvis-client
+
+services:
+  jarvis:
+    image: ${JB_JARVIS_IMAGE:-jb-orchestrator-jarvis:0.1.0-dev}
+    build:
+      context: ../../..
+      dockerfile: deploy/clients/jarvis/Dockerfile
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 20s
+    environment:
+      JARVIS_CONTROL_PLANE_URL: ${JARVIS_CONTROL_PLANE_URL}
+      JARVIS_API_TOKEN: ${JARVIS_API_TOKEN}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:3300/api/projects').then(response => {
+            if (!response.ok) process.exit(1)
+          }).catch(() => process.exit(1))
+      interval: 10s
+      timeout: 5s
+      retries: 18
+    ports:
+      - "127.0.0.1:${JB_JARVIS_PORT:-3300}:3300"

@@ -7,6 +7,8 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     Enum,
@@ -27,13 +29,34 @@ from jb_orchestrator.budgets import BudgetReservationStatus, UsageKind
 from jb_orchestrator.domain.projects import ProjectStatus
 from jb_orchestrator.domain.requests import RequestStatus
 from jb_orchestrator.domain.runs import RunStatus
+from jb_orchestrator.external_executions import ExternalExecutionStatus
 from jb_orchestrator.infrastructure.database.base import Base
 from jb_orchestrator.model_routing import ModelTier
+from jb_orchestrator.notifications import (
+    NotificationAttemptStatus,
+    NotificationAttemptTrigger,
+    NotificationDeliveryStatus,
+    NotificationEventType,
+    NotificationFailureCode,
+)
+from jb_orchestrator.scm import (
+    ScmPublicationAttemptStatus,
+    ScmPublicationAttemptTrigger,
+    ScmPublicationFailureCode,
+    ScmPublicationStatus,
+)
 from jb_orchestrator.skills import SkillSourceKind
+from jb_orchestrator.worker_presence import (
+    WorkerKind,
+    WorkerLifecycleStatus,
+    WorkerReadinessAlertStatus,
+    WorkerReadinessIssueReason,
+)
 from jb_orchestrator.workflows.models import NodeExecutionStatus, NodeOutcome, WorkflowStatus
+from jb_orchestrator.workspace_operations import WorkspaceOperationKind, WorkspaceOperationStatus
 
 
-def string_enum(enum_type: type[Any], name: str) -> Enum:
+def string_enum(enum_type: type[Any], name: str, *, length: int | None = None) -> Enum:
     """Store string enum values portably with a database check constraint."""
 
     return Enum(
@@ -43,6 +66,7 @@ def string_enum(enum_type: type[Any], name: str) -> Enum:
         create_constraint=True,
         values_callable=lambda members: [member.value for member in members],
         validate_strings=True,
+        length=length,
     )
 
 
@@ -78,10 +102,120 @@ class ProjectRecord(TimestampMixin, Base):
     )
 
 
+class ServiceAccountRecord(Base):
+    """Stable API identity with explicit permissions and project scope."""
+
+    __tablename__ = "service_accounts"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    permissions: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    project_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    all_projects: Mapped[bool] = mapped_column(nullable=False, default=False)
+    enabled: Mapped[bool] = mapped_column(nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ServiceAccountCredentialRecord(Base):
+    """Independently revocable bearer credential for a service account."""
+
+    __tablename__ = "service_account_credentials"
+    __table_args__ = (
+        CheckConstraint(
+            "expires_at IS NULL OR expires_at > created_at",
+            name="credential_expiration_after_creation",
+        ),
+        CheckConstraint(
+            "revoked_at IS NULL OR revoked_at >= created_at",
+            name="credential_revocation_after_creation",
+        ),
+        CheckConstraint(
+            "last_used_at IS NULL OR last_used_at >= created_at",
+            name="credential_usage_after_creation",
+        ),
+        Index("ix_service_account_credentials_account_id", "account_id"),
+        Index("ix_service_account_credentials_expires_at", "expires_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    account_id: Mapped[UUID] = mapped_column(
+        ForeignKey("service_accounts.id", ondelete="CASCADE"), nullable=False
+    )
+    token_digest: Mapped[str] = mapped_column(String(71), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ProjectWorkflowBindingRecord(TimestampMixin, Base):
+    """Current exact workflow version selected for a project."""
+
+    __tablename__ = "project_workflow_bindings"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    definition_id: Mapped[UUID] = mapped_column(
+        ForeignKey("workflow_definitions.id", ondelete="RESTRICT"), nullable=False
+    )
+    definition_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    definition_version: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class RequestDispatchReceiptRecord(Base):
+    """Project-scoped idempotency claim and completed dispatch result."""
+
+    __tablename__ = "request_dispatch_receipts"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "ingress_key",
+            "idempotency_key",
+            name="uq_dispatch_receipts_project_ingress_key",
+        ),
+        CheckConstraint(
+            "(request_id IS NULL AND run_id IS NULL AND workflow_execution_id IS NULL "
+            "AND completed_at IS NULL) OR "
+            "(request_id IS NOT NULL AND run_id IS NOT NULL "
+            "AND workflow_execution_id IS NOT NULL AND completed_at IS NOT NULL)",
+            name="dispatch_receipt_result_all_or_none",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    ingress_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload_digest: Mapped[str] = mapped_column(String(71), nullable=False)
+    request_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("user_requests.id", ondelete="CASCADE")
+    )
+    run_id: Mapped[UUID | None] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"))
+    workflow_execution_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("workflow_executions.id", ondelete="CASCADE")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class UserRequestRecord(TimestampMixin, Base):
     """Stored original user intent."""
 
     __tablename__ = "user_requests"
+    __table_args__ = (
+        CheckConstraint(
+            "(ingress_key IS NULL AND external_request_id IS NULL "
+            "AND origin_actor_id IS NULL AND origin_conversation_id IS NULL) OR "
+            "(ingress_key IS NOT NULL AND external_request_id IS NOT NULL)",
+            name="user_request_origin_required_fields",
+        ),
+        Index("ix_user_requests_origin", "ingress_key", "external_request_id"),
+    )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     project_id: Mapped[UUID] = mapped_column(
@@ -89,6 +223,10 @@ class UserRequestRecord(TimestampMixin, Base):
     )
     title: Mapped[str | None] = mapped_column(String(255))
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    ingress_key: Mapped[str | None] = mapped_column(String(64))
+    external_request_id: Mapped[str | None] = mapped_column(String(255))
+    origin_actor_id: Mapped[str | None] = mapped_column(String(255))
+    origin_conversation_id: Mapped[str | None] = mapped_column(String(512))
     status: Mapped[RequestStatus] = mapped_column(
         string_enum(RequestStatus, "request_status"),
         nullable=False,
@@ -132,14 +270,48 @@ class EventRecord(Base):
     """Append-only event emitted by a committed application use case."""
 
     __tablename__ = "events"
-    __table_args__ = (Index("ix_events_aggregate_occurred", "aggregate_id", "occurred_at"),)
+    __table_args__ = (
+        Index("ix_events_aggregate_occurred", "aggregate_id", "occurred_at"),
+        Index("ix_events_aggregate_type_sequence", "aggregate_type", "sequence"),
+        UniqueConstraint("id", name="uq_events_id"),
+    )
 
-    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    sequence: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
+    )
+    id: Mapped[UUID] = mapped_column(Uuid, nullable=False, default=uuid4)
     aggregate_type: Mapped[str] = mapped_column(String(64), nullable=False)
     aggregate_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
     event_type: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class TaskArtifactRecord(Base):
+    """Immutable output produced by one workflow task node visit."""
+
+    __tablename__ = "task_artifacts"
+    __table_args__ = (
+        UniqueConstraint(
+            "execution_id",
+            "producer_node_key",
+            "visit_count",
+            name="uq_task_artifacts_execution_node_visit",
+        ),
+        Index("ix_task_artifacts_execution_created", "execution_id", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    execution_id: Mapped[UUID] = mapped_column(
+        ForeignKey("workflow_executions.id", ondelete="CASCADE"), nullable=False
+    )
+    producer_node_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    visit_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    outcome: Mapped[NodeOutcome] = mapped_column(
+        string_enum(NodeOutcome, "task_artifact_outcome"), nullable=False
+    )
+    content: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class SkillDefinitionRecord(Base):
@@ -161,6 +333,27 @@ class SkillDefinitionRecord(Base):
     source_revision: Mapped[str | None] = mapped_column(String(255))
     entrypoint: Mapped[str] = mapped_column(String(1024), nullable=False)
     skill_metadata: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class PhasePackDefinitionRecord(Base):
+    """Immutable reusable phase-pack version."""
+
+    __tablename__ = "phase_pack_definitions"
+    __table_args__ = (
+        UniqueConstraint("key", "version", name="uq_phase_pack_definitions_key_version"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    key: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    instructions: Mapped[str] = mapped_column(Text, nullable=False)
+    inputs: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
+    output_contract: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    skills: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
+    phase_metadata: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
@@ -281,6 +474,369 @@ class UsageRecordRecord(Base):
     model_profile_key: Mapped[str] = mapped_column(String(128), nullable=False)
     model_profile_version: Mapped[int] = mapped_column(Integer, nullable=False)
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ExternalExecutionRecord(Base):
+    """Retry-safe mapping to one external runtime execution."""
+
+    __tablename__ = "external_executions"
+    __table_args__ = (
+        UniqueConstraint(
+            "executor_key",
+            "external_run_id",
+            name="uq_external_executions_executor_run",
+        ),
+        Index("ix_external_executions_status_updated", "status", "updated_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    execution_id: Mapped[UUID] = mapped_column(
+        ForeignKey("workflow_executions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    run_id: Mapped[UUID] = mapped_column(
+        ForeignKey("runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    node_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    executor_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    external_session_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    external_agent_id: Mapped[str | None] = mapped_column(String(255))
+    workspace_path: Mapped[str | None] = mapped_column(String(2048))
+    workspace_repository_path: Mapped[str | None] = mapped_column(String(2048))
+    workspace_branch: Mapped[str | None] = mapped_column(String(255))
+    workspace_base_ref: Mapped[str | None] = mapped_column(String(255))
+    workspace_scope: Mapped[str | None] = mapped_column(String(128), index=True)
+    workspace_released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    external_run_id: Mapped[str | None] = mapped_column(String(255))
+    status: Mapped[ExternalExecutionStatus] = mapped_column(
+        string_enum(ExternalExecutionStatus, "external_execution_status"), nullable=False
+    )
+    terminal_result: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    failure_reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class WorkspaceOperationRecord(Base):
+    """Leaseable command for maintenance of an executor-owned workspace."""
+
+    __tablename__ = "workspace_operations"
+    __table_args__ = (
+        UniqueConstraint(
+            "external_execution_id",
+            "idempotency_key",
+            name="uq_workspace_operations_execution_key",
+        ),
+        Index("ix_workspace_operations_claim", "workspace_scope", "status", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    external_execution_id: Mapped[UUID] = mapped_column(
+        ForeignKey("external_executions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    kind: Mapped[WorkspaceOperationKind] = mapped_column(
+        string_enum(WorkspaceOperationKind, "workspace_operation_kind"), nullable=False
+    )
+    target_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    workspace_scope: Mapped[str] = mapped_column(String(128), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    requested_by: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[WorkspaceOperationStatus] = mapped_column(
+        string_enum(WorkspaceOperationStatus, "workspace_operation_status"), nullable=False
+    )
+    worker_id: Mapped[str | None] = mapped_column(String(255))
+    lease_token: Mapped[UUID | None] = mapped_column(Uuid)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    failure_reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ScmPublicationRecord(Base):
+    """Leaseable request to publish one executor-owned branch for review."""
+
+    __tablename__ = "scm_publications"
+    __table_args__ = (
+        UniqueConstraint(
+            "external_execution_id",
+            "idempotency_key",
+            name="uq_scm_publications_execution_key",
+        ),
+        Index(
+            "ix_scm_publications_claim",
+            "provider_key",
+            "workspace_scope",
+            "status",
+            "created_at",
+        ),
+        CheckConstraint(
+            "automatic_retry_limit BETWEEN 0 AND 10",
+            name="automatic_retry_limit",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    external_execution_id: Mapped[UUID] = mapped_column(
+        ForeignKey("external_executions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    provider_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    repository: Mapped[str] = mapped_column(String(2048), nullable=False)
+    source_branch: Mapped[str] = mapped_column(String(255), nullable=False)
+    target_branch: Mapped[str] = mapped_column(String(255), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    workspace_scope: Mapped[str] = mapped_column(String(128), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    requested_by: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[ScmPublicationStatus] = mapped_column(
+        string_enum(ScmPublicationStatus, "scm_publication_status"), nullable=False
+    )
+    worker_id: Mapped[str | None] = mapped_column(String(255))
+    lease_token: Mapped[UUID | None] = mapped_column(Uuid)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    failure_reason: Mapped[str | None] = mapped_column(Text)
+    failure_code: Mapped[ScmPublicationFailureCode | None] = mapped_column(
+        string_enum(ScmPublicationFailureCode, "scm_publication_failure_code")
+    )
+    failure_retryable: Mapped[bool | None] = mapped_column(Boolean)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    automatic_retry_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ScmPublicationAttemptRecord(Base):
+    """One durable worker claim and its terminal publication outcome."""
+
+    __tablename__ = "scm_publication_attempts"
+    __table_args__ = (
+        UniqueConstraint(
+            "publication_id",
+            "attempt_number",
+            name="uq_scm_publication_attempts_number",
+        ),
+        CheckConstraint("attempt_number > 0", name="attempt_number_positive"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    publication_id: Mapped[UUID] = mapped_column(
+        ForeignKey("scm_publications.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    trigger: Mapped[ScmPublicationAttemptTrigger] = mapped_column(
+        string_enum(ScmPublicationAttemptTrigger, "scm_publication_attempt_trigger"),
+        nullable=False,
+    )
+    worker_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    lease_token: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    status: Mapped[ScmPublicationAttemptStatus] = mapped_column(
+        string_enum(ScmPublicationAttemptStatus, "scm_publication_attempt_status"),
+        nullable=False,
+    )
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    failure_reason: Mapped[str | None] = mapped_column(Text)
+    failure_code: Mapped[ScmPublicationFailureCode | None] = mapped_column(
+        string_enum(ScmPublicationFailureCode, "scm_publication_attempt_failure_code")
+    )
+    failure_retryable: Mapped[bool | None] = mapped_column(Boolean)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class WorkerInstanceRecord(Base):
+    """One process lifetime for an execution, workspace, or SCM worker."""
+
+    __tablename__ = "worker_instances"
+    __table_args__ = (
+        Index("ix_worker_instances_status_seen", "status", "last_seen_at"),
+        Index("ix_worker_instances_kind_seen", "kind", "last_seen_at"),
+        CheckConstraint("process_id > 0", name="process_id_positive"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    worker_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    kind: Mapped[WorkerKind] = mapped_column(
+        string_enum(WorkerKind, "worker_kind", length=32), nullable=False
+    )
+    hostname: Mapped[str] = mapped_column(String(255), nullable=False)
+    process_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    capabilities: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    workspace_scope: Mapped[str | None] = mapped_column(String(128))
+    metadata_json: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, nullable=False)
+    status: Mapped[WorkerLifecycleStatus] = mapped_column(
+        string_enum(WorkerLifecycleStatus, "worker_lifecycle_status"), nullable=False
+    )
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class WorkerReadinessAlertRecord(Base):
+    """One durable unassignable READY-node occurrence."""
+
+    __tablename__ = "worker_readiness_alerts"
+    __table_args__ = (
+        UniqueConstraint(
+            "workflow_execution_id",
+            "node_key",
+            "ready_since",
+            name="uq_worker_readiness_alert_occurrence",
+        ),
+        Index("ix_worker_readiness_alert_project_status", "project_id", "status"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    workflow_execution_id: Mapped[UUID] = mapped_column(
+        ForeignKey("workflow_executions.id", ondelete="CASCADE"), nullable=False
+    )
+    run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), nullable=False)
+    node_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    executor_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    ready_since: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    reason: Mapped[WorkerReadinessIssueReason] = mapped_column(
+        string_enum(WorkerReadinessIssueReason, "worker_readiness_issue_reason"), nullable=False
+    )
+    status: Mapped[WorkerReadinessAlertStatus] = mapped_column(
+        string_enum(WorkerReadinessAlertStatus, "worker_readiness_alert_status"), nullable=False
+    )
+    first_detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    critical_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class NotificationSubscriptionRecord(Base):
+    """Project-scoped destination and accepted notification event types."""
+
+    __tablename__ = "notification_subscriptions"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "provider_key",
+            "destination_ref",
+            name="uq_notification_subscription_destination",
+        ),
+        Index("ix_notification_subscriptions_project_enabled", "project_id", "enabled"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    provider_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    destination_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    event_types: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class NotificationDeliveryRecord(Base):
+    """Immutable intent to deliver one project event to one subscription."""
+
+    __tablename__ = "notification_deliveries"
+    __table_args__ = (
+        UniqueConstraint(
+            "subscription_id",
+            "event_id",
+            name="uq_notification_delivery_subscription_event",
+        ),
+        Index("ix_notification_deliveries_project_status", "project_id", "status"),
+        Index(
+            "ix_notification_deliveries_provider_claim",
+            "provider_key",
+            "status",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    subscription_id: Mapped[UUID] = mapped_column(
+        ForeignKey("notification_subscriptions.id", ondelete="CASCADE"), nullable=False
+    )
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    event_id: Mapped[UUID] = mapped_column(
+        ForeignKey("events.id", ondelete="CASCADE"), nullable=False
+    )
+    alert_id: Mapped[UUID] = mapped_column(
+        ForeignKey("worker_readiness_alerts.id", ondelete="CASCADE"), nullable=False
+    )
+    event_type: Mapped[NotificationEventType] = mapped_column(
+        string_enum(NotificationEventType, "notification_event_type", length=64), nullable=False
+    )
+    provider_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    destination_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    status: Mapped[NotificationDeliveryStatus] = mapped_column(
+        string_enum(NotificationDeliveryStatus, "notification_delivery_status"), nullable=False
+    )
+    worker_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    lease_token: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    failure_code: Mapped[NotificationFailureCode | None] = mapped_column(
+        string_enum(NotificationFailureCode, "notification_failure_code"), nullable=True
+    )
+    failure_retryable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    automatic_retry_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class NotificationDeliveryAttemptRecord(Base):
+    """Immutable-numbered evidence for one Notification Delivery claim."""
+
+    __tablename__ = "notification_delivery_attempts"
+    __table_args__ = (
+        UniqueConstraint(
+            "delivery_id",
+            "attempt_number",
+            name="uq_notification_delivery_attempt_number",
+        ),
+        CheckConstraint("attempt_number > 0", name="ck_notification_attempt_number"),
+        Index("ix_notification_delivery_attempts_delivery", "delivery_id", "attempt_number"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    delivery_id: Mapped[UUID] = mapped_column(
+        ForeignKey("notification_deliveries.id", ondelete="CASCADE"), nullable=False
+    )
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    trigger: Mapped[NotificationAttemptTrigger] = mapped_column(
+        string_enum(NotificationAttemptTrigger, "notification_attempt_trigger"), nullable=False
+    )
+    worker_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    lease_token: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    status: Mapped[NotificationAttemptStatus] = mapped_column(
+        string_enum(NotificationAttemptStatus, "notification_attempt_status"), nullable=False
+    )
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    failure_code: Mapped[NotificationFailureCode | None] = mapped_column(
+        string_enum(NotificationFailureCode, "notification_attempt_failure_code"), nullable=True
+    )
+    failure_retryable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class WorkflowDefinitionRecord(Base):

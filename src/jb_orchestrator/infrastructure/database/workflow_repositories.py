@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from jb_orchestrator.infrastructure.database.models import (
     NodeExecutionRecord,
+    RunRecord,
+    UserRequestRecord,
     WorkflowDefinitionRecord,
     WorkflowExecutionRecord,
 )
@@ -136,11 +138,54 @@ class SqlAlchemyWorkflowExecutionRepository:
         record = await self._session.get(WorkflowExecutionRecord, execution_id)
         return await self._to_execution(record)
 
+    async def get_for_update(self, execution_id: UUID) -> WorkflowExecution | None:
+        record = await self._session.scalar(
+            select(WorkflowExecutionRecord)
+            .where(WorkflowExecutionRecord.id == execution_id)
+            .with_for_update()
+        )
+        return await self._to_execution(record)
+
     async def get_by_run(self, run_id: UUID) -> WorkflowExecution | None:
         record = await self._session.scalar(
             select(WorkflowExecutionRecord).where(WorkflowExecutionRecord.run_id == run_id)
         )
         return await self._to_execution(record)
+
+    async def get_by_run_for_update(self, run_id: UUID) -> WorkflowExecution | None:
+        record = await self._session.scalar(
+            select(WorkflowExecutionRecord)
+            .where(WorkflowExecutionRecord.run_id == run_id)
+            .with_for_update()
+        )
+        return await self._to_execution(record)
+
+    async def list_by_project(
+        self,
+        project_id: UUID,
+        *,
+        status: WorkflowStatus | None = None,
+        limit: int = 100,
+    ) -> list[WorkflowExecution]:
+        statement = (
+            select(WorkflowExecutionRecord)
+            .join(RunRecord, WorkflowExecutionRecord.run_id == RunRecord.id)
+            .join(UserRequestRecord, RunRecord.request_id == UserRequestRecord.id)
+            .where(UserRequestRecord.project_id == project_id)
+        )
+        if status is not None:
+            statement = statement.where(WorkflowExecutionRecord.status == status)
+        records = await self._session.scalars(
+            statement.order_by(
+                WorkflowExecutionRecord.updated_at.desc(), WorkflowExecutionRecord.id
+            ).limit(limit)
+        )
+        executions: list[WorkflowExecution] = []
+        for record in records:
+            execution = await self._to_execution(record)
+            if execution is not None:
+                executions.append(execution)
+        return executions
 
     async def get_ready_for_update(
         self, executor_keys: Collection[str] | None = None
@@ -158,7 +203,10 @@ class SqlAlchemyWorkflowExecutionRepository:
             .join(WorkflowExecutionRecord)
             .where(*filters)
             .order_by(NodeExecutionRecord.updated_at, NodeExecutionRecord.id)
-            .with_for_update(skip_locked=True, of=NodeExecutionRecord)
+            .with_for_update(
+                skip_locked=True,
+                of=WorkflowExecutionRecord,
+            )
             .limit(1)
         )
         return await self._candidate(node)
@@ -174,7 +222,10 @@ class SqlAlchemyWorkflowExecutionRepository:
                 WorkflowExecutionRecord.status == WorkflowStatus.RUNNING,
             )
             .order_by(NodeExecutionRecord.lease_expires_at, NodeExecutionRecord.id)
-            .with_for_update(skip_locked=True, of=NodeExecutionRecord)
+            .with_for_update(
+                skip_locked=True,
+                of=WorkflowExecutionRecord,
+            )
             .limit(1)
         )
         return await self._candidate(node)

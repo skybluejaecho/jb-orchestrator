@@ -1,19 +1,31 @@
 """FastAPI application entry point."""
 
+from collections.abc import Awaitable, Callable
 from typing import Final
 
 import uvicorn
 from fastapi import FastAPI, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from jb_orchestrator import __version__
 from jb_orchestrator.api.routes import router
+from jb_orchestrator.api.security import authenticate_request, authorize_request
 from jb_orchestrator.application.budget_services import BudgetService
 from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNotFound
+from jb_orchestrator.application.external_execution_services import ExternalExecutionService
 from jb_orchestrator.application.model_services import ModelCatalogService
+from jb_orchestrator.application.notification_services import NotificationService
+from jb_orchestrator.application.phase_pack_services import PhasePackCatalogService
+from jb_orchestrator.application.project_observation_services import ProjectObservationService
+from jb_orchestrator.application.request_dispatch_services import RequestDispatchService
+from jb_orchestrator.application.scm_publication_services import ScmPublicationService
+from jb_orchestrator.application.security_services import SecurityService
 from jb_orchestrator.application.services import OrchestrationService
 from jb_orchestrator.application.skill_services import SkillCatalogService
+from jb_orchestrator.application.worker_presence_services import WorkerPresenceService
+from jb_orchestrator.application.worker_readiness_services import WorkerReadinessService
 from jb_orchestrator.application.workflow_services import WorkflowService
+from jb_orchestrator.application.workspace_operation_services import WorkspaceOperationService
 from jb_orchestrator.config import get_settings
 from jb_orchestrator.domain.exceptions import DomainValidationError, InvalidStateTransition
 from jb_orchestrator.infrastructure.database import SqlAlchemyUnitOfWork, create_session_factory
@@ -28,16 +40,39 @@ def create_app(
     model_service: ModelCatalogService | None = None,
     budget_service: BudgetService | None = None,
     workflow_service: WorkflowService | None = None,
+    external_execution_service: ExternalExecutionService | None = None,
+    phase_pack_service: PhasePackCatalogService | None = None,
+    request_dispatch_service: RequestDispatchService | None = None,
+    project_observation_service: ProjectObservationService | None = None,
+    security_service: SecurityService | None = None,
+    workspace_operation_service: WorkspaceOperationService | None = None,
+    scm_publication_service: ScmPublicationService | None = None,
+    worker_presence_service: WorkerPresenceService | None = None,
+    worker_readiness_service: WorkerReadinessService | None = None,
+    notification_service: NotificationService | None = None,
+    auth_enabled: bool | None = None,
 ) -> FastAPI:
     """Build the API application."""
 
     app = FastAPI(title=SERVICE_NAME, version=__version__)
+    settings = get_settings()
+    auth_enabled = settings.api_auth_enabled if auth_enabled is None else auth_enabled
     if (
         service is None
         or skill_service is None
         or model_service is None
+        or phase_pack_service is None
         or budget_service is None
         or workflow_service is None
+        or external_execution_service is None
+        or request_dispatch_service is None
+        or project_observation_service is None
+        or workspace_operation_service is None
+        or scm_publication_service is None
+        or worker_presence_service is None
+        or worker_readiness_service is None
+        or notification_service is None
+        or (auth_enabled and security_service is None)
     ):
         session_factory = create_session_factory()
     if service is None:
@@ -46,15 +81,95 @@ def create_app(
         skill_service = SkillCatalogService(lambda: SqlAlchemyUnitOfWork(session_factory))
     if model_service is None:
         model_service = ModelCatalogService(lambda: SqlAlchemyUnitOfWork(session_factory))
+    if phase_pack_service is None:
+        phase_pack_service = PhasePackCatalogService(lambda: SqlAlchemyUnitOfWork(session_factory))
     if budget_service is None:
         budget_service = BudgetService(lambda: SqlAlchemyUnitOfWork(session_factory))
     if workflow_service is None:
         workflow_service = WorkflowService(lambda: SqlAlchemyUnitOfWork(session_factory))
+    if external_execution_service is None:
+        external_execution_service = ExternalExecutionService(
+            lambda: SqlAlchemyUnitOfWork(session_factory)
+        )
+    if request_dispatch_service is None:
+        request_dispatch_service = RequestDispatchService(
+            lambda: SqlAlchemyUnitOfWork(session_factory), workflow_service
+        )
+    if project_observation_service is None:
+        project_observation_service = ProjectObservationService(
+            lambda: SqlAlchemyUnitOfWork(session_factory)
+        )
+    if workspace_operation_service is None:
+        workspace_operation_service = WorkspaceOperationService(
+            lambda: SqlAlchemyUnitOfWork(session_factory)
+        )
+    if scm_publication_service is None:
+        scm_publication_service = ScmPublicationService(
+            lambda: SqlAlchemyUnitOfWork(session_factory)
+        )
+    if worker_presence_service is None:
+        worker_presence_service = WorkerPresenceService(
+            lambda: SqlAlchemyUnitOfWork(session_factory)
+        )
+    if worker_readiness_service is None:
+        worker_readiness_service = WorkerReadinessService(
+            lambda: SqlAlchemyUnitOfWork(session_factory)
+        )
+    if notification_service is None:
+        notification_service = NotificationService(lambda: SqlAlchemyUnitOfWork(session_factory))
+    if auth_enabled and security_service is None:
+        security_service = SecurityService(lambda: SqlAlchemyUnitOfWork(session_factory))
     app.state.orchestration_service = service
     app.state.skill_catalog_service = skill_service
     app.state.model_catalog_service = model_service
+    app.state.phase_pack_catalog_service = phase_pack_service
     app.state.budget_service = budget_service
     app.state.workflow_service = workflow_service
+    app.state.external_execution_service = external_execution_service
+    app.state.request_dispatch_service = request_dispatch_service
+    app.state.project_observation_service = project_observation_service
+    app.state.workspace_operation_service = workspace_operation_service
+    app.state.scm_publication_service = scm_publication_service
+    app.state.worker_presence_service = worker_presence_service
+    app.state.worker_readiness_service = worker_readiness_service
+    app.state.notification_service = notification_service
+    app.state.security_service = security_service
+    app.state.auth_enabled = auth_enabled
+
+    if auth_enabled:
+        if security_service is None:  # pragma: no cover - guarded above
+            raise RuntimeError("security service is required when API authentication is enabled")
+
+        @app.middleware("http")
+        async def bearer_security(
+            request: Request, call_next: Callable[[Request], Awaitable[Response]]
+        ) -> Response:
+            if not request.url.path.startswith("/v1"):
+                return await call_next(request)
+            authentication = await authenticate_request(request, security_service)
+            if authentication.principal is None:
+                return JSONResponse(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    headers={"WWW-Authenticate": "Bearer"},
+                    content={
+                        "type": "about:blank",
+                        "title": "Authentication required",
+                        "status": status.HTTP_401_UNAUTHORIZED,
+                        "detail": authentication.error,
+                    },
+                )
+            if not await authorize_request(request, authentication.principal, security_service):
+                return JSONResponse(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    content={
+                        "type": "about:blank",
+                        "title": "Permission denied",
+                        "status": status.HTTP_403_FORBIDDEN,
+                        "detail": "The service account cannot access this resource",
+                    },
+                )
+            request.state.principal = authentication.principal
+            return await call_next(request)
 
     @app.get("/health/live", tags=["health"])
     async def live() -> dict[str, str]:
@@ -111,6 +226,12 @@ def run() -> None:
     """Run the development ASGI server."""
 
     settings = get_settings()
+    if not settings.api_auth_enabled and settings.api_host not in {
+        "127.0.0.1",
+        "localhost",
+        "::1",
+    }:
+        raise RuntimeError("API authentication must be enabled when binding to a remote address")
     uvicorn.run(
         "jb_orchestrator.api.main:app",
         host=settings.api_host,

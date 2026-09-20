@@ -77,10 +77,13 @@ async def test_workflow_control_api_registration_execution_and_approval() -> Non
         execution_id = started.json()["id"]
         by_run = await client.get(f"/v1/runs/{run_id}/workflow")
         by_execution = await client.get(f"/v1/workflow-executions/{execution_id}")
+        artifacts = await client.get(f"/v1/workflow-executions/{execution_id}/artifacts")
         approved = await client.post(
             f"/v1/workflow-executions/{execution_id}/approvals/approval",
             json={"approved": True},
         )
+        completed_run = await client.get(f"/v1/runs/{run_id}")
+        completed_request = await client.get(f"/v1/requests/{completed_run.json()['request_id']}")
 
     assert first.status_code == 201
     assert latest.status_code == 201
@@ -91,16 +94,23 @@ async def test_workflow_control_api_registration_execution_and_approval() -> Non
     assert started.status_code == 201
     assert started.json()["status"] == "awaiting_approval"
     assert started.json()["definition_version"] == 1
+    assert started.json()["request_context"]["prompt"] == "Run the workflow"
+    assert started.json()["request_context"]["project_key"] == "workflow-project"
     assert by_run.json()["id"] == execution_id
     assert by_execution.json()["nodes"][0]["status"] == "awaiting_approval"
+    assert artifacts.status_code == 200
+    assert artifacts.json() == []
     assert approved.status_code == 200
     assert approved.json()["status"] == "succeeded"
     assert approved.json()["nodes"][0]["outcome"] == "approved"
-    assert [event.event_type for event in store.events][-4:] == [
-        "workflow.definition_registered",
-        "workflow.definition_registered",
+    assert completed_run.json()["status"] == "succeeded"
+    assert completed_request.json()["status"] == "completed"
+    assert [event.event_type for event in store.events][-5:] == [
         "workflow.started",
+        "run.status_changed",
         "workflow.approval_resolved",
+        "run.status_changed",
+        "request.completed",
     ]
 
 
@@ -122,6 +132,8 @@ async def test_workflow_control_api_conflicts_validation_and_cancellation() -> N
             json={"definition_key": "approval-flow"},
         )
         cancelled = await client.post(f"/v1/workflow-executions/{started.json()['id']}/cancel")
+        run = await client.get(f"/v1/runs/{run_id}")
+        request = await client.get(f"/v1/requests/{run.json()['request_id']}")
         missing = await client.get("/v1/workflows/missing")
 
     assert duplicate.status_code == 409
@@ -134,4 +146,91 @@ async def test_workflow_control_api_conflicts_validation_and_cancellation() -> N
         "pending",
         "pending",
     ]
+    assert run.json()["status"] == "cancelled"
+    assert request.json()["status"] == "cancelled"
     assert missing.status_code == 404
+
+
+async def test_workflow_api_accepts_explicit_parallel_fork_and_join() -> None:
+    app, _ = build_app()
+    payload = {
+        "key": "parallel-flow",
+        "version": 1,
+        "entry_node": "fork",
+        "nodes": [
+            {"key": "fork", "kind": "fork"},
+            {"key": "research", "kind": "task"},
+            {"key": "design", "kind": "task"},
+            {"key": "join", "kind": "join"},
+            {"key": "done", "kind": "terminal", "terminal_status": "succeeded"},
+        ],
+        "edges": [
+            {"source": "fork", "outcome": "success", "target": "research"},
+            {"source": "fork", "outcome": "success", "target": "design"},
+            {"source": "research", "outcome": "success", "target": "join"},
+            {"source": "design", "outcome": "success", "target": "join"},
+            {"source": "join", "outcome": "success", "target": "done"},
+        ],
+    }
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        registered = await client.post("/v1/workflows", json=payload)
+        run_id = await create_run(client)
+        started = await client.post(
+            f"/v1/runs/{run_id}/workflow",
+            json={"definition_key": "parallel-flow"},
+        )
+
+    assert registered.status_code == 201
+    assert [node["kind"] for node in registered.json()["nodes"]] == [
+        "fork",
+        "task",
+        "task",
+        "join",
+        "terminal",
+    ]
+    statuses = {node["node_key"]: node["status"] for node in started.json()["nodes"]}
+    assert started.status_code == 201
+    assert statuses == {
+        "fork": "succeeded",
+        "research": "ready",
+        "design": "ready",
+        "join": "pending",
+        "done": "pending",
+    }
+
+
+async def test_workflow_api_accepts_artifact_conditional_edges() -> None:
+    app, _ = build_app()
+    payload = {
+        "key": "conditional-flow",
+        "version": 1,
+        "entry_node": "verify",
+        "nodes": [
+            {"key": "verify", "kind": "task"},
+            {"key": "approved", "kind": "terminal", "terminal_status": "succeeded"},
+            {"key": "changes", "kind": "terminal", "terminal_status": "failed"},
+        ],
+        "edges": [
+            {
+                "source": "verify",
+                "outcome": "success",
+                "target": "approved",
+                "condition": {"path": "/verdict", "equals": "approve"},
+            },
+            {
+                "source": "verify",
+                "outcome": "success",
+                "target": "changes",
+                "condition": {"path": "/verdict", "equals": "changes_requested"},
+            },
+        ],
+    }
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        registered = await client.post("/v1/workflows", json=payload)
+        fetched = await client.get("/v1/workflows/conditional-flow")
+
+    assert registered.status_code == 201
+    assert registered.json()["edges"] == payload["edges"]
+    assert fetched.json()["edges"] == payload["edges"]

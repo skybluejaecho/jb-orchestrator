@@ -1,22 +1,83 @@
 """Application use-case package."""
 
 from jb_orchestrator.application.budget_services import BudgetService, BudgetUsageRequired
-from jb_orchestrator.application.commands import CreateUserRequest, RegisterProject
+from jb_orchestrator.application.commands import (
+    CreateUserRequest,
+    DispatchProjectRequest,
+    NodeSkillAddon,
+    RegisterProject,
+)
+from jb_orchestrator.application.external_execution_services import ExternalExecutionService
 from jb_orchestrator.application.model_services import ModelCatalogService
+from jb_orchestrator.application.notification_services import NotificationService
+from jb_orchestrator.application.phase_pack_services import PhasePackCatalogService
+from jb_orchestrator.application.project_observation_services import ProjectObservationService
+from jb_orchestrator.application.request_dispatch_services import (
+    DispatchedRequest,
+    ProjectWorkflowOptions,
+    RecordedWorkflowRecommendation,
+    RequestDispatchService,
+    WorkflowComposition,
+)
+from jb_orchestrator.application.scm_publication_services import ScmPublicationService
+from jb_orchestrator.application.security_services import (
+    CredentialInventorySummary,
+    CredentialReadiness,
+    IssuedCredential,
+    IssuedServiceAccount,
+    SecurityService,
+    ServiceAccountInventory,
+)
 from jb_orchestrator.application.services import CreatedRequest, OrchestrationService
 from jb_orchestrator.application.skill_services import SkillCatalogService
 from jb_orchestrator.application.task_dispatch import TaskDispatchService
+from jb_orchestrator.application.worker_presence_services import (
+    WorkerPresenceService,
+    WorkerPresenceView,
+)
+from jb_orchestrator.application.worker_readiness_services import WorkerReadinessService
+from jb_orchestrator.application.workflow_compatibility import (
+    WorkflowCompatibility,
+    WorkflowCompatibilityIssue,
+    assess_workflow_compatibility,
+)
 from jb_orchestrator.application.workflow_services import WorkflowService
+from jb_orchestrator.application.workspace_operation_services import WorkspaceOperationService
 
 __all__ = [
     "BudgetService",
     "BudgetUsageRequired",
     "CreateUserRequest",
     "CreatedRequest",
+    "CredentialInventorySummary",
+    "CredentialReadiness",
+    "DispatchProjectRequest",
+    "DispatchedRequest",
+    "ExternalExecutionService",
+    "IssuedCredential",
+    "IssuedServiceAccount",
     "ModelCatalogService",
+    "NodeSkillAddon",
+    "NotificationService",
     "OrchestrationService",
+    "PhasePackCatalogService",
+    "ProjectObservationService",
+    "ProjectWorkflowOptions",
+    "RecordedWorkflowRecommendation",
     "RegisterProject",
+    "RequestDispatchService",
+    "ScmPublicationService",
+    "SecurityService",
+    "ServiceAccountInventory",
     "SkillCatalogService",
     "TaskDispatchService",
+    "WorkerPresenceService",
+    "WorkerPresenceView",
+    "WorkerReadinessService",
+    "WorkflowCompatibility",
+    "WorkflowCompatibilityIssue",
+    "WorkflowComposition",
     "WorkflowService",
+    "WorkspaceOperationService",
+    "assess_workflow_compatibility",
 ]

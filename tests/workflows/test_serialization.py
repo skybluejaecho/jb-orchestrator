@@ -8,12 +8,20 @@ from jb_orchestrator.model_routing import (
     ModelTier,
     NodeModelSelection,
 )
+from jb_orchestrator.phase_packs import (
+    PhaseInputDefinition,
+    PhasePackDefinition,
+    PhasePackReference,
+)
 from jb_orchestrator.workflows import (
+    ArtifactCondition,
     EdgeDefinition,
     NodeDefinition,
+    NodeInputMapping,
     NodeKind,
     NodeOutcome,
     WorkflowDefinition,
+    WorkflowRequestContext,
     WorkflowSnapshot,
     WorkflowStatus,
 )
@@ -26,10 +34,19 @@ from jb_orchestrator.workflows.serialization import (
 
 
 def test_definition_and_snapshot_json_round_trip() -> None:
+    phase_pack = PhasePackDefinition(
+        key="implementation",
+        version=1,
+        name="Implementation",
+        description="Implement a plan.",
+        instructions="Apply the approved plan.",
+        inputs=(PhaseInputDefinition(key="plan", description="Approved plan"),),
+        output_contract={"required": ["summary"]},
+    )
     definition = WorkflowDefinition(
         key="serialized",
         version=3,
-        entry_node="task",
+        entry_node="prepare",
         nodes=(
             NodeDefinition(
                 key="task",
@@ -38,16 +55,27 @@ def test_definition_and_snapshot_json_round_trip() -> None:
                 executor_key="codex",
                 instructions="Implement the approved task.",
                 configuration={"reasoning_effort": "medium"},
+                phase_pack=PhasePackReference(key="implementation", version=1),
+                input_mappings=(NodeInputMapping(input_key="plan", source_node="prepare"),),
                 model_routing=ModelRoutingRequest(
                     required_capabilities=("coding",),
                     max_cost_usd=Decimal("1.00"),
                 ),
             ),
+            NodeDefinition(key="prepare", kind=NodeKind.TASK),
             NodeDefinition(
                 key="done", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.SUCCEEDED
             ),
         ),
-        edges=(EdgeDefinition(source="task", outcome=NodeOutcome.SUCCESS, target="done"),),
+        edges=(
+            EdgeDefinition(
+                source="task",
+                outcome=NodeOutcome.SUCCESS,
+                target="done",
+                condition=ArtifactCondition(path="/summary", equals="complete"),
+            ),
+            EdgeDefinition(source="prepare", outcome=NodeOutcome.SUCCESS, target="task"),
+        ),
     )
     profile = ModelProfile(
         key="codex-balanced",
@@ -68,6 +96,17 @@ def test_definition_and_snapshot_json_round_trip() -> None:
     snapshot = WorkflowSnapshot.from_definition(
         definition,
         run_id=uuid4(),
+        request_context=WorkflowRequestContext(
+            request_id=uuid4(),
+            project_id=uuid4(),
+            project_key="serialized-project",
+            project_name="Serialized Project",
+            repository_url="https://example.com/project.git",
+            default_branch="develop",
+            prompt="Implement the serialized workflow.",
+            title="Serialized request",
+        ),
+        phase_packs=(phase_pack,),
         model_selections=(NodeModelSelection(node_key="task", selection=selection),),
     )
 

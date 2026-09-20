@@ -1,3 +1,6 @@
+from collections.abc import Callable, Coroutine
+from typing import Any
+
 import pytest
 from typer.testing import CliRunner
 
@@ -5,6 +8,7 @@ from jb_orchestrator.worker.main import app
 from jb_orchestrator.worker.models import TaskClaim, TaskResult
 from jb_orchestrator.worker.registry import ExecutorRegistry
 from jb_orchestrator.worker.runtime import WorkerRuntime
+from jb_orchestrator.worker_presence.runtime import WorkerPresenceRuntime
 from jb_orchestrator.workflows import NodeOutcome
 
 runner = CliRunner()
@@ -38,8 +42,15 @@ def test_worker_once_uses_discovered_registry(monkeypatch: pytest.MonkeyPatch) -
     async def run_once(runtime: WorkerRuntime) -> bool:
         return False
 
+    async def run_with_presence(
+        runtime: WorkerPresenceRuntime,
+        operation: Callable[[], Coroutine[Any, Any, bool]],
+    ) -> bool:
+        return await operation()
+
     monkeypatch.setattr(ExecutorRegistry, "from_entry_points", classmethod(discover))
     monkeypatch.setattr(WorkerRuntime, "run_once", run_once)
+    monkeypatch.setattr(WorkerPresenceRuntime, "run", run_with_presence)
 
     result = runner.invoke(app, ["--once", "--worker-id", "test-worker"])
 

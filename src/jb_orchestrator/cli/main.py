@@ -1,37 +1,77 @@
 """Administration CLI entry point."""
 
+import asyncio
 import json
 from pathlib import Path
-from typing import Annotated, Any, cast
+from typing import Annotated, Any
+from urllib.parse import urlencode
 from uuid import UUID
 
 import httpx
 import typer
 
 from jb_orchestrator import __version__
+from jb_orchestrator.application import SecurityService
+from jb_orchestrator.cli.bundles import (
+    BundleError,
+    ControlPlaneBundleClient,
+    OrchestrationBundle,
+    apply_bundle,
+    load_bundle,
+    plan_bundle,
+    validate_bundle,
+)
+from jb_orchestrator.cli.starter import StarterKitError, initialize_starter_kit
 from jb_orchestrator.config import get_settings
+from jb_orchestrator.infrastructure.database import SqlAlchemyUnitOfWork, create_session_factory
+from jb_orchestrator.preflight import PreflightError, run_preflight
+from jb_orchestrator.release_check import ReleaseCheckError, run_release_check
+from jb_orchestrator.security import ApiPermission
 from jb_orchestrator.skills.materialization import (
     SkillMaterializationError,
     compute_directory_digest,
 )
+from jb_orchestrator.system_smoke import SystemSmokeError, run_system_smoke
 
 app = typer.Typer(no_args_is_help=True, help="Administer jb-orchestrator.")
 project_app = typer.Typer(no_args_is_help=True, help="Manage registered projects.")
 request_app = typer.Typer(no_args_is_help=True, help="Submit and inspect user requests.")
 run_app = typer.Typer(no_args_is_help=True, help="Inspect and control runs.")
 skill_app = typer.Typer(no_args_is_help=True, help="Inspect and prepare skills.")
+auth_app = typer.Typer(no_args_is_help=True, help="Manage API service accounts.")
+account_app = typer.Typer(no_args_is_help=True, help="Inspect service-account identities.")
+credential_app = typer.Typer(no_args_is_help=True, help="Rotate service-account credentials.")
+mcp_app = typer.Typer(no_args_is_help=True, help="Configure and verify the MCP adapter.")
+system_app = typer.Typer(no_args_is_help=True, help="Verify complete local system boundaries.")
+bundle_app = typer.Typer(no_args_is_help=True, help="Validate and apply orchestration bundles.")
 app.add_typer(project_app, name="project")
 app.add_typer(request_app, name="request")
 app.add_typer(run_app, name="run")
 app.add_typer(skill_app, name="skill")
+app.add_typer(auth_app, name="auth")
+auth_app.add_typer(account_app, name="account")
+auth_app.add_typer(credential_app, name="credential")
+app.add_typer(mcp_app, name="mcp")
+app.add_typer(system_app, name="system")
+app.add_typer(bundle_app, name="bundle")
 
 
-def call_api(method: str, path: str, *, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+class McpCommandError(RuntimeError):
+    """An MCP-specific CLI operation failed."""
+
+
+def call_api(method: str, path: str, *, payload: dict[str, Any] | None = None) -> Any:
     """Call the configured control-plane API and render failures consistently."""
 
-    base_url = get_settings().control_plane_url.rstrip("/")
+    settings = get_settings()
+    base_url = settings.control_plane_url.rstrip("/")
+    headers = {}
+    if settings.api_token is not None:
+        headers["Authorization"] = f"Bearer {settings.api_token.get_secret_value()}"
     try:
-        response = httpx.request(method, f"{base_url}{path}", json=payload, timeout=10.0)
+        response = httpx.request(
+            method, f"{base_url}{path}", json=payload, headers=headers, timeout=10.0
+        )
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
         typer.echo(exc.response.text, err=True)
@@ -39,11 +79,81 @@ def call_api(method: str, path: str, *, payload: dict[str, Any] | None = None) -
     except httpx.RequestError as exc:
         typer.echo(f"control-plane request failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
-    return cast(dict[str, Any], response.json())
+    return response.json()
 
 
-def echo_json(payload: dict[str, Any]) -> None:
+def echo_json(payload: Any) -> None:
     typer.echo(json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False))
+
+
+def _load_bundle_or_exit(path: Path) -> OrchestrationBundle:
+    try:
+        return load_bundle(path.resolve())
+    except BundleError as exc:
+        typer.echo(f"bundle failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+
+@bundle_app.command("init")
+def initialize_bundle_starter(
+    destination: Annotated[
+        Path, typer.Argument(help="New directory that will receive the starter kit.")
+    ] = Path("jb-orchestration"),
+) -> None:
+    """Create a non-overwriting starter kit with composable phase packs and workflows."""
+
+    try:
+        created = initialize_starter_kit(destination)
+    except (OSError, StarterKitError) as exc:
+        typer.echo(f"bundle init failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    echo_json(
+        {
+            "bundle": str(created / "orchestrator.yaml"),
+            "destination": str(created),
+            "status": "created",
+        }
+    )
+
+
+@bundle_app.command("validate")
+def validate_bundle_file(path: Path) -> None:
+    """Validate bundle schema and local orchestration contracts without API access."""
+
+    try:
+        result = validate_bundle(_load_bundle_or_exit(path))
+    except BundleError as exc:
+        typer.echo(f"bundle failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    echo_json(result.as_dict())
+
+
+@bundle_app.command("plan")
+def plan_bundle_file(path: Path) -> None:
+    """Compare a valid bundle with the configured Control Plane without writing."""
+
+    try:
+        plan = plan_bundle(_load_bundle_or_exit(path), ControlPlaneBundleClient())
+    except BundleError as exc:
+        typer.echo(f"bundle failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    echo_json(plan.as_dict())
+    if plan.has_conflicts:
+        raise typer.Exit(code=2)
+
+
+@bundle_app.command("apply")
+def apply_bundle_file(path: Path) -> None:
+    """Apply a conflict-free bundle through the configured Control Plane API."""
+
+    try:
+        plan = apply_bundle(_load_bundle_or_exit(path), ControlPlaneBundleClient())
+    except BundleError as exc:
+        typer.echo(f"bundle failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    payload = plan.as_dict()
+    payload["status"] = "applied"
+    echo_json(payload)
 
 
 @app.command()
@@ -60,6 +170,8 @@ def doctor() -> None:
     settings = get_settings()
     result = {
         "api": f"{settings.api_host}:{settings.api_port}",
+        "api_auth_enabled": settings.api_auth_enabled,
+        "api_token_configured": settings.api_token is not None,
         "database_configured": bool(settings.database_url),
         "environment": settings.environment,
         "control_plane_url": settings.control_plane_url,
@@ -67,6 +179,372 @@ def doctor() -> None:
         "version": __version__,
     }
     typer.echo(json.dumps(result, indent=2, sort_keys=True))
+
+
+def security_service() -> SecurityService:
+    session_factory = create_session_factory()
+    return SecurityService(lambda: SqlAlchemyUnitOfWork(session_factory))
+
+
+async def get_mcp_project(project_id: UUID) -> dict[str, Any]:
+    """Load the MCP client only for the command that requires it."""
+
+    from jb_orchestrator.mcp_server import ControlPlaneClient, ControlPlaneError
+
+    try:
+        return await ControlPlaneClient.from_settings().get_project(project_id)
+    except ControlPlaneError as exc:
+        raise McpCommandError(str(exc)) from exc
+
+
+async def probe_mcp_runtime(project_id: UUID) -> Any:
+    """Load the MCP protocol client only for the command that requires it."""
+
+    from jb_orchestrator.mcp_server import ControlPlaneError, probe_runtime
+
+    try:
+        return await probe_runtime(project_id)
+    except ControlPlaneError as exc:
+        raise McpCommandError(str(exc)) from exc
+
+
+@auth_app.command("issue")
+def issue_service_account(
+    *,
+    key: Annotated[str, typer.Option(help="Stable service-account key.")],
+    name: Annotated[str, typer.Option(help="Human-readable service-account name.")],
+    permission: Annotated[
+        list[ApiPermission], typer.Option(help="Permission to grant; repeat as needed.")
+    ],
+    project_id: Annotated[
+        list[UUID] | None, typer.Option(help="Project scope; repeat as needed.")
+    ] = None,
+    all_projects: Annotated[bool, typer.Option(help="Grant access to every project.")] = False,
+) -> None:
+    """Issue a service-account bearer token and print it once."""
+
+    issued = asyncio.run(
+        security_service().issue(
+            key=key,
+            name=name,
+            permissions=permission,
+            project_ids=project_id or (),
+            all_projects=all_projects,
+        )
+    )
+    echo_json(
+        {
+            "account_id": str(issued.account.id),
+            "credential_id": str(issued.credential.id),
+            "key": issued.account.key,
+            "token": issued.token,
+            "warning": "Store this token now; it cannot be retrieved later.",
+        }
+    )
+
+
+@auth_app.command("revoke")
+def revoke_service_account(account_id: UUID) -> None:
+    """Revoke a service account immediately."""
+
+    asyncio.run(security_service().revoke(account_id))
+    echo_json({"account_id": str(account_id), "revoked": True})
+
+
+@account_app.command("list")
+def list_service_accounts(
+    *,
+    enabled: Annotated[
+        bool | None,
+        typer.Option("--enabled/--disabled", help="Filter by account activation state."),
+    ] = None,
+    key_prefix: Annotated[
+        str | None,
+        typer.Option(help="Filter accounts whose stable key starts with this value."),
+    ] = None,
+    after_key: Annotated[
+        str | None,
+        typer.Option(help="Return accounts ordered after this exact key."),
+    ] = None,
+    limit: Annotated[int, typer.Option(min=1, max=500, help="Maximum accounts to return.")] = 100,
+) -> None:
+    """List service-account policy and credential health without secrets."""
+
+    parameters: dict[str, str | int | bool] = {}
+    if enabled is not None:
+        parameters["enabled"] = enabled
+    if key_prefix is not None:
+        parameters["key_prefix"] = key_prefix
+    if after_key is not None:
+        parameters["after_key"] = after_key
+    parameters["limit"] = limit
+    echo_json(call_api("GET", f"/v1/service-accounts?{urlencode(parameters)}"))
+
+
+@account_app.command("show")
+def show_service_account(account_id: UUID) -> None:
+    """Show one service account and its credential health summary."""
+
+    echo_json(call_api("GET", f"/v1/service-accounts/{account_id}"))
+
+
+@auth_app.command("doctor")
+def inspect_credential_readiness(
+    *,
+    issues_only: Annotated[
+        bool,
+        typer.Option(help="Return only accounts that require operator attention."),
+    ] = False,
+    key_prefix: Annotated[
+        str | None,
+        typer.Option(help="Inspect accounts whose stable key starts with this value."),
+    ] = None,
+    after_key: Annotated[
+        str | None,
+        typer.Option(help="Return accounts ordered after this exact key."),
+    ] = None,
+    limit: Annotated[int, typer.Option(min=1, max=500, help="Maximum accounts to return.")] = 100,
+    warning_seconds: Annotated[
+        int | None,
+        typer.Option(min=1, max=31_536_000, help="Override the expiry warning window."),
+    ] = None,
+) -> None:
+    """Inspect service-account credential expiry and authentication readiness."""
+
+    parameters: dict[str, str | int | bool] = {}
+    if issues_only:
+        parameters["issues_only"] = True
+    if key_prefix is not None:
+        parameters["key_prefix"] = key_prefix
+    if after_key is not None:
+        parameters["after_key"] = after_key
+    parameters["limit"] = limit
+    if warning_seconds is not None:
+        parameters["warning_seconds"] = warning_seconds
+    echo_json(
+        call_api(
+            "GET",
+            f"/v1/service-accounts/readiness?{urlencode(parameters)}",
+        )
+    )
+
+
+@credential_app.command("issue")
+def issue_service_account_credential(
+    account_id: UUID,
+    *,
+    expires_at: Annotated[
+        str | None,
+        typer.Option(help="Optional ISO-8601 expiration timestamp."),
+    ] = None,
+) -> None:
+    """Issue an additional bearer credential through the Control Plane."""
+
+    echo_json(
+        call_api(
+            "POST",
+            f"/v1/service-accounts/{account_id}/credentials",
+            payload={"expires_at": expires_at},
+        )
+    )
+
+
+@credential_app.command("list")
+def list_service_account_credentials(account_id: UUID) -> None:
+    """List credential metadata without exposing bearer secrets."""
+
+    echo_json(call_api("GET", f"/v1/service-accounts/{account_id}/credentials"))
+
+
+@credential_app.command("revoke")
+def revoke_service_account_credential(account_id: UUID, credential_id: UUID) -> None:
+    """Revoke one credential while leaving its service account enabled."""
+
+    echo_json(
+        call_api(
+            "DELETE",
+            f"/v1/service-accounts/{account_id}/credentials/{credential_id}",
+        )
+    )
+
+
+@credential_app.command("audit")
+def list_service_account_credential_events(
+    account_id: UUID,
+    *,
+    before_sequence: Annotated[
+        int | None,
+        typer.Option(min=1, help="Return events older than this sequence."),
+    ] = None,
+    limit: Annotated[int, typer.Option(min=1, max=500, help="Maximum events to return.")] = 100,
+) -> None:
+    """List the latest credential lifecycle audit events."""
+
+    query = f"limit={limit}"
+    if before_sequence is not None:
+        query = f"before_sequence={before_sequence}&{query}"
+    echo_json(
+        call_api(
+            "GET",
+            f"/v1/service-accounts/{account_id}/credential-events?{query}",
+        )
+    )
+
+
+@mcp_app.command("config")
+def render_mcp_config(
+    project_path: Annotated[
+        Path | None, typer.Option(help="Absolute path containing the jb-orchestrator project.")
+    ] = None,
+) -> None:
+    """Render a generic stdio MCP host configuration without exposing a token."""
+
+    resolved_path = (project_path or Path.cwd()).resolve()
+    if not (resolved_path / "pyproject.toml").is_file():
+        typer.echo(f"jb-orchestrator pyproject.toml not found below: {resolved_path}", err=True)
+        raise typer.Exit(code=1)
+    settings = get_settings()
+    echo_json(
+        {
+            "mcpServers": {
+                "jb-orchestrator": {
+                    "command": "uv",
+                    "args": ["run", "--project", str(resolved_path), "jb-mcp"],
+                    "env": {
+                        "JB_CONTROL_PLANE_URL": settings.control_plane_url,
+                        "JB_API_TOKEN": "<service-account-token>",
+                    },
+                }
+            }
+        }
+    )
+
+
+@mcp_app.command("check")
+def check_mcp_connection(
+    project_id: Annotated[UUID, typer.Option(help="Authorized project UUID to query.")],
+) -> None:
+    """Verify token, API connectivity, and project scope used by jb-mcp."""
+
+    try:
+        project = asyncio.run(get_mcp_project(project_id))
+    except McpCommandError as exc:
+        typer.echo(f"MCP control-plane check failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    echo_json(
+        {
+            "authenticated": True,
+            "control_plane_url": get_settings().control_plane_url,
+            "project": project,
+        }
+    )
+
+
+@mcp_app.command("smoke")
+def smoke_test_mcp_runtime(
+    project_id: Annotated[UUID, typer.Option(help="Authorized project UUID to query.")],
+) -> None:
+    """Launch jb-mcp and verify the complete stdio protocol boundary."""
+
+    try:
+        result = asyncio.run(probe_mcp_runtime(project_id))
+    except McpCommandError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    echo_json(
+        {
+            "project": result.project,
+            "server": {"name": result.server_name, "version": result.server_version},
+            "status": "ready",
+            "tools": list(result.tools),
+        }
+    )
+
+
+@system_app.command("smoke")
+def smoke_test_local_system(
+    project_path: Annotated[
+        Path | None, typer.Option(help="Repository root containing apps/jarvis.")
+    ] = None,
+    api_port: Annotated[int, typer.Option(help="Temporary Control Plane port.")] = 18080,
+    jarvis_port: Annotated[int, typer.Option(help="Temporary Jarvis port.")] = 13000,
+    timeout_seconds: Annotated[
+        float, typer.Option(help="Per-process readiness and transition timeout.")
+    ] = 60.0,
+) -> None:
+    """Exercise PostgreSQL, API, Worker, and Jarvis using disposable test data."""
+
+    try:
+        result = run_system_smoke(
+            (project_path or Path.cwd()).resolve(),
+            api_port=api_port,
+            jarvis_port=jarvis_port,
+            timeout_seconds=timeout_seconds,
+        )
+    except SystemSmokeError as exc:
+        typer.echo(f"system smoke failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    echo_json(result.as_dict())
+
+
+@system_app.command("release-check")
+def check_release_readiness(
+    project_path: Annotated[
+        Path | None, typer.Option(help="Repository root containing all release surfaces.")
+    ] = None,
+    include_system_smoke: Annotated[
+        bool,
+        typer.Option(
+            "--include-system-smoke",
+            help="Also migrate a disposable test database and run the process-level smoke.",
+        ),
+    ] = False,
+    timeout_seconds: Annotated[
+        float, typer.Option(help="Maximum duration allowed for each individual check.")
+    ] = 900.0,
+) -> None:
+    """Run the reproducible local release-readiness gate."""
+
+    try:
+        result = run_release_check(
+            (project_path or Path.cwd()).resolve(),
+            include_system_smoke=include_system_smoke,
+            timeout_seconds=timeout_seconds,
+        )
+    except ReleaseCheckError as exc:
+        typer.echo(f"release check failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    echo_json(result.as_dict())
+
+
+@system_app.command("preflight")
+def check_deployment_preflight(
+    roles: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--role",
+            help="Deployment role to inspect; repeat the option to select multiple roles.",
+        ),
+    ] = None,
+    project_path: Annotated[
+        Path | None, typer.Option(help="Repository root containing migrations and adapters.")
+    ] = None,
+) -> None:
+    """Validate role-specific deployment configuration and database readiness."""
+
+    try:
+        report = asyncio.run(
+            run_preflight(
+                roles=roles or (),
+                project_root=(project_path or Path.cwd()).resolve(),
+            )
+        )
+    except PreflightError as exc:
+        typer.echo(f"preflight failed: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    echo_json(report.as_dict())
+    if not report.ready:
+        raise typer.Exit(code=1)
 
 
 @skill_app.command("digest")

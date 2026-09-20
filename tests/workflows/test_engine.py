@@ -4,12 +4,14 @@ from uuid import uuid4
 import pytest
 
 from jb_orchestrator.workflows import (
+    ArtifactCondition,
     EdgeDefinition,
     NodeDefinition,
     NodeExecutionStatus,
     NodeKind,
     NodeOutcome,
     WorkflowDefinition,
+    WorkflowDefinitionError,
     WorkflowEngine,
     WorkflowExecution,
     WorkflowExecutionError,
@@ -71,6 +73,77 @@ def test_happy_path_pauses_for_approval_and_succeeds() -> None:
     assert execution.status is WorkflowStatus.SUCCEEDED
     assert execution.is_terminal
     assert execution.nodes["done"].status is NodeExecutionStatus.SUCCEEDED
+
+
+def test_fork_activates_parallel_tasks_and_join_waits_for_all_sources() -> None:
+    definition = WorkflowDefinition(
+        key="parallel-analysis",
+        version=1,
+        entry_node="fan_out",
+        nodes=(
+            NodeDefinition(key="fan_out", kind=NodeKind.FORK),
+            NodeDefinition(key="research", kind=NodeKind.TASK),
+            NodeDefinition(key="design", kind=NodeKind.TASK),
+            NodeDefinition(key="fan_in", kind=NodeKind.JOIN),
+            NodeDefinition(key="synthesize", kind=NodeKind.TASK),
+            NodeDefinition(
+                key="done", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.SUCCEEDED
+            ),
+        ),
+        edges=(
+            EdgeDefinition(source="fan_out", outcome=NodeOutcome.SUCCESS, target="research"),
+            EdgeDefinition(source="fan_out", outcome=NodeOutcome.SUCCESS, target="design"),
+            EdgeDefinition(source="research", outcome=NodeOutcome.SUCCESS, target="fan_in"),
+            EdgeDefinition(source="design", outcome=NodeOutcome.SUCCESS, target="fan_in"),
+            EdgeDefinition(source="fan_in", outcome=NodeOutcome.SUCCESS, target="synthesize"),
+            EdgeDefinition(source="synthesize", outcome=NodeOutcome.SUCCESS, target="done"),
+        ),
+    )
+    execution = WorkflowExecution.create(
+        WorkflowSnapshot.from_definition(definition, run_id=uuid4())
+    )
+    engine = WorkflowEngine()
+
+    engine.start(execution)
+
+    assert execution.nodes["fan_out"].status is NodeExecutionStatus.SUCCEEDED
+    assert execution.nodes["research"].status is NodeExecutionStatus.READY
+    assert execution.nodes["design"].status is NodeExecutionStatus.READY
+    assert execution.nodes["fan_in"].status is NodeExecutionStatus.PENDING
+
+    engine.begin_task(execution, "research")
+    engine.complete_task(execution, "research", NodeOutcome.SUCCESS)
+
+    assert execution.nodes["fan_in"].status is NodeExecutionStatus.PENDING
+    assert execution.nodes["synthesize"].status is NodeExecutionStatus.PENDING
+
+    engine.begin_task(execution, "design")
+    engine.complete_task(execution, "design", NodeOutcome.SUCCESS)
+
+    assert execution.nodes["fan_in"].status is NodeExecutionStatus.SUCCEEDED
+    assert execution.nodes["fan_in"].visit_count == 1
+    assert execution.nodes["synthesize"].status is NodeExecutionStatus.READY
+
+
+def test_fork_and_join_reject_ambiguous_shapes_and_loops() -> None:
+    with pytest.raises(WorkflowDefinitionError, match="fork nodes require at least two targets"):
+        WorkflowDefinition(
+            key="single-fork",
+            version=1,
+            entry_node="fork",
+            nodes=(
+                NodeDefinition(key="fork", kind=NodeKind.FORK),
+                NodeDefinition(
+                    key="done",
+                    kind=NodeKind.TERMINAL,
+                    terminal_status=WorkflowStatus.SUCCEEDED,
+                ),
+            ),
+            edges=(EdgeDefinition(source="fork", outcome=NodeOutcome.SUCCESS, target="done"),),
+        )
+
+    with pytest.raises(WorkflowDefinitionError, match="only one visit"):
+        NodeDefinition(key="join", kind=NodeKind.JOIN, max_visits=2)
 
 
 def test_rejected_approval_routes_to_failure_terminal() -> None:
@@ -155,6 +228,131 @@ def test_missing_outcome_edge_fails_deterministically() -> None:
 
     assert execution.status is WorkflowStatus.FAILED
     assert execution.failure_reason == "no edge for task:failure"
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        ({"verdict": "approve"}, WorkflowStatus.SUCCEEDED),
+        ({"verdict": "changes_requested"}, WorkflowStatus.FAILED),
+    ],
+)
+def test_task_output_selects_conditional_edge(
+    output: dict[str, object], expected: WorkflowStatus
+) -> None:
+    definition = WorkflowDefinition(
+        key="conditional",
+        version=1,
+        entry_node="verify",
+        nodes=(
+            NodeDefinition(key="verify", kind=NodeKind.TASK),
+            NodeDefinition(
+                key="approved", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.SUCCEEDED
+            ),
+            NodeDefinition(
+                key="changes", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.FAILED
+            ),
+        ),
+        edges=(
+            EdgeDefinition(
+                source="verify",
+                outcome=NodeOutcome.SUCCESS,
+                target="approved",
+                condition=ArtifactCondition(path="/verdict", equals="approve"),
+            ),
+            EdgeDefinition(
+                source="verify",
+                outcome=NodeOutcome.SUCCESS,
+                target="changes",
+                condition=ArtifactCondition(path="/verdict", equals="changes_requested"),
+            ),
+        ),
+    )
+    execution = WorkflowExecution.create(
+        WorkflowSnapshot.from_definition(definition, run_id=uuid4())
+    )
+    engine = WorkflowEngine()
+    engine.start(execution)
+    engine.begin_task(execution, "verify")
+
+    engine.complete_task(execution, "verify", NodeOutcome.SUCCESS, output=output)
+
+    assert execution.status is expected
+
+
+def test_conditional_edge_supports_nested_pointer_and_default_fallback() -> None:
+    definition = WorkflowDefinition(
+        key="conditional-default",
+        version=1,
+        entry_node="verify",
+        nodes=(
+            NodeDefinition(key="verify", kind=NodeKind.TASK),
+            NodeDefinition(
+                key="approved", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.SUCCEEDED
+            ),
+            NodeDefinition(
+                key="fallback", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.FAILED
+            ),
+        ),
+        edges=(
+            EdgeDefinition(
+                source="verify",
+                outcome=NodeOutcome.SUCCESS,
+                target="approved",
+                condition=ArtifactCondition(path="/reviews/0/verdict", equals="approve"),
+            ),
+            EdgeDefinition(source="verify", outcome=NodeOutcome.SUCCESS, target="fallback"),
+        ),
+    )
+    execution = WorkflowExecution.create(
+        WorkflowSnapshot.from_definition(definition, run_id=uuid4())
+    )
+    engine = WorkflowEngine()
+    engine.start(execution)
+    engine.begin_task(execution, "verify")
+
+    engine.complete_task(
+        execution,
+        "verify",
+        NodeOutcome.SUCCESS,
+        output={"reviews": [{"verdict": "unknown"}]},
+    )
+
+    assert execution.status is WorkflowStatus.FAILED
+    assert execution.failure_reason == "workflow reached failure terminal: fallback"
+
+
+def test_conditional_route_without_match_fails_deterministically() -> None:
+    definition = WorkflowDefinition(
+        key="conditional-no-match",
+        version=1,
+        entry_node="verify",
+        nodes=(
+            NodeDefinition(key="verify", kind=NodeKind.TASK),
+            NodeDefinition(
+                key="approved", kind=NodeKind.TERMINAL, terminal_status=WorkflowStatus.SUCCEEDED
+            ),
+        ),
+        edges=(
+            EdgeDefinition(
+                source="verify",
+                outcome=NodeOutcome.SUCCESS,
+                target="approved",
+                condition=ArtifactCondition(path="/verdict", equals="approve"),
+            ),
+        ),
+    )
+    execution = WorkflowExecution.create(
+        WorkflowSnapshot.from_definition(definition, run_id=uuid4())
+    )
+    engine = WorkflowEngine()
+    engine.start(execution)
+    engine.begin_task(execution, "verify")
+
+    engine.complete_task(execution, "verify", NodeOutcome.SUCCESS, output={"verdict": "unknown"})
+
+    assert execution.status is WorkflowStatus.FAILED
+    assert execution.failure_reason == "no matching edge for verify:success"
 
 
 def test_cancel_stops_active_node_and_is_not_repeatable() -> None:

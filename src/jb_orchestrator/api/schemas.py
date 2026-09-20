@@ -9,14 +9,36 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 from jb_orchestrator.budgets import UsageKind
 from jb_orchestrator.domain import ProjectStatus, RequestStatus, RunStatus
+from jb_orchestrator.external_executions import ExternalExecutionStatus
 from jb_orchestrator.model_routing import ModelTier, RequirementLevel
+from jb_orchestrator.notifications import (
+    NotificationAttemptStatus,
+    NotificationAttemptTrigger,
+    NotificationDeliveryStatus,
+    NotificationEventType,
+    NotificationFailureCode,
+)
+from jb_orchestrator.scm import (
+    ScmPublicationAttemptStatus,
+    ScmPublicationAttemptTrigger,
+    ScmPublicationFailureCode,
+    ScmPublicationStatus,
+)
+from jb_orchestrator.security import ApiPermission, CredentialReadinessStatus
 from jb_orchestrator.skills import SkillSourceKind
+from jb_orchestrator.worker_presence import (
+    WorkerKind,
+    WorkerObservedStatus,
+    WorkerReadinessAlertStatus,
+    WorkerReadinessIssueReason,
+)
 from jb_orchestrator.workflows import (
     NodeExecutionStatus,
     NodeKind,
     NodeOutcome,
     WorkflowStatus,
 )
+from jb_orchestrator.workspace_operations import WorkspaceOperationKind, WorkspaceOperationStatus
 
 
 class ProjectCreate(BaseModel):
@@ -39,9 +61,174 @@ class ProjectResponse(BaseModel):
     updated_at: datetime
 
 
+class ServiceAccountCredentialCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expires_at: datetime | None = None
+
+
+class ServiceAccountCredentialSummaryResponse(BaseModel):
+    total: int
+    active: int
+    usable: int
+    expired: int
+    revoked: int
+    latest_created_at: datetime | None
+    last_used_at: datetime | None
+
+
+class ServiceAccountInventoryResponse(BaseModel):
+    id: UUID
+    key: str
+    name: str
+    permissions: tuple[ApiPermission, ...]
+    project_ids: tuple[UUID, ...]
+    all_projects: bool
+    enabled: bool
+    created_at: datetime
+    credential_summary: ServiceAccountCredentialSummaryResponse
+
+
+class CredentialReadinessResponse(BaseModel):
+    account: ServiceAccountInventoryResponse
+    status: CredentialReadinessStatus
+    next_expires_at: datetime | None
+    checked_at: datetime
+    warning_seconds: int
+
+
+class ServiceAccountCredentialResponse(BaseModel):
+    id: UUID
+    account_id: UUID
+    created_at: datetime
+    expires_at: datetime | None
+    revoked_at: datetime | None
+    last_used_at: datetime | None
+    active: bool
+
+
+class IssuedServiceAccountCredentialResponse(ServiceAccountCredentialResponse):
+    token: str
+    warning: str
+
+
+class RevokedServiceAccountCredentialResponse(BaseModel):
+    account_id: UUID
+    credential_id: UUID
+    revoked: bool
+
+
+class ServiceAccountCredentialEventResponse(BaseModel):
+    sequence: int
+    id: UUID
+    account_id: UUID
+    event_type: str
+    credential_id: UUID | None
+    expires_at: datetime | None
+    actor_account_id: UUID | None
+    actor_credential_id: UUID | None
+    occurred_at: datetime
+
+
+class NotificationSubscriptionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider_key: str = Field(pattern=r"^[a-z][a-z0-9._-]*$", max_length=64)
+    destination_ref: str = Field(min_length=1, max_length=255)
+    event_types: tuple[NotificationEventType, ...] = Field(min_length=1, max_length=3)
+
+
+class NotificationSubscriptionConfigure(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    event_types: tuple[NotificationEventType, ...] = Field(min_length=1, max_length=3)
+    enabled: bool
+
+
+class NotificationSubscriptionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    project_id: UUID
+    provider_key: str
+    destination_ref: str
+    event_types: tuple[NotificationEventType, ...]
+    enabled: bool
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class NotificationDeliveryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    subscription_id: UUID
+    project_id: UUID
+    event_id: UUID
+    alert_id: UUID
+    event_type: NotificationEventType
+    provider_key: str
+    destination_ref: str
+    payload: dict[str, Any]
+    idempotency_key: str
+    status: NotificationDeliveryStatus
+    worker_id: str | None
+    lease_expires_at: datetime | None
+    result: dict[str, Any] | None
+    failure_reason: str | None
+    failure_code: NotificationFailureCode | None
+    failure_retryable: bool | None
+    attempt_count: int
+    automatic_retry_limit: int
+    next_attempt_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None
+
+
+class NotificationDeliveryAttemptResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    delivery_id: UUID
+    attempt_number: int
+    trigger: NotificationAttemptTrigger
+    worker_id: str
+    status: NotificationAttemptStatus
+    result: dict[str, Any] | None
+    failure_reason: str | None
+    failure_code: NotificationFailureCode | None
+    failure_retryable: bool | None
+    started_at: datetime
+    finished_at: datetime | None
+
+
 class UserRequestCreate(BaseModel):
     title: str | None = Field(default=None, max_length=255)
     prompt: str = Field(min_length=1)
+
+
+class WorkflowSelectionPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    definition_key: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$", max_length=128)
+    definition_version: int = Field(ge=1)
+
+
+class ProjectRequestDispatchCreate(UserRequestCreate):
+    workflow: WorkflowSelectionPayload | None = None
+    recommendation_id: UUID | None = None
+    skill_addons: tuple["NodeSkillAddonPayload", ...] = Field(default=(), max_length=64)
+
+
+class RequestOriginResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    ingress_key: str
+    external_request_id: str
+    actor_id: str | None
+    conversation_id: str | None
 
 
 class UserRequestResponse(BaseModel):
@@ -51,6 +238,7 @@ class UserRequestResponse(BaseModel):
     project_id: UUID
     title: str | None
     prompt: str
+    origin: RequestOriginResponse | None
     status: RequestStatus
     created_at: datetime
     updated_at: datetime
@@ -74,6 +262,21 @@ class RunResponse(BaseModel):
 class CreatedRequestResponse(BaseModel):
     request: UserRequestResponse
     run: RunResponse
+
+
+class ProjectWorkflowBindingConfigure(BaseModel):
+    definition_key: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$", max_length=128)
+    definition_version: int = Field(ge=1)
+
+
+class ProjectWorkflowBindingResponse(ProjectWorkflowBindingConfigure):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    project_id: UUID
+    definition_id: UUID
+    created_at: datetime
+    updated_at: datetime
 
 
 class SkillCreate(BaseModel):
@@ -178,11 +381,228 @@ class UsageRecordResponse(BaseModel):
     recorded_at: datetime
 
 
+class ExternalExecutionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    execution_id: UUID
+    run_id: UUID
+    node_key: str
+    executor_key: str
+    idempotency_key: str
+    external_session_key: str
+    external_agent_id: str | None
+    workspace_path: str | None
+    workspace_repository_path: str | None
+    workspace_branch: str | None
+    workspace_base_ref: str | None
+    workspace_scope: str | None
+    workspace_released_at: datetime | None
+    external_run_id: str | None
+    status: ExternalExecutionStatus
+    terminal_result: dict[str, Any] | None
+    failure_reason: str | None
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None
+
+
+class WorkspaceOperationCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: WorkspaceOperationKind
+    target_ref: str = Field(min_length=1, max_length=255)
+    confirmation: str | None = Field(default=None, max_length=36)
+
+
+class WorkspaceOperationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    external_execution_id: UUID
+    kind: WorkspaceOperationKind
+    target_ref: str
+    idempotency_key: str
+    requested_by: str
+    status: WorkspaceOperationStatus
+    worker_id: str | None
+    result: dict[str, Any] | None
+    failure_reason: str | None
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None
+
+
+class ScmPublicationCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider_key: str = Field(pattern=r"^[a-z][a-z0-9._-]*$", max_length=64)
+    target_branch: str = Field(min_length=1, max_length=255)
+    title: str = Field(min_length=1, max_length=255)
+    body: str = Field(default="", max_length=65535)
+
+
+class ScmPublicationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    external_execution_id: UUID
+    provider_key: str
+    repository: str
+    source_branch: str
+    target_branch: str
+    title: str
+    body: str
+    idempotency_key: str
+    requested_by: str
+    status: ScmPublicationStatus
+    worker_id: str | None
+    result: dict[str, Any] | None
+    failure_reason: str | None
+    failure_code: ScmPublicationFailureCode | None
+    failure_retryable: bool | None
+    attempt_count: int
+    automatic_retry_limit: int
+    next_attempt_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None
+
+
+class ScmPublicationAttemptResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    publication_id: UUID
+    attempt_number: int
+    trigger: ScmPublicationAttemptTrigger
+    worker_id: str
+    status: ScmPublicationAttemptStatus
+    result: dict[str, Any] | None
+    failure_reason: str | None
+    failure_code: ScmPublicationFailureCode | None
+    failure_retryable: bool | None
+    started_at: datetime
+    finished_at: datetime | None
+
+
+class WorkerPresenceResponse(BaseModel):
+    id: UUID
+    worker_id: str
+    kind: WorkerKind
+    hostname: str
+    process_id: int
+    capabilities: tuple[str, ...]
+    workspace_scope: str | None
+    metadata: dict[str, Any]
+    observed_status: WorkerObservedStatus
+    started_at: datetime
+    last_seen_at: datetime
+    stopped_at: datetime | None
+
+
+class WorkerCapabilityCoverageResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    executor_key: str
+    online_worker_ids: tuple[str, ...]
+    stale_worker_ids: tuple[str, ...]
+    stopped_worker_ids: tuple[str, ...]
+
+
+class WorkerReadinessIssueResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    workflow_execution_id: UUID
+    run_id: UUID
+    node_key: str
+    executor_key: str
+    ready_since: datetime
+    reason: WorkerReadinessIssueReason
+
+
+class WorkerReadinessAlertResponse(BaseModel):
+    id: UUID
+    workflow_execution_id: UUID
+    run_id: UUID
+    node_key: str
+    executor_key: str
+    ready_since: datetime
+    reason: WorkerReadinessIssueReason
+    status: WorkerReadinessAlertStatus
+    severity: str
+    age_seconds: int
+    recommended_action: str
+    first_detected_at: datetime
+    last_observed_at: datetime
+    critical_at: datetime | None
+    resolved_at: datetime | None
+
+
+class ProjectWorkerReadinessResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    project_id: UUID
+    checked_at: datetime
+    online_execution_workers: int
+    coverage: tuple[WorkerCapabilityCoverageResponse, ...]
+    issues: tuple[WorkerReadinessIssueResponse, ...]
+    alerts: tuple[WorkerReadinessAlertResponse, ...]
+
+
 class SkillReferencePayload(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     key: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$", max_length=128)
     version: int = Field(ge=1)
+
+
+class NodeSkillAddonPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    node_key: str = Field(min_length=1, max_length=128)
+    skills: tuple[SkillReferencePayload, ...] = Field(min_length=1, max_length=64)
+
+
+class PhaseInputPayload(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    key: str = Field(pattern=r"^[a-z][a-z0-9_]*$", max_length=128)
+    description: str = Field(min_length=1)
+    required: bool = True
+
+
+class PhasePackReferencePayload(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    key: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$", max_length=128)
+    version: int = Field(ge=1)
+
+
+class PhasePackCreate(BaseModel):
+    key: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$", max_length=128)
+    version: int = Field(ge=1)
+    name: str = Field(min_length=1, max_length=255)
+    description: str = Field(min_length=1)
+    instructions: str = Field(min_length=1)
+    inputs: tuple[PhaseInputPayload, ...] = ()
+    output_contract: dict[str, Any] = Field(default_factory=dict)
+    skills: tuple[SkillReferencePayload, ...] = ()
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class PhasePackResponse(PhasePackCreate):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    created_at: datetime
+
+
+class NodeInputMappingPayload(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    input_key: str = Field(pattern=r"^[a-z][a-z0-9_]*$", max_length=128)
+    source_node: str = Field(min_length=1, max_length=128)
 
 
 class ModelRoutingPayload(BaseModel):
@@ -211,6 +631,15 @@ class WorkflowNodePayload(BaseModel):
     configuration: dict[str, Any] = Field(default_factory=dict)
     skills: tuple[SkillReferencePayload, ...] = ()
     model_routing: ModelRoutingPayload | None = None
+    phase_pack: PhasePackReferencePayload | None = None
+    input_mappings: tuple[NodeInputMappingPayload, ...] = ()
+
+
+class ArtifactConditionPayload(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    path: str = Field(pattern=r"^(?:/(?:[^~/]|~[01])*)+$", max_length=512)
+    equals: str | int | float | bool | None
 
 
 class WorkflowEdgePayload(BaseModel):
@@ -219,6 +648,7 @@ class WorkflowEdgePayload(BaseModel):
     source: str = Field(min_length=1, max_length=128)
     outcome: NodeOutcome
     target: str = Field(min_length=1, max_length=128)
+    condition: ArtifactConditionPayload | None = None
 
 
 class WorkflowDefinitionCreate(BaseModel):
@@ -233,6 +663,78 @@ class WorkflowDefinitionResponse(WorkflowDefinitionCreate):
     id: UUID
 
 
+class WorkflowOptionResponse(BaseModel):
+    id: UUID
+    key: str
+    version: int
+    entry_node: str
+    nodes: tuple[WorkflowNodePayload, ...]
+    edges: tuple[WorkflowEdgePayload, ...]
+    phase_packs: tuple["WorkflowPhasePackSummaryResponse", ...] = ()
+    skills: tuple["WorkflowSkillSummaryResponse", ...] = ()
+    compatible: bool
+    compatibility_issues: tuple["WorkflowCompatibilityIssueResponse", ...] = ()
+
+
+class WorkflowCompatibilityIssueResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    code: str
+    node_key: str
+    executor_key: str
+    message: str
+
+
+class WorkflowPhasePackSummaryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    key: str
+    version: int
+    name: str
+    description: str
+    skills: tuple[SkillReferencePayload, ...] = ()
+
+
+class WorkflowSkillSummaryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    key: str
+    version: int
+    name: str
+    description: str
+    source_kind: SkillSourceKind
+
+
+class ProjectWorkflowOptionsResponse(BaseModel):
+    default: ProjectWorkflowBindingResponse | None
+    default_workflow: WorkflowOptionResponse | None
+    workflows: tuple[WorkflowOptionResponse, ...]
+    available_skills: tuple[WorkflowSkillSummaryResponse, ...]
+
+
+class WorkflowRecommendationCreate(BaseModel):
+    prompt: str = Field(min_length=1)
+    limit: int = Field(default=3, ge=1, le=10)
+
+
+class WorkflowRecommendationCandidateResponse(BaseModel):
+    definition_key: str
+    definition_version: int
+    score: int
+    matched_terms: tuple[str, ...]
+    matched_intents: tuple[str, ...]
+    is_default: bool
+
+
+class WorkflowRecommendationResponse(BaseModel):
+    id: UUID
+    policy_version: str
+    confidence: str
+    requires_confirmation: bool
+    recommended: WorkflowRecommendationCandidateResponse | None
+    candidates: tuple[WorkflowRecommendationCandidateResponse, ...]
+
+
 class WorkflowStart(BaseModel):
     definition_key: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$", max_length=128)
     version: int | None = Field(default=None, ge=1)
@@ -240,6 +742,31 @@ class WorkflowStart(BaseModel):
 
 class WorkflowApprovalResolve(BaseModel):
     approved: bool
+
+
+class WorkflowRequestContextResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    request_id: UUID
+    project_id: UUID
+    project_key: str
+    project_name: str
+    repository_url: str
+    default_branch: str
+    prompt: str
+    title: str | None
+
+
+class TaskArtifactResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    execution_id: UUID
+    producer_node_key: str
+    visit_count: int
+    outcome: NodeOutcome
+    content: dict[str, Any]
+    created_at: datetime
 
 
 class NodeExecutionResponse(BaseModel):
@@ -266,6 +793,7 @@ class WorkflowExecutionResponse(BaseModel):
     snapshot_id: UUID
     definition_key: str
     definition_version: int
+    request_context: WorkflowRequestContextResponse | None
     status: WorkflowStatus
     nodes: tuple[NodeExecutionResponse, ...]
     failure_reason: str | None
@@ -273,6 +801,13 @@ class WorkflowExecutionResponse(BaseModel):
     completed_at: datetime | None
     updated_at: datetime
     version: int
+
+
+class DispatchedRequestResponse(BaseModel):
+    request: UserRequestResponse
+    run: RunResponse
+    workflow: WorkflowExecutionResponse
+    replayed: bool
 
 
 class ProblemDetail(BaseModel):

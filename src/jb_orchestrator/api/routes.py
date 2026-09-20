@@ -1,64 +1,687 @@
 """Control-plane REST routes."""
 
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
+from fastapi.responses import StreamingResponse
 
 from jb_orchestrator.api.dependencies import (
     get_budget_service,
+    get_external_execution_service,
     get_model_catalog_service,
+    get_notification_service,
     get_orchestration_service,
+    get_phase_pack_catalog_service,
+    get_project_observation_service,
+    get_request_dispatch_service,
+    get_scm_publication_service,
+    get_security_service,
     get_skill_catalog_service,
+    get_worker_presence_service,
+    get_worker_readiness_service,
     get_workflow_service,
+    get_workspace_operation_service,
 )
+from jb_orchestrator.api.event_streams import external_execution_event_stream, project_event_stream
 from jb_orchestrator.api.schemas import (
     BudgetConfigure,
     BudgetResponse,
     CreatedRequestResponse,
+    CredentialReadinessResponse,
+    DispatchedRequestResponse,
+    ExternalExecutionResponse,
+    IssuedServiceAccountCredentialResponse,
     ModelProfileCreate,
     ModelProfileResponse,
     NodeExecutionResponse,
+    NotificationDeliveryAttemptResponse,
+    NotificationDeliveryResponse,
+    NotificationSubscriptionConfigure,
+    NotificationSubscriptionCreate,
+    NotificationSubscriptionResponse,
+    PhasePackCreate,
+    PhasePackResponse,
     ProjectCreate,
+    ProjectRequestDispatchCreate,
     ProjectResponse,
+    ProjectWorkerReadinessResponse,
+    ProjectWorkflowBindingConfigure,
+    ProjectWorkflowBindingResponse,
+    ProjectWorkflowOptionsResponse,
+    RevokedServiceAccountCredentialResponse,
     RunResponse,
+    ScmPublicationAttemptResponse,
+    ScmPublicationCreate,
+    ScmPublicationResponse,
+    ServiceAccountCredentialCreate,
+    ServiceAccountCredentialEventResponse,
+    ServiceAccountCredentialResponse,
+    ServiceAccountCredentialSummaryResponse,
+    ServiceAccountInventoryResponse,
     SkillCreate,
     SkillResponse,
+    TaskArtifactResponse,
     UsageRecordResponse,
     UserRequestCreate,
     UserRequestResponse,
+    WorkerCapabilityCoverageResponse,
+    WorkerPresenceResponse,
+    WorkerReadinessAlertResponse,
+    WorkerReadinessIssueResponse,
     WorkflowApprovalResolve,
+    WorkflowCompatibilityIssueResponse,
     WorkflowDefinitionCreate,
     WorkflowDefinitionResponse,
     WorkflowEdgePayload,
     WorkflowExecutionResponse,
     WorkflowNodePayload,
+    WorkflowOptionResponse,
+    WorkflowPhasePackSummaryResponse,
+    WorkflowRecommendationCandidateResponse,
+    WorkflowRecommendationCreate,
+    WorkflowRecommendationResponse,
+    WorkflowRequestContextResponse,
+    WorkflowSkillSummaryResponse,
     WorkflowStart,
+    WorkspaceOperationCreate,
+    WorkspaceOperationResponse,
 )
 from jb_orchestrator.application import (
     BudgetService,
     CreateUserRequest,
+    CredentialReadiness,
+    DispatchProjectRequest,
+    ExternalExecutionService,
     ModelCatalogService,
+    NodeSkillAddon,
+    NotificationService,
     OrchestrationService,
+    PhasePackCatalogService,
+    ProjectObservationService,
     RegisterProject,
+    RequestDispatchService,
+    ScmPublicationService,
+    SecurityService,
+    ServiceAccountInventory,
     SkillCatalogService,
+    WorkerPresenceService,
+    WorkerReadinessService,
+    WorkflowComposition,
     WorkflowService,
+    WorkspaceOperationService,
 )
+from jb_orchestrator.config import get_settings
+from jb_orchestrator.domain import (
+    DomainEvent,
+    DomainValidationError,
+    ProjectStatus,
+    RequestOrigin,
+    RequestStatus,
+    RunStatus,
+)
+from jb_orchestrator.external_executions import ExternalExecutionStatus
 from jb_orchestrator.model_routing import ModelProfile, ModelRoutingRequest
+from jb_orchestrator.notifications import NotificationDeliveryStatus
+from jb_orchestrator.phase_packs import (
+    PhaseInputDefinition,
+    PhasePackDefinition,
+    PhasePackReference,
+)
+from jb_orchestrator.security import ServiceAccountCredential
 from jb_orchestrator.skills import SkillDefinition, SkillReference
+from jb_orchestrator.worker_presence import (
+    ProjectWorkerReadiness,
+    WorkerReadinessAlertStatus,
+    WorkerReadinessIssueReason,
+)
 from jb_orchestrator.workflows import (
+    ArtifactCondition,
     EdgeDefinition,
     NodeDefinition,
+    NodeInputMapping,
     WorkflowDefinition,
     WorkflowExecution,
+    WorkflowStatus,
 )
 
 router = APIRouter(prefix="/v1")
 Service = Annotated[OrchestrationService, Depends(get_orchestration_service)]
 SkillService = Annotated[SkillCatalogService, Depends(get_skill_catalog_service)]
 ModelService = Annotated[ModelCatalogService, Depends(get_model_catalog_service)]
+PhasePackService = Annotated[PhasePackCatalogService, Depends(get_phase_pack_catalog_service)]
 BudgetServiceDependency = Annotated[BudgetService, Depends(get_budget_service)]
 WorkflowServiceDependency = Annotated[WorkflowService, Depends(get_workflow_service)]
+RequestDispatchServiceDependency = Annotated[
+    RequestDispatchService, Depends(get_request_dispatch_service)
+]
+ExternalExecutionServiceDependency = Annotated[
+    ExternalExecutionService, Depends(get_external_execution_service)
+]
+WorkspaceOperationServiceDependency = Annotated[
+    WorkspaceOperationService, Depends(get_workspace_operation_service)
+]
+ScmPublicationServiceDependency = Annotated[
+    ScmPublicationService, Depends(get_scm_publication_service)
+]
+ProjectObservationServiceDependency = Annotated[
+    ProjectObservationService, Depends(get_project_observation_service)
+]
+WorkerPresenceServiceDependency = Annotated[
+    WorkerPresenceService, Depends(get_worker_presence_service)
+]
+WorkerReadinessServiceDependency = Annotated[
+    WorkerReadinessService, Depends(get_worker_readiness_service)
+]
+NotificationServiceDependency = Annotated[NotificationService, Depends(get_notification_service)]
+SecurityServiceDependency = Annotated[SecurityService, Depends(get_security_service)]
+
+
+def _credential_response(
+    credential: ServiceAccountCredential,
+) -> ServiceAccountCredentialResponse:
+    return ServiceAccountCredentialResponse(
+        id=credential.id,
+        account_id=credential.account_id,
+        created_at=credential.created_at,
+        expires_at=credential.expires_at,
+        revoked_at=credential.revoked_at,
+        last_used_at=credential.last_used_at,
+        active=credential.is_active(),
+    )
+
+
+def _service_account_inventory_response(
+    inventory: ServiceAccountInventory,
+) -> ServiceAccountInventoryResponse:
+    account = inventory.account
+    summary = inventory.credential_summary
+    return ServiceAccountInventoryResponse(
+        id=account.id,
+        key=account.key,
+        name=account.name,
+        permissions=tuple(sorted(account.permissions)),
+        project_ids=tuple(sorted(account.project_ids)),
+        all_projects=account.all_projects,
+        enabled=account.enabled,
+        created_at=account.created_at,
+        credential_summary=ServiceAccountCredentialSummaryResponse(
+            total=summary.total,
+            active=summary.active,
+            usable=summary.usable,
+            expired=summary.expired,
+            revoked=summary.revoked,
+            latest_created_at=summary.latest_created_at,
+            last_used_at=summary.last_used_at,
+        ),
+    )
+
+
+def _credential_readiness_response(
+    readiness: CredentialReadiness,
+) -> CredentialReadinessResponse:
+    return CredentialReadinessResponse(
+        account=_service_account_inventory_response(
+            ServiceAccountInventory(
+                account=readiness.account,
+                credential_summary=readiness.credential_summary,
+            )
+        ),
+        status=readiness.status,
+        next_expires_at=readiness.next_expires_at,
+        checked_at=readiness.checked_at,
+        warning_seconds=readiness.warning_seconds,
+    )
+
+
+def _credential_event_response(event: DomainEvent) -> ServiceAccountCredentialEventResponse:
+    if event.sequence is None:  # pragma: no cover - only persisted events are queried
+        raise RuntimeError("credential audit event requires a persisted sequence")
+    credential_id = event.payload.get("credential_id")
+    expires_at = event.payload.get("expires_at")
+    actor_account_id = event.payload.get("actor_account_id")
+    actor_credential_id = event.payload.get("actor_credential_id")
+    return ServiceAccountCredentialEventResponse(
+        sequence=event.sequence,
+        id=event.id,
+        account_id=event.aggregate_id,
+        event_type=event.event_type,
+        credential_id=UUID(credential_id) if isinstance(credential_id, str) else None,
+        expires_at=datetime.fromisoformat(expires_at) if isinstance(expires_at, str) else None,
+        actor_account_id=(UUID(actor_account_id) if isinstance(actor_account_id, str) else None),
+        actor_credential_id=(
+            UUID(actor_credential_id) if isinstance(actor_credential_id, str) else None
+        ),
+        occurred_at=event.occurred_at,
+    )
+
+
+@router.get(
+    "/service-accounts",
+    response_model=list[ServiceAccountInventoryResponse],
+)
+async def list_service_accounts(
+    service: SecurityServiceDependency,
+    enabled: bool | None = Query(default=None),
+    key_prefix: str | None = Query(
+        default=None,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[a-z][a-z0-9._-]*$",
+    ),
+    after_key: str | None = Query(
+        default=None,
+        min_length=3,
+        max_length=64,
+        pattern=r"^[a-z][a-z0-9._-]{2,63}$",
+    ),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[ServiceAccountInventoryResponse]:
+    return [
+        _service_account_inventory_response(inventory)
+        for inventory in await service.list_account_inventory(
+            enabled=enabled,
+            key_prefix=key_prefix,
+            after_key=after_key,
+            limit=limit,
+        )
+    ]
+
+
+@router.get(
+    "/service-accounts/readiness",
+    response_model=list[CredentialReadinessResponse],
+)
+async def inspect_service_account_readiness(
+    service: SecurityServiceDependency,
+    issues_only: bool = Query(default=False),
+    key_prefix: str | None = Query(
+        default=None,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[a-z][a-z0-9._-]*$",
+    ),
+    after_key: str | None = Query(
+        default=None,
+        min_length=3,
+        max_length=64,
+        pattern=r"^[a-z][a-z0-9._-]{2,63}$",
+    ),
+    limit: int = Query(default=100, ge=1, le=500),
+    warning_seconds: int | None = Query(default=None, ge=1, le=31_536_000),
+) -> list[CredentialReadinessResponse]:
+    configured_warning = (
+        warning_seconds
+        if warning_seconds is not None
+        else get_settings().credential_expiry_warning_seconds
+    )
+    return [
+        _credential_readiness_response(readiness)
+        for readiness in await service.list_credential_readiness(
+            warning_seconds=configured_warning,
+            issues_only=issues_only,
+            key_prefix=key_prefix,
+            after_key=after_key,
+            limit=limit,
+        )
+    ]
+
+
+@router.get(
+    "/service-accounts/{account_id}",
+    response_model=ServiceAccountInventoryResponse,
+)
+async def get_service_account(
+    account_id: UUID,
+    service: SecurityServiceDependency,
+) -> ServiceAccountInventoryResponse:
+    return _service_account_inventory_response(await service.get_account_inventory(account_id))
+
+
+@router.post(
+    "/service-accounts/{account_id}/credentials",
+    response_model=IssuedServiceAccountCredentialResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def issue_service_account_credential(
+    request: Request,
+    account_id: UUID,
+    payload: ServiceAccountCredentialCreate,
+    service: SecurityServiceDependency,
+) -> IssuedServiceAccountCredentialResponse:
+    issued = await service.issue_credential(
+        account_id,
+        expires_at=payload.expires_at,
+        actor=request.state.principal,
+    )
+    credential = _credential_response(issued.credential)
+    return IssuedServiceAccountCredentialResponse(
+        **credential.model_dump(),
+        token=issued.token,
+        warning="Store this token now; it cannot be retrieved later.",
+    )
+
+
+@router.get(
+    "/service-accounts/{account_id}/credentials",
+    response_model=list[ServiceAccountCredentialResponse],
+)
+async def list_service_account_credentials(
+    account_id: UUID,
+    service: SecurityServiceDependency,
+) -> list[ServiceAccountCredentialResponse]:
+    return [
+        _credential_response(credential)
+        for credential in await service.list_credentials(account_id)
+    ]
+
+
+@router.get(
+    "/service-accounts/{account_id}/credential-events",
+    response_model=list[ServiceAccountCredentialEventResponse],
+)
+async def list_service_account_credential_events(
+    account_id: UUID,
+    service: SecurityServiceDependency,
+    before_sequence: int | None = Query(default=None, ge=1),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[ServiceAccountCredentialEventResponse]:
+    return [
+        _credential_event_response(event)
+        for event in await service.list_credential_events(
+            account_id,
+            before_sequence=before_sequence,
+            limit=limit,
+        )
+    ]
+
+
+@router.delete(
+    "/service-accounts/{account_id}/credentials/{credential_id}",
+    response_model=RevokedServiceAccountCredentialResponse,
+)
+async def revoke_service_account_credential(
+    request: Request,
+    account_id: UUID,
+    credential_id: UUID,
+    service: SecurityServiceDependency,
+) -> RevokedServiceAccountCredentialResponse:
+    await service.revoke_credential(
+        account_id,
+        credential_id,
+        actor=request.state.principal,
+    )
+    return RevokedServiceAccountCredentialResponse(
+        account_id=account_id,
+        credential_id=credential_id,
+        revoked=True,
+    )
+
+
+@router.get("/workers", response_model=list[WorkerPresenceResponse])
+async def list_worker_presence(
+    service: WorkerPresenceServiceDependency,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[WorkerPresenceResponse]:
+    settings = get_settings()
+    views = await service.list(
+        limit=limit,
+        stale_after_seconds=settings.worker_presence_stale_after_seconds,
+    )
+    return [
+        WorkerPresenceResponse(
+            id=view.worker.id,
+            worker_id=view.worker.worker_id,
+            kind=view.worker.kind,
+            hostname=view.worker.hostname,
+            process_id=view.worker.process_id,
+            capabilities=view.worker.capabilities,
+            workspace_scope=view.worker.workspace_scope,
+            metadata=view.worker.metadata,
+            observed_status=view.observed_status,
+            started_at=view.worker.started_at,
+            last_seen_at=view.worker.last_seen_at,
+            stopped_at=view.worker.stopped_at,
+        )
+        for view in views
+    ]
+
+
+@router.get(
+    "/projects/{project_id}/worker-readiness",
+    response_model=ProjectWorkerReadinessResponse,
+)
+async def inspect_project_worker_readiness(
+    project_id: UUID,
+    service: WorkerReadinessServiceDependency,
+) -> ProjectWorkerReadinessResponse:
+    report = await service.inspect_project(
+        project_id,
+        stale_after_seconds=get_settings().worker_presence_stale_after_seconds,
+    )
+    return _worker_readiness_response(report)
+
+
+@router.post(
+    "/projects/{project_id}/worker-readiness/evaluate",
+    response_model=ProjectWorkerReadinessResponse,
+)
+async def evaluate_project_worker_readiness(
+    project_id: UUID,
+    service: WorkerReadinessServiceDependency,
+) -> ProjectWorkerReadinessResponse:
+    settings = get_settings()
+    report = await service.evaluate_project(
+        project_id,
+        stale_after_seconds=settings.worker_presence_stale_after_seconds,
+        critical_after_seconds=settings.worker_readiness_alert_critical_after_seconds,
+    )
+    return _worker_readiness_response(report)
+
+
+def _worker_readiness_response(
+    report: ProjectWorkerReadiness,
+) -> ProjectWorkerReadinessResponse:
+    alerts = []
+    for alert in report.alerts:
+        detected_at = _as_utc(alert.first_detected_at)
+        finished_at = _as_utc(alert.resolved_at or report.checked_at)
+        age_seconds = max(
+            0,
+            int((finished_at - detected_at).total_seconds()),
+        )
+        severity = (
+            "resolved"
+            if alert.status is WorkerReadinessAlertStatus.RESOLVED
+            else "critical"
+            if alert.critical_at is not None
+            else "warning"
+        )
+        action = (
+            "none"
+            if alert.status is WorkerReadinessAlertStatus.RESOLVED
+            else "start_capable_worker"
+            if alert.reason is WorkerReadinessIssueReason.NO_CAPABLE_WORKER
+            else "restart_capable_worker"
+        )
+        alerts.append(
+            WorkerReadinessAlertResponse(
+                id=alert.id,
+                workflow_execution_id=alert.workflow_execution_id,
+                run_id=alert.run_id,
+                node_key=alert.node_key,
+                executor_key=alert.executor_key,
+                ready_since=alert.ready_since,
+                reason=alert.reason,
+                status=alert.status,
+                severity=severity,
+                age_seconds=age_seconds,
+                recommended_action=action,
+                first_detected_at=alert.first_detected_at,
+                last_observed_at=alert.last_observed_at,
+                critical_at=alert.critical_at,
+                resolved_at=alert.resolved_at,
+            )
+        )
+    return ProjectWorkerReadinessResponse(
+        project_id=report.project_id,
+        checked_at=report.checked_at,
+        online_execution_workers=report.online_execution_workers,
+        coverage=tuple(
+            WorkerCapabilityCoverageResponse.model_validate(value) for value in report.coverage
+        ),
+        issues=tuple(WorkerReadinessIssueResponse.model_validate(value) for value in report.issues),
+        alerts=tuple(alerts),
+    )
+
+
+def _as_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+@router.post(
+    "/projects/{project_id}/notification-subscriptions",
+    response_model=NotificationSubscriptionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_notification_subscription(
+    project_id: UUID,
+    payload: NotificationSubscriptionCreate,
+    request: Request,
+    response: Response,
+    service: NotificationServiceDependency,
+) -> NotificationSubscriptionResponse:
+    principal = getattr(request.state, "principal", None)
+    subscription, replayed = await service.create_subscription(
+        project_id,
+        provider_key=payload.provider_key,
+        destination_ref=payload.destination_ref,
+        event_types=payload.event_types,
+        created_by=principal.account_key if principal is not None else "anonymous",
+    )
+    if replayed:
+        response.status_code = status.HTTP_200_OK
+    return NotificationSubscriptionResponse.model_validate(subscription)
+
+
+@router.get(
+    "/projects/{project_id}/notification-subscriptions",
+    response_model=list[NotificationSubscriptionResponse],
+)
+async def list_notification_subscriptions(
+    project_id: UUID,
+    service: NotificationServiceDependency,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[NotificationSubscriptionResponse]:
+    return [
+        NotificationSubscriptionResponse.model_validate(subscription)
+        for subscription in await service.list_subscriptions(project_id, limit=limit)
+    ]
+
+
+@router.patch(
+    "/projects/{project_id}/notification-subscriptions/{subscription_id}",
+    response_model=NotificationSubscriptionResponse,
+)
+async def configure_notification_subscription(
+    project_id: UUID,
+    subscription_id: UUID,
+    payload: NotificationSubscriptionConfigure,
+    request: Request,
+    service: NotificationServiceDependency,
+) -> NotificationSubscriptionResponse:
+    principal = getattr(request.state, "principal", None)
+    subscription = await service.configure_subscription(
+        project_id,
+        subscription_id,
+        event_types=payload.event_types,
+        enabled=payload.enabled,
+        configured_by=principal.account_key if principal is not None else "anonymous",
+    )
+    return NotificationSubscriptionResponse.model_validate(subscription)
+
+
+@router.get(
+    "/projects/{project_id}/notification-deliveries",
+    response_model=list[NotificationDeliveryResponse],
+)
+async def list_notification_deliveries(
+    project_id: UUID,
+    service: NotificationServiceDependency,
+    delivery_status: Annotated[NotificationDeliveryStatus | None, Query(alias="status")] = None,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[NotificationDeliveryResponse]:
+    return [
+        NotificationDeliveryResponse.model_validate(delivery)
+        for delivery in await service.list_deliveries(
+            project_id,
+            status=delivery_status,
+            limit=limit,
+        )
+    ]
+
+
+@router.get(
+    "/projects/{project_id}/notification-deliveries/{delivery_id}/attempts",
+    response_model=list[NotificationDeliveryAttemptResponse],
+)
+async def list_notification_delivery_attempts(
+    project_id: UUID,
+    delivery_id: UUID,
+    service: NotificationServiceDependency,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[NotificationDeliveryAttemptResponse]:
+    return [
+        NotificationDeliveryAttemptResponse.model_validate(attempt)
+        for attempt in await service.list_attempts(project_id, delivery_id, limit=limit)
+    ]
+
+
+@router.post(
+    "/projects/{project_id}/notification-deliveries/{delivery_id}/retry",
+    response_model=NotificationDeliveryResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def retry_notification_delivery(
+    project_id: UUID,
+    delivery_id: UUID,
+    request: Request,
+    response: Response,
+    service: NotificationServiceDependency,
+) -> NotificationDeliveryResponse:
+    principal = getattr(request.state, "principal", None)
+    delivery, replayed = await service.retry(
+        project_id,
+        delivery_id,
+        requested_by=principal.account_key if principal is not None else "anonymous",
+    )
+    if replayed:
+        response.status_code = status.HTTP_200_OK
+    return NotificationDeliveryResponse.model_validate(delivery)
+
+
+@router.post(
+    "/projects/{project_id}/notification-deliveries/{delivery_id}/automatic-retry/cancel",
+    response_model=NotificationDeliveryResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def cancel_notification_delivery_automatic_retry(
+    project_id: UUID,
+    delivery_id: UUID,
+    request: Request,
+    response: Response,
+    service: NotificationServiceDependency,
+) -> NotificationDeliveryResponse:
+    principal = getattr(request.state, "principal", None)
+    delivery, replayed = await service.cancel_automatic_retry(
+        project_id,
+        delivery_id,
+        requested_by=principal.account_key if principal is not None else "anonymous",
+    )
+    if replayed:
+        response.status_code = status.HTTP_200_OK
+    return NotificationDeliveryResponse.model_validate(delivery)
 
 
 def workflow_definition_response(
@@ -81,6 +704,11 @@ def workflow_execution_response(execution: WorkflowExecution) -> WorkflowExecuti
         snapshot_id=execution.snapshot.id,
         definition_key=execution.snapshot.definition_key,
         definition_version=execution.snapshot.definition_version,
+        request_context=(
+            WorkflowRequestContextResponse.model_validate(execution.snapshot.request_context)
+            if execution.snapshot.request_context is not None
+            else None
+        ),
         status=execution.status,
         nodes=tuple(
             NodeExecutionResponse.model_validate(execution.nodes[node.key])
@@ -121,11 +749,32 @@ def workflow_definition_from_payload(
                     if node.model_routing is not None
                     else None
                 ),
+                phase_pack=(
+                    PhasePackReference(key=node.phase_pack.key, version=node.phase_pack.version)
+                    if node.phase_pack is not None
+                    else None
+                ),
+                input_mappings=tuple(
+                    NodeInputMapping(input_key=value.input_key, source_node=value.source_node)
+                    for value in node.input_mappings
+                ),
             )
             for node in payload.nodes
         ),
         edges=tuple(
-            EdgeDefinition(source=edge.source, outcome=edge.outcome, target=edge.target)
+            EdgeDefinition(
+                source=edge.source,
+                outcome=edge.outcome,
+                target=edge.target,
+                condition=(
+                    ArtifactCondition(
+                        path=edge.condition.path,
+                        equals=edge.condition.equals,
+                    )
+                    if edge.condition is not None
+                    else None
+                ),
+            )
             for edge in payload.edges
         ),
     )
@@ -144,9 +793,255 @@ async def register_project(payload: ProjectCreate, service: Service) -> ProjectR
     return ProjectResponse.model_validate(project)
 
 
+@router.get("/projects", response_model=list[ProjectResponse])
+async def list_projects(
+    service: ProjectObservationServiceDependency,
+    status: ProjectStatus | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[ProjectResponse]:
+    return [
+        ProjectResponse.model_validate(project)
+        for project in await service.list_projects(status=status, limit=limit)
+    ]
+
+
 @router.get("/projects/{project_id}", response_model=ProjectResponse)
 async def get_project(project_id: UUID, service: Service) -> ProjectResponse:
     return ProjectResponse.model_validate(await service.get_project(project_id))
+
+
+@router.get("/projects/{project_id}/requests", response_model=list[UserRequestResponse])
+async def list_project_requests(
+    project_id: UUID,
+    service: ProjectObservationServiceDependency,
+    status: RequestStatus | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[UserRequestResponse]:
+    return [
+        UserRequestResponse.model_validate(user_request)
+        for user_request in await service.list_requests(project_id, status=status, limit=limit)
+    ]
+
+
+@router.get(
+    "/projects/{project_id}/workflow-executions",
+    response_model=list[WorkflowExecutionResponse],
+)
+async def list_project_workflow_executions(
+    project_id: UUID,
+    service: ProjectObservationServiceDependency,
+    status: WorkflowStatus | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[WorkflowExecutionResponse]:
+    return [
+        workflow_execution_response(execution)
+        for execution in await service.list_workflow_executions(
+            project_id, status=status, limit=limit
+        )
+    ]
+
+
+@router.get("/projects/{project_id}/events/stream")
+async def stream_project_events(
+    project_id: UUID,
+    request: Request,
+    service: ProjectObservationServiceDependency,
+    after: Annotated[UUID | None, Query()] = None,
+    last_event_id: Annotated[UUID | None, Header(alias="Last-Event-ID")] = None,
+) -> StreamingResponse:
+    if after is not None and last_event_id is not None and after != last_event_id:
+        raise DomainValidationError("after and Last-Event-ID cursors must match")
+    cursor = last_event_id or after
+    initial_events = await service.list_events(project_id, after_event_id=cursor)
+    settings = get_settings()
+    return StreamingResponse(
+        project_event_stream(
+            request=request,
+            service=service,
+            project_id=project_id,
+            initial_events=initial_events,
+            cursor=cursor,
+            poll_interval_seconds=settings.sse_poll_interval_seconds,
+            heartbeat_interval_seconds=settings.sse_heartbeat_interval_seconds,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.put(
+    "/projects/{project_id}/workflow-binding",
+    response_model=ProjectWorkflowBindingResponse,
+)
+async def configure_project_workflow_binding(
+    project_id: UUID,
+    payload: ProjectWorkflowBindingConfigure,
+    service: RequestDispatchServiceDependency,
+) -> ProjectWorkflowBindingResponse:
+    binding = await service.configure_binding(
+        project_id, payload.definition_key, payload.definition_version
+    )
+    return ProjectWorkflowBindingResponse.model_validate(binding)
+
+
+@router.get(
+    "/projects/{project_id}/workflow-binding",
+    response_model=ProjectWorkflowBindingResponse,
+)
+async def get_project_workflow_binding(
+    project_id: UUID, service: RequestDispatchServiceDependency
+) -> ProjectWorkflowBindingResponse:
+    return ProjectWorkflowBindingResponse.model_validate(await service.get_binding(project_id))
+
+
+@router.get(
+    "/projects/{project_id}/workflow-options",
+    response_model=ProjectWorkflowOptionsResponse,
+)
+async def list_project_workflow_options(
+    project_id: UUID,
+    service: RequestDispatchServiceDependency,
+) -> ProjectWorkflowOptionsResponse:
+    options = await service.list_workflow_options(project_id)
+    return ProjectWorkflowOptionsResponse(
+        default=(
+            ProjectWorkflowBindingResponse.model_validate(options.default)
+            if options.default is not None
+            else None
+        ),
+        default_workflow=(
+            _workflow_option_response(options.default_workflow)
+            if options.default_workflow is not None
+            else None
+        ),
+        workflows=tuple(_workflow_option_response(value) for value in options.workflows),
+        available_skills=tuple(
+            WorkflowSkillSummaryResponse.model_validate(skill) for skill in options.available_skills
+        ),
+    )
+
+
+@router.post(
+    "/projects/{project_id}/workflow-recommendations",
+    response_model=WorkflowRecommendationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def recommend_project_workflow(
+    project_id: UUID,
+    payload: WorkflowRecommendationCreate,
+    service: RequestDispatchServiceDependency,
+) -> WorkflowRecommendationResponse:
+    recorded = await service.recommend_workflows(project_id, payload.prompt, limit=payload.limit)
+    recommendation = recorded.recommendation
+    candidates = tuple(
+        WorkflowRecommendationCandidateResponse.model_validate(candidate, from_attributes=True)
+        for candidate in recommendation.candidates
+    )
+    return WorkflowRecommendationResponse(
+        id=recorded.id,
+        policy_version=recommendation.policy_version,
+        confidence=recommendation.confidence.value,
+        requires_confirmation=recommendation.requires_confirmation,
+        recommended=candidates[0] if candidates else None,
+        candidates=candidates,
+    )
+
+
+def _workflow_option_response(composition: WorkflowComposition) -> WorkflowOptionResponse:
+    definition = composition.definition
+    return WorkflowOptionResponse(
+        id=definition.id,
+        key=definition.key,
+        version=definition.version,
+        entry_node=definition.entry_node,
+        nodes=tuple(WorkflowNodePayload.model_validate(node) for node in definition.nodes),
+        edges=tuple(WorkflowEdgePayload.model_validate(edge) for edge in definition.edges),
+        phase_packs=tuple(
+            WorkflowPhasePackSummaryResponse.model_validate(phase_pack)
+            for phase_pack in composition.phase_packs
+        ),
+        skills=tuple(
+            WorkflowSkillSummaryResponse.model_validate(skill) for skill in composition.skills
+        ),
+        compatible=composition.compatibility.compatible,
+        compatibility_issues=tuple(
+            WorkflowCompatibilityIssueResponse.model_validate(issue)
+            for issue in composition.compatibility.issues
+        ),
+    )
+
+
+@router.post(
+    "/projects/{project_id}/dispatches",
+    response_model=DispatchedRequestResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def dispatch_project_request(
+    project_id: UUID,
+    payload: ProjectRequestDispatchCreate,
+    service: RequestDispatchServiceDependency,
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=128)],
+    ingress_key: Annotated[
+        str,
+        Header(
+            alias="X-JB-Ingress-Key",
+            pattern=r"^[a-z][a-z0-9._-]{0,63}$",
+            max_length=64,
+        ),
+    ] = "rest",
+    external_request_id: Annotated[
+        str | None,
+        Header(alias="X-JB-External-Request-ID", min_length=1, max_length=255),
+    ] = None,
+    actor_id: Annotated[
+        str | None, Header(alias="X-JB-Actor-ID", min_length=1, max_length=255)
+    ] = None,
+    conversation_id: Annotated[
+        str | None,
+        Header(alias="X-JB-Conversation-ID", min_length=1, max_length=512),
+    ] = None,
+) -> DispatchedRequestResponse:
+    dispatched = await service.dispatch(
+        DispatchProjectRequest(
+            project_id=project_id,
+            prompt=payload.prompt,
+            title=payload.title,
+            idempotency_key=idempotency_key,
+            origin=RequestOrigin(
+                ingress_key=ingress_key,
+                external_request_id=external_request_id or idempotency_key,
+                actor_id=actor_id,
+                conversation_id=conversation_id,
+            ),
+            definition_key=(
+                payload.workflow.definition_key if payload.workflow is not None else None
+            ),
+            definition_version=(
+                payload.workflow.definition_version if payload.workflow is not None else None
+            ),
+            recommendation_id=payload.recommendation_id,
+            skill_addons=tuple(
+                NodeSkillAddon(
+                    node_key=addon.node_key,
+                    skills=tuple(
+                        SkillReference(key=skill.key, version=skill.version)
+                        for skill in addon.skills
+                    ),
+                )
+                for addon in payload.skill_addons
+            ),
+        )
+    )
+    return DispatchedRequestResponse(
+        request=UserRequestResponse.model_validate(dispatched.request),
+        run=RunResponse.model_validate(dispatched.run),
+        workflow=workflow_execution_response(dispatched.workflow),
+        replayed=dispatched.replayed,
+    )
 
 
 @router.post(
@@ -169,6 +1064,19 @@ async def create_request(
 @router.get("/requests/{request_id}", response_model=UserRequestResponse)
 async def get_request(request_id: UUID, service: Service) -> UserRequestResponse:
     return UserRequestResponse.model_validate(await service.get_request(request_id))
+
+
+@router.get("/requests/{request_id}/runs", response_model=list[RunResponse])
+async def list_request_runs(
+    request_id: UUID,
+    service: ProjectObservationServiceDependency,
+    status: RunStatus | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[RunResponse]:
+    return [
+        RunResponse.model_validate(run)
+        for run in await service.list_runs(request_id, status=status, limit=limit)
+    ]
 
 
 @router.get("/runs/{run_id}", response_model=RunResponse)
@@ -248,6 +1156,20 @@ async def get_workflow_execution(
     return workflow_execution_response(await service.get(execution_id))
 
 
+@router.get(
+    "/workflow-executions/{execution_id}/artifacts",
+    response_model=list[TaskArtifactResponse],
+)
+async def list_workflow_artifacts(
+    execution_id: UUID,
+    service: WorkflowServiceDependency,
+) -> list[TaskArtifactResponse]:
+    return [
+        TaskArtifactResponse.model_validate(artifact)
+        for artifact in await service.list_artifacts(execution_id)
+    ]
+
+
 @router.post(
     "/workflow-executions/{execution_id}/approvals/{node_key}",
     response_model=WorkflowExecutionResponse,
@@ -293,6 +1215,38 @@ async def get_skill(key: str, service: SkillService, version: int | None = None)
     return SkillResponse.model_validate(await service.get(key, version))
 
 
+@router.post("/phase-packs", response_model=PhasePackResponse, status_code=status.HTTP_201_CREATED)
+async def register_phase_pack(
+    payload: PhasePackCreate, service: PhasePackService
+) -> PhasePackResponse:
+    phase_pack = PhasePackDefinition(
+        key=payload.key,
+        version=payload.version,
+        name=payload.name,
+        description=payload.description,
+        instructions=payload.instructions,
+        inputs=tuple(PhaseInputDefinition(**value.model_dump()) for value in payload.inputs),
+        output_contract=payload.output_contract,
+        skills=tuple(
+            SkillReference(key=value.key, version=value.version) for value in payload.skills
+        ),
+        metadata=payload.metadata,
+    )
+    return PhasePackResponse.model_validate(await service.register(phase_pack))
+
+
+@router.get("/phase-packs", response_model=list[PhasePackResponse])
+async def list_phase_packs(service: PhasePackService) -> list[PhasePackResponse]:
+    return [PhasePackResponse.model_validate(value) for value in await service.list_latest()]
+
+
+@router.get("/phase-packs/{key}", response_model=PhasePackResponse)
+async def get_phase_pack(
+    key: str, service: PhasePackService, version: int | None = None
+) -> PhasePackResponse:
+    return PhasePackResponse.model_validate(await service.get(key, version))
+
+
 @router.post("/models", response_model=ModelProfileResponse, status_code=status.HTTP_201_CREATED)
 async def register_model(
     payload: ModelProfileCreate, service: ModelService
@@ -335,3 +1289,204 @@ async def list_usage(
         UsageRecordResponse.model_validate(record)
         for record in await service.list_usage(project_id)
     ]
+
+
+@router.get("/external-executions", response_model=list[ExternalExecutionResponse])
+async def list_external_executions(
+    service: ExternalExecutionServiceDependency,
+    workflow_execution_id: UUID | None = None,
+    run_id: UUID | None = None,
+    status: ExternalExecutionStatus | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[ExternalExecutionResponse]:
+    return [
+        ExternalExecutionResponse.model_validate(execution)
+        for execution in await service.list(
+            workflow_execution_id=workflow_execution_id,
+            run_id=run_id,
+            status=status,
+            limit=limit,
+        )
+    ]
+
+
+@router.get("/external-executions/events/stream")
+async def stream_external_execution_events(
+    request: Request,
+    service: ExternalExecutionServiceDependency,
+    after: Annotated[UUID | None, Query()] = None,
+    last_event_id: Annotated[UUID | None, Header(alias="Last-Event-ID")] = None,
+) -> StreamingResponse:
+    if after is not None and last_event_id is not None and after != last_event_id:
+        raise DomainValidationError("after and Last-Event-ID cursors must match")
+    cursor = last_event_id or after
+    initial_events = await service.list_events(after_event_id=cursor)
+    settings = get_settings()
+    return StreamingResponse(
+        external_execution_event_stream(
+            request=request,
+            service=service,
+            initial_events=initial_events,
+            cursor=cursor,
+            poll_interval_seconds=settings.sse_poll_interval_seconds,
+            heartbeat_interval_seconds=settings.sse_heartbeat_interval_seconds,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get("/external-executions/{execution_id}", response_model=ExternalExecutionResponse)
+async def get_external_execution(
+    execution_id: UUID,
+    service: ExternalExecutionServiceDependency,
+) -> ExternalExecutionResponse:
+    return ExternalExecutionResponse.model_validate(await service.get_by_id(execution_id))
+
+
+@router.post(
+    "/external-executions/{execution_id}/workspace-operations",
+    response_model=WorkspaceOperationResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def request_workspace_operation(
+    execution_id: UUID,
+    payload: WorkspaceOperationCreate,
+    request: Request,
+    response: Response,
+    service: WorkspaceOperationServiceDependency,
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=255)],
+) -> WorkspaceOperationResponse:
+    principal = getattr(request.state, "principal", None)
+    requested_by = principal.account_key if principal is not None else "anonymous"
+    operation, replayed = await service.request(
+        execution_id,
+        kind=payload.kind,
+        target_ref=payload.target_ref,
+        confirmation=payload.confirmation,
+        idempotency_key=idempotency_key,
+        requested_by=requested_by,
+    )
+    if replayed:
+        response.status_code = status.HTTP_200_OK
+    return WorkspaceOperationResponse.model_validate(operation)
+
+
+@router.get(
+    "/external-executions/{execution_id}/workspace-operations",
+    response_model=list[WorkspaceOperationResponse],
+)
+async def list_workspace_operations(
+    execution_id: UUID,
+    service: WorkspaceOperationServiceDependency,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[WorkspaceOperationResponse]:
+    return [
+        WorkspaceOperationResponse.model_validate(operation)
+        for operation in await service.list_for_execution(execution_id, limit=limit)
+    ]
+
+
+@router.post(
+    "/external-executions/{execution_id}/scm-publications",
+    response_model=ScmPublicationResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def request_scm_publication(
+    execution_id: UUID,
+    payload: ScmPublicationCreate,
+    request: Request,
+    response: Response,
+    service: ScmPublicationServiceDependency,
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=255)],
+) -> ScmPublicationResponse:
+    principal = getattr(request.state, "principal", None)
+    requested_by = principal.account_key if principal is not None else "anonymous"
+    publication, replayed = await service.request(
+        execution_id,
+        provider_key=payload.provider_key,
+        target_branch=payload.target_branch,
+        title=payload.title,
+        body=payload.body,
+        idempotency_key=idempotency_key,
+        requested_by=requested_by,
+    )
+    if replayed:
+        response.status_code = status.HTTP_200_OK
+    return ScmPublicationResponse.model_validate(publication)
+
+
+@router.get(
+    "/external-executions/{execution_id}/scm-publications",
+    response_model=list[ScmPublicationResponse],
+)
+async def list_scm_publications(
+    execution_id: UUID,
+    service: ScmPublicationServiceDependency,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[ScmPublicationResponse]:
+    return [
+        ScmPublicationResponse.model_validate(publication)
+        for publication in await service.list_for_execution(execution_id, limit=limit)
+    ]
+
+
+@router.get(
+    "/scm-publications/{publication_id}/attempts",
+    response_model=list[ScmPublicationAttemptResponse],
+)
+async def list_scm_publication_attempts(
+    publication_id: UUID,
+    service: ScmPublicationServiceDependency,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[ScmPublicationAttemptResponse]:
+    return [
+        ScmPublicationAttemptResponse.model_validate(attempt)
+        for attempt in await service.list_attempts(publication_id, limit=limit)
+    ]
+
+
+@router.post(
+    "/scm-publications/{publication_id}/retry",
+    response_model=ScmPublicationResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def retry_scm_publication(
+    publication_id: UUID,
+    request: Request,
+    response: Response,
+    service: ScmPublicationServiceDependency,
+) -> ScmPublicationResponse:
+    principal = getattr(request.state, "principal", None)
+    publication, replayed = await service.retry(
+        publication_id,
+        requested_by=principal.account_key if principal is not None else "anonymous",
+    )
+    if replayed:
+        response.status_code = status.HTTP_200_OK
+    return ScmPublicationResponse.model_validate(publication)
+
+
+@router.post(
+    "/scm-publications/{publication_id}/automatic-retry/cancel",
+    response_model=ScmPublicationResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def cancel_scm_publication_automatic_retry(
+    publication_id: UUID,
+    request: Request,
+    response: Response,
+    service: ScmPublicationServiceDependency,
+) -> ScmPublicationResponse:
+    principal = getattr(request.state, "principal", None)
+    publication, replayed = await service.cancel_automatic_retry(
+        publication_id,
+        requested_by=principal.account_key if principal is not None else "anonymous",
+    )
+    if replayed:
+        response.status_code = status.HTTP_200_OK
+    return ScmPublicationResponse.model_validate(publication)

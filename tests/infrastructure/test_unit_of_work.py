@@ -1,4 +1,6 @@
+from datetime import UTC, datetime
 from decimal import Decimal
+from uuid import UUID, uuid4
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -8,18 +10,21 @@ from jb_orchestrator.application import (
     CreateUserRequest,
     ModelCatalogService,
     OrchestrationService,
+    PhasePackCatalogService,
+    ProjectObservationService,
     RegisterProject,
     SkillCatalogService,
     TaskDispatchService,
     WorkflowService,
 )
-from jb_orchestrator.domain import RequestStatus, RunStatus
+from jb_orchestrator.domain import DomainEvent, Project, ProjectStatus, RequestStatus, RunStatus
 from jb_orchestrator.infrastructure.database import Base, EventRecord, SqlAlchemyUnitOfWork
 from jb_orchestrator.model_routing import (
     ModelProfile,
     ModelRoutingRequest,
     ModelTier,
 )
+from jb_orchestrator.phase_packs import PhasePackDefinition, PhasePackReference
 from jb_orchestrator.skills import SkillDefinition, SkillReference, SkillSourceKind
 from jb_orchestrator.worker.models import TaskResult, TokenUsage
 from jb_orchestrator.workflows import (
@@ -61,6 +66,7 @@ async def test_application_service_round_trip_with_sqlalchemy() -> None:
     workflow_service = WorkflowService(lambda: SqlAlchemyUnitOfWork(session_factory))
     skill_service = SkillCatalogService(lambda: SqlAlchemyUnitOfWork(session_factory))
     model_service = ModelCatalogService(lambda: SqlAlchemyUnitOfWork(session_factory))
+    phase_pack_service = PhasePackCatalogService(lambda: SqlAlchemyUnitOfWork(session_factory))
     skill = await skill_service.register(
         SkillDefinition(
             key="implementation",
@@ -87,6 +93,16 @@ async def test_application_service_round_trip_with_sqlalchemy() -> None:
             executor_keys=("integration",),
         )
     )
+    phase_pack = await phase_pack_service.register(
+        PhasePackDefinition(
+            key="implementation",
+            version=1,
+            name="Implementation",
+            description="Implement an approved task.",
+            instructions="Apply changes and verify the result.",
+            skills=(SkillReference(key=skill.key, version=skill.version),),
+        )
+    )
     definition = WorkflowDefinition(
         key="delivery",
         version=1,
@@ -97,6 +113,7 @@ async def test_application_service_round_trip_with_sqlalchemy() -> None:
                 kind=NodeKind.TASK,
                 executor_key="integration",
                 skills=(SkillReference(key=skill.key, version=skill.version),),
+                phase_pack=PhasePackReference(key=phase_pack.key, version=phase_pack.version),
                 model_routing=ModelRoutingRequest(required_capabilities=("coding",)),
             ),
             NodeDefinition(
@@ -111,6 +128,7 @@ async def test_application_service_round_trip_with_sqlalchemy() -> None:
     claim = await dispatch.claim_next("integration-worker", {"integration"})
     assert claim is not None
     assert claim.executor_key == "integration"
+    assert claim.phase_pack == phase_pack
     leased_execution = await workflow_service.get(execution.id)
     assert leased_execution.nodes["implement"].worker_id == "integration-worker"
     assert leased_execution.nodes["implement"].lease_token == claim.lease_token
@@ -132,15 +150,31 @@ async def test_application_service_round_trip_with_sqlalchemy() -> None:
         TaskResult(outcome=NodeOutcome.SUCCESS, output={"commit": "abc123"}),
     )
     stored_execution = await workflow_service.get(execution.id)
+    artifacts = await workflow_service.list_artifacts(execution.id)
     assert stored_execution.status is WorkflowStatus.SUCCEEDED
     assert stored_execution.nodes["implement"].status is NodeExecutionStatus.SUCCEEDED
     assert stored_execution.nodes["implement"].output == {"commit": "abc123"}
     assert stored_execution.nodes["implement"].lease_token is None
     assert stored_execution.version == completed_execution.version
+    assert len(artifacts) == 1
+    assert artifacts[0].producer_node_key == "implement"
+    assert artifacts[0].content == {"commit": "abc123"}
 
-    cancelled = await service.cancel_run(created.run.id)
-    assert cancelled.status is RunStatus.CANCELLED
-    assert (await service.get_request(created.request.id)).status is RequestStatus.CANCELLED
+    assert (await service.get_run(created.run.id)).status is RunStatus.SUCCEEDED
+    assert (await service.get_request(created.request.id)).status is RequestStatus.COMPLETED
+
+    observation_service = ProjectObservationService(lambda: SqlAlchemyUnitOfWork(session_factory))
+    observed_requests = await observation_service.list_requests(project.id)
+    observed_runs = await observation_service.list_runs(created.request.id)
+    observed_workflows = await observation_service.list_workflow_executions(project.id)
+    observed_events = await observation_service.list_events(project.id)
+    assert [value.id for value in observed_requests] == [created.request.id]
+    assert [value.id for value in observed_runs] == [created.run.id]
+    assert [value.id for value in observed_workflows] == [execution.id]
+    assert "project.registered" in {event.event_type for event in observed_events}
+    assert "workflow.started" in {event.event_type for event in observed_events}
+    assert "budget.settled" in {event.event_type for event in observed_events}
+    assert "skill.registered" not in {event.event_type for event in observed_events}
 
     async with session_factory() as session:
         event_types = list(await session.scalars(select(EventRecord.event_type)))
@@ -150,15 +184,109 @@ async def test_application_service_round_trip_with_sqlalchemy() -> None:
             "request.created",
             "workflow.definition_registered",
             "model.registered",
+            "phase_pack.registered",
             "skill.registered",
             "workflow.started",
+            "run.status_changed",
             "task.claimed",
             "task.completed",
-            "run.cancelled",
+            "run.status_changed",
+            "request.completed",
             "budget.configured",
             "budget.reserved",
             "budget.settled",
         ]
     )
 
+    await engine.dispose()
+
+
+async def test_event_repository_reads_a_stable_cursor_order() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    occurred_at = datetime(2026, 1, 1, tzinfo=UTC)
+    first = DomainEvent(
+        id=UUID(int=1),
+        aggregate_type="external_execution",
+        aggregate_id=uuid4(),
+        event_type="external_execution.prepared",
+        occurred_at=occurred_at,
+    )
+    second = DomainEvent(
+        id=UUID(int=2),
+        aggregate_type="external_execution",
+        aggregate_id=first.aggregate_id,
+        event_type="external_execution.accepted",
+        occurred_at=occurred_at,
+    )
+    unrelated = DomainEvent(
+        id=UUID(int=3),
+        aggregate_type="run",
+        aggregate_id=uuid4(),
+        event_type="run.started",
+        occurred_at=occurred_at,
+    )
+
+    async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+        await unit_of_work.events.append(first)
+        await unit_of_work.events.append(unrelated)
+        await unit_of_work.events.append(second)
+        await unit_of_work.commit()
+
+    async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+        cursor = await unit_of_work.events.get(first.id)
+        events = await unit_of_work.events.list_after(
+            aggregate_type="external_execution", after=cursor
+        )
+
+    assert cursor is not None
+    assert cursor.id == first.id
+    assert cursor.sequence == 1
+    assert [event.id for event in events] == [second.id]
+    assert events[0].sequence == 3
+    await engine.dispose()
+
+
+async def test_project_repository_reads_the_next_stable_page() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    created_at = datetime(2026, 9, 7, tzinfo=UTC)
+    projects = [
+        Project(
+            id=UUID(int=index),
+            key=f"cursor-project-{index}",
+            name=f"Cursor Project {index}",
+            repository_url=f"https://github.com/example/cursor-{index}.git",
+            created_at=created_at,
+        )
+        for index in range(1, 4)
+    ]
+    archived = Project(
+        id=UUID(int=4),
+        key="cursor-archived",
+        name="Cursor Archived",
+        repository_url="https://github.com/example/cursor-archived.git",
+        status=ProjectStatus.ARCHIVED,
+        created_at=created_at,
+    )
+
+    async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+        for project in [*projects, archived]:
+            await unit_of_work.projects.add(project)
+        await unit_of_work.commit()
+
+    async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+        first_page = await unit_of_work.projects.list(status=ProjectStatus.ACTIVE, limit=2)
+        second_page = await unit_of_work.projects.list(
+            status=ProjectStatus.ACTIVE,
+            after=first_page[-1],
+            limit=2,
+        )
+
+    assert [project.id for project in first_page] == [projects[0].id, projects[1].id]
+    assert [project.id for project in second_page] == [projects[2].id]
     await engine.dispose()

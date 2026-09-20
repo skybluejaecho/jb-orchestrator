@@ -1,0 +1,170 @@
+import subprocess
+from dataclasses import replace
+from pathlib import Path
+
+import pytest
+from jb_openclaw_executor.workspace import (
+    OpenClawWorkspaceError,
+    OpenClawWorkspaceManager,
+    WorkspaceAssignment,
+)
+
+from jb_orchestrator.external_executions import ExternalExecution, ExternalExecutionStatus
+from jb_orchestrator.worker import TaskClaim
+from tests.openclaw_executor.test_executor import task_claim
+
+
+def _git(cwd: Path, *arguments: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(cwd), *arguments],
+        check=True,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def _repository(path: Path) -> Path:
+    path.mkdir()
+    _git(path, "init", "-b", "develop")
+    _git(path, "config", "user.name", "JB Test")
+    _git(path, "config", "user.email", "jb-test@example.invalid")
+    (path / "README.md").write_text("# Test\n", encoding="utf-8")
+    _git(path, "add", "README.md")
+    _git(path, "commit", "-m", "initial")
+    return path.resolve()
+
+
+def _external_execution(claim: TaskClaim, assignment: WorkspaceAssignment) -> ExternalExecution:
+    return ExternalExecution(
+        execution_id=claim.execution_id,
+        run_id=claim.run_id,
+        node_key=claim.node_key,
+        executor_key="openclaw",
+        idempotency_key=claim.idempotency_key,
+        external_session_key="agent:implementation:execution",
+        external_run_id="openclaw-run-1",
+        status=ExternalExecutionStatus.SUCCEEDED,
+        workspace_path=assignment.path,
+        workspace_repository_path=assignment.repository_path,
+        workspace_branch=assignment.branch,
+        workspace_base_ref=assignment.base_ref,
+        workspace_scope=assignment.scope,
+    )
+
+
+def _legacy_worktree_assignment(
+    manager: OpenClawWorkspaceManager,
+    repository: Path,
+    workspace: Path,
+    *,
+    branch: str = "jb/execution/review-v1",
+) -> WorkspaceAssignment:
+    base_commit = _git(repository, "rev-parse", "develop")
+    workspace.parent.mkdir(parents=True, exist_ok=True)
+    _git(repository, "worktree", "add", "-b", branch, str(workspace), base_commit)
+    return WorkspaceAssignment(
+        cwd=str(workspace),
+        path=str(workspace),
+        repository_path=str(repository),
+        branch=branch,
+        base_ref=base_commit,
+        scope=manager.scope,
+    )
+
+
+async def test_git_worktree_mode_is_rejected_before_allocation(tmp_path: Path) -> None:
+    repositories = tmp_path / "repositories"
+    repositories.mkdir()
+    repository = _repository(repositories / "project")
+    workspace_root = tmp_path / "worktrees"
+    claim = replace(
+        task_claim(),
+        configuration={
+            "cwd": str(repository),
+            "workspace_mode": "git_worktree",
+            "workspace_base_ref": "develop",
+        },
+    )
+    manager = OpenClawWorkspaceManager(
+        workspace_root=workspace_root,
+        repository_roots=(repositories,),
+    )
+
+    with pytest.raises(OpenClawWorkspaceError, match="not supported"):
+        await manager.prepare(claim)
+
+    assert not workspace_root.exists()
+
+
+async def test_shared_workspace_rejects_node_level_cwd() -> None:
+    claim = replace(task_claim(), configuration={"cwd": "C:/projects/shared"})
+    manager = OpenClawWorkspaceManager(workspace_root=None, repository_roots=())
+
+    with pytest.raises(OpenClawWorkspaceError, match="node-level cwd"):
+        await manager.prepare(claim)
+
+
+async def test_shared_workspace_uses_preconfigured_agent_workspace() -> None:
+    manager = OpenClawWorkspaceManager(workspace_root=None, repository_roots=())
+
+    assignment = await manager.prepare(task_claim())
+
+    assert assignment.cwd is None
+    assert assignment.path is None
+    assert assignment.branch is None
+
+
+async def test_cleanup_requires_clean_branch_merged_into_target(tmp_path: Path) -> None:
+    repositories = tmp_path / "repositories"
+    repositories.mkdir()
+    repository = _repository(repositories / "project")
+    manager = OpenClawWorkspaceManager(
+        workspace_root=tmp_path / "worktrees",
+        repository_roots=(repositories,),
+    )
+    claim = task_claim()
+    assignment = _legacy_worktree_assignment(
+        manager,
+        repository,
+        tmp_path / "worktrees" / "review-v1",
+    )
+    assert assignment.path is not None
+    workspace = Path(assignment.path)
+    (workspace / "result.txt").write_text("done\n", encoding="utf-8")
+    execution = _external_execution(claim, assignment)
+
+    with pytest.raises(OpenClawWorkspaceError, match="uncommitted"):
+        await manager.cleanup(execution, merged_into="develop")
+
+    _git(workspace, "add", "result.txt")
+    _git(workspace, "commit", "-m", "complete isolated work")
+    with pytest.raises(OpenClawWorkspaceError, match="not merged"):
+        await manager.cleanup(execution, merged_into="develop")
+
+    assert assignment.branch is not None
+    _git(repository, "merge", "--ff-only", assignment.branch)
+    review = await manager.review(execution, merged_into="develop")
+    assert review.clean is True
+    assert review.merged is True
+
+    released = await manager.cleanup(execution, merged_into="develop")
+
+    assert released.head_commit == _git(repository, "rev-parse", "develop")
+    assert not workspace.exists()
+    branch_check = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repository),
+            "show-ref",
+            "--verify",
+            "--quiet",
+            f"refs/heads/{assignment.branch}",
+        ],
+        check=False,
+        capture_output=True,
+    )
+    assert branch_check.returncode == 1

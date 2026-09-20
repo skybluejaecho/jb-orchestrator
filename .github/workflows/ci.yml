@@ -33,6 +33,12 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev --frozen
 
+      - name: Verify Runtime dependency export
+        run: |
+          uv export --frozen --no-dev --no-emit-project --format requirements-txt \
+            --output-file deploy/server/requirements.lock
+          git diff --exit-code -- deploy/server/requirements.lock
+
       - name: Run Ruff lint
         run: uv run ruff check .
 
@@ -41,6 +47,130 @@ jobs:
 
       - name: Run mypy
         run: uv run mypy
+
+  jarvis:
+    name: Jarvis
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/jarvis
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.13.0
+          cache: npm
+          cache-dependency-path: apps/jarvis/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Check formatting
+        run: npm run format:check
+
+      - name: Run lint
+        run: npm run lint
+
+      - name: Run contract tests
+        run: npm test
+
+      - name: Build Jarvis
+        run: npm run build
+
+  openclaw-contract:
+    name: OpenClaw contract
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/openclaw-gateway-spike
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.19.0
+          cache: npm
+          cache-dependency-path: tools/openclaw-gateway-spike/package-lock.json
+
+      - name: Install official OpenClaw dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Verify OpenClaw Gateway contract
+        run: npm test
+
+  deployment-contract:
+    name: Deployment contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Validate server Compose configuration
+        run: >-
+          docker compose --env-file deploy/server/.env.example
+          -f deploy/server/compose.yml --profile "*" config --quiet
+
+      - name: Validate local Jarvis client Compose configuration
+        run: >-
+          docker compose --env-file deploy/clients/jarvis/.env.example
+          -f deploy/clients/jarvis/compose.yml config --quiet
+
+  container-build:
+    name: Container build (${{ matrix.component }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: runtime
+            dockerfile: deploy/server/Dockerfile.runtime
+            image: jb-orchestrator-runtime:ci
+          - component: jarvis
+            dockerfile: deploy/clients/jarvis/Dockerfile
+            image: jb-orchestrator-jarvis:ci
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4.1.0
+
+      - name: Build image
+        uses: docker/build-push-action@v7.2.0
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          load: true
+          push: false
+          provenance: false
+          sbom: false
+          tags: ${{ matrix.image }}
+          cache-from: type=gha,scope=container-${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=container-${{ matrix.component }}
+
+      - name: Require a non-root runtime user
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: test "$(docker run --rm --entrypoint id "$IMAGE" -u)" != "0"
+
+      - name: Verify Runtime entry point
+        if: matrix.component == 'runtime'
+        run: docker run --rm jb-orchestrator-runtime:ci jb version
+
+      - name: Verify Runtime Git tooling
+        if: matrix.component == 'runtime'
+        run: |
+          docker run --rm --network none jb-orchestrator-runtime:ci git --version
+          docker run --rm --network none jb-orchestrator-runtime:ci ssh -V
+
+      - name: Verify Jarvis Node.js runtime
+        if: matrix.component == 'jarvis'
+        run: docker run --rm --entrypoint node jb-orchestrator-jarvis:ci --version
 
   test:
     name: Test
@@ -79,3 +209,87 @@ jobs:
 
       - name: Run tests
         run: uv run pytest --cov=jb_orchestrator --cov-report=term-missing
+
+  system-smoke:
+    name: System smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: jb_orchestrator
+          POSTGRES_USER: jb_orchestrator
+          POSTGRES_PASSWORD: jb_orchestrator
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U jb_orchestrator -d jb_orchestrator"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JB_ENVIRONMENT: test
+      JB_DATABASE_URL: postgresql+asyncpg://jb_orchestrator:jb_orchestrator@localhost:5432/jb_orchestrator
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        run: uv sync --extra dev --frozen
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.13.0
+          cache: npm
+          cache-dependency-path: apps/jarvis/package-lock.json
+
+      - name: Install Jarvis dependencies
+        working-directory: apps/jarvis
+        run: npm ci --no-audit --no-fund
+
+      - name: Apply database migrations
+        run: uv run alembic upgrade head
+
+      - name: Run complete local system smoke
+        run: >-
+          uv run --with-editable . --with-editable adapters/github
+          --with-editable adapters/webhook --with-editable tools/system-smoke-executor
+          jb system smoke
+
+  release-readiness:
+    name: Release readiness
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - quality
+      - jarvis
+      - openclaw-contract
+      - deployment-contract
+      - container-build
+      - test
+      - system-smoke
+    steps:
+      - name: Require every release gate
+        env:
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          JARVIS_RESULT: ${{ needs.jarvis.result }}
+          OPENCLAW_RESULT: ${{ needs.openclaw-contract.result }}
+          DEPLOYMENT_RESULT: ${{ needs.deployment-contract.result }}
+          CONTAINER_BUILD_RESULT: ${{ needs.container-build.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          SYSTEM_SMOKE_RESULT: ${{ needs.system-smoke.result }}
+        run: |
+          test "$QUALITY_RESULT" = "success"
+          test "$JARVIS_RESULT" = "success"
+          test "$OPENCLAW_RESULT" = "success"
+          test "$DEPLOYMENT_RESULT" = "success"
+          test "$CONTAINER_BUILD_RESULT" = "success"
+          test "$TEST_RESULT" = "success"
+          test "$SYSTEM_SMOKE_RESULT" = "success"

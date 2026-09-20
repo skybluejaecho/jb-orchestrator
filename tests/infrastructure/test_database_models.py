@@ -18,17 +18,32 @@ def test_metadata_creates_initial_domain_schema() -> None:
     inspector = inspect(engine)
     assert set(inspector.get_table_names()) == {
         "events",
+        "external_executions",
         "budget_accounts",
         "budget_reservations",
         "model_profiles",
         "node_executions",
+        "notification_deliveries",
+        "notification_delivery_attempts",
+        "notification_subscriptions",
+        "phase_pack_definitions",
+        "project_workflow_bindings",
         "projects",
+        "request_dispatch_receipts",
         "runs",
+        "scm_publications",
+        "scm_publication_attempts",
+        "service_accounts",
+        "service_account_credentials",
         "skill_definitions",
+        "task_artifacts",
         "user_requests",
         "usage_records",
         "workflow_definitions",
         "workflow_executions",
+        "workspace_operations",
+        "worker_instances",
+        "worker_readiness_alerts",
     }
     assert {index["name"] for index in inspector.get_indexes("runs")} >= {
         "ix_runs_request_id",
@@ -38,6 +53,47 @@ def test_metadata_creates_initial_domain_schema() -> None:
         "ix_node_executions_executor_ready",
         "ix_node_executions_lease_expiry",
         "ix_node_executions_status_updated",
+    }
+    assert {index["name"] for index in inspector.get_indexes("external_executions")} >= {
+        "ix_external_executions_execution_id",
+        "ix_external_executions_run_id",
+        "ix_external_executions_status_updated",
+    }
+    assert {index["name"] for index in inspector.get_indexes("task_artifacts")} >= {
+        "ix_task_artifacts_execution_created"
+    }
+    assert {index["name"] for index in inspector.get_indexes("scm_publications")} >= {
+        "ix_scm_publications_claim",
+        "ix_scm_publications_external_execution_id",
+    }
+    assert {index["name"] for index in inspector.get_indexes("worker_instances")} >= {
+        "ix_worker_instances_kind_seen",
+        "ix_worker_instances_status_seen",
+        "ix_worker_instances_worker_id",
+    }
+    worker_kind = next(
+        column for column in inspector.get_columns("worker_instances") if column["name"] == "kind"
+    )
+    assert worker_kind["type"].length == 32
+    assert {index["name"] for index in inspector.get_indexes("worker_readiness_alerts")} >= {
+        "ix_worker_readiness_alert_project_status"
+    }
+    assert {index["name"] for index in inspector.get_indexes("notification_subscriptions")} >= {
+        "ix_notification_subscriptions_project_enabled"
+    }
+    assert {index["name"] for index in inspector.get_indexes("notification_deliveries")} >= {
+        "ix_notification_deliveries_project_status",
+        "ix_notification_deliveries_provider_claim",
+    }
+    assert {index["name"] for index in inspector.get_indexes("notification_delivery_attempts")} >= {
+        "ix_notification_delivery_attempts_delivery"
+    }
+    assert {index["name"] for index in inspector.get_indexes("scm_publication_attempts")} >= {
+        "ix_scm_publication_attempts_publication_id"
+    }
+    assert {index["name"] for index in inspector.get_indexes("service_account_credentials")} >= {
+        "ix_service_account_credentials_account_id",
+        "ix_service_account_credentials_expires_at",
     }
 
 

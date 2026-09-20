@@ -5,7 +5,12 @@ from importlib.metadata import entry_points
 from inspect import iscoroutinefunction
 from typing import Any, Protocol
 
-from jb_orchestrator.worker.models import TaskClaim, TaskExecutor, TaskResult
+from jb_orchestrator.worker.models import (
+    CancellableTaskExecutor,
+    TaskClaim,
+    TaskExecutor,
+    TaskResult,
+)
 
 EXECUTOR_ENTRY_POINT_GROUP = "jb_orchestrator.executors"
 
@@ -48,16 +53,28 @@ class ExecutorRegistry:
             )
         if not iscoroutinefunction(executor.execute):
             raise ExecutorRegistrationError(f"executor execute method must be async: {normalized}")
+        if isinstance(executor, CancellableTaskExecutor) and not iscoroutinefunction(
+            executor.cancel
+        ):
+            raise ExecutorRegistrationError(f"executor cancel method must be async: {normalized}")
         self._executors[normalized] = executor
 
     async def execute(self, claim: TaskClaim) -> TaskResult:
-        try:
-            executor = self._executors[claim.executor_key]
-        except KeyError as exc:
-            raise ExecutorNotFoundError(
-                f"executor is not registered: {claim.executor_key}"
-            ) from exc
+        executor = self._get(claim.executor_key)
         return await executor.execute(claim)
+
+    async def cancel(self, claim: TaskClaim) -> None:
+        """Request provider-side cancellation when the adapter supports it."""
+
+        executor = self._get(claim.executor_key)
+        if isinstance(executor, CancellableTaskExecutor):
+            await executor.cancel(claim)
+
+    def _get(self, key: str) -> TaskExecutor:
+        try:
+            return self._executors[key]
+        except KeyError as exc:
+            raise ExecutorNotFoundError(f"executor is not registered: {key}") from exc
 
     @classmethod
     def from_entry_points(
