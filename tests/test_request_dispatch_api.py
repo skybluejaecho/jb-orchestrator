@@ -143,6 +143,8 @@ async def test_project_binding_and_one_call_dispatch_api() -> None:
     ]
     assert workflow_option["phase_packs"] == []
     assert workflow_option["skills"] == []
+    assert workflow_option["compatible"] is True
+    assert workflow_option["compatibility_issues"] == []
     assert options.json()["available_skills"] == [
         {
             "key": "security-review",

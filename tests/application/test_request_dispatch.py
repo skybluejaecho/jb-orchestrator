@@ -1,3 +1,4 @@
+from dataclasses import replace
 from uuid import UUID
 
 import pytest
@@ -204,6 +205,59 @@ async def test_binding_pins_exact_version_and_dispatches_all_state() -> None:
     assert store.events[-3].payload["origin"]["ingress_key"] == "test"
 
 
+async def test_dispatch_rejects_openclaw_dynamic_workspace_before_creating_run() -> None:
+    store = MemoryStore()
+    project = Project(
+        key="openclaw-project",
+        name="OpenClaw Project",
+        repository_url="https://example.com/openclaw.git",
+    )
+    selected = definition(1)
+    selected = replace(
+        selected,
+        nodes=tuple(
+            replace(
+                node,
+                executor_key="openclaw",
+                configuration={
+                    "cwd": "/workspaces/repositories/openclaw-project",
+                    "workspace_mode": "git_worktree",
+                },
+            )
+            if node.key == "work"
+            else node
+            for node in selected.nodes
+        ),
+    )
+    store.projects[project.id] = project
+    store.workflow_definitions[(selected.key, selected.version)] = selected
+    service = RequestDispatchService(lambda: MemoryUnitOfWork(store))
+
+    options = await service.list_workflow_options(project.id)
+
+    [composition] = options.workflows
+    assert composition.compatibility.compatible is False
+    assert [issue.code for issue in composition.compatibility.issues] == [
+        "openclaw.workspace_mode_unsupported",
+        "openclaw.dynamic_cwd_unsupported",
+    ]
+
+    with pytest.raises(ResourceConflict, match=r"openclaw\.workspace_mode_unsupported"):
+        await service.dispatch(
+            dispatch_command(
+                project,
+                "Run in a dynamic worktree",
+                "unsupported-openclaw-workspace",
+                definition_key=selected.key,
+                definition_version=selected.version,
+            )
+        )
+
+    assert store.requests == {}
+    assert store.runs == {}
+    assert store.workflow_executions == {}
+
+
 async def test_binding_update_affects_only_future_dispatches() -> None:
     store = MemoryStore()
     project = Project(
@@ -281,6 +335,8 @@ async def test_workflow_options_include_default_and_latest_definitions() -> None
     assert options.default.definition_id == latest.id
     assert options.default_workflow is not None
     assert options.default_workflow.definition == latest
+    assert options.default_workflow.compatibility.compatible is True
+    assert options.default_workflow.compatibility.issues == ()
     assert [(value.key, value.version) for value in options.workflows] == [("delivery", 2)]
 
 

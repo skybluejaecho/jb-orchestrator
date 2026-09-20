@@ -71,6 +71,7 @@ from jb_orchestrator.api.schemas import (
     WorkerReadinessAlertResponse,
     WorkerReadinessIssueResponse,
     WorkflowApprovalResolve,
+    WorkflowCompatibilityIssueResponse,
     WorkflowDefinitionCreate,
     WorkflowDefinitionResponse,
     WorkflowEdgePayload,
@@ -965,6 +966,11 @@ def _workflow_option_response(composition: WorkflowComposition) -> WorkflowOptio
         ),
         skills=tuple(
             WorkflowSkillSummaryResponse.model_validate(skill) for skill in composition.skills
+        ),
+        compatible=composition.compatibility.compatible,
+        compatibility_issues=tuple(
+            WorkflowCompatibilityIssueResponse.model_validate(issue)
+            for issue in composition.compatibility.issues
         ),
     )
 
