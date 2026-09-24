@@ -21,7 +21,7 @@ database migration이 누락될 수 있다. 기존 `jb doctor`는 핵심 설정�
 - Task Worker, SCM Worker와 Notification Worker는 각각의 entry-point registry를 실제로
   구성한다. 설치 누락과 adapter factory의 설정 오류는 동일한 역할 실패로 보고한다.
 - OpenClaw executor가 설치된 경우 bridge file, Node 실행 파일, Gateway URL, 원격 WSS TLS pin,
-  bootstrap credential 또는 저장된 device token을 추가 확인한다.
+  shared Gateway credential 또는 저장된 device token을 추가 확인한다.
 - 결과는 `pass`, `warning`, `fail` check 목록과 집계를 JSON으로 출력한다. warning은 개발 또는
   staging 점검을 허용하지만 하나의 fail이라도 있으면 명령은 종료 코드 1을 반환한다.
 - 예외 형식과 설정 여부만 보고하며 URL 이외의 credential 값과 provider 내부 오류 문자열은

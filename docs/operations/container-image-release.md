@@ -11,8 +11,8 @@ Runtime과 Jarvis는 하나의 제품 버전으로 함께 검증하지만 서로
 ## 릴리스 준비
 
 1. `develop`에서 `release/<version>` branch를 만든다.
-2. `pyproject.toml`의 project version과 `apps/jarvis/package.json`의 version을 같은 안정
-   SemVer로 변경한다.
+2. `pyproject.toml`, `apps/jarvis/package.json`, 그리고 Runtime 이미지에 설치되는
+   OpenClaw·GitHub·Webhook adapter의 version을 같은 안정 SemVer로 변경한다.
 3. dependency 변경이 포함됐다면 Runtime 잠금 export를 갱신한다.
 
 ~~~powershell

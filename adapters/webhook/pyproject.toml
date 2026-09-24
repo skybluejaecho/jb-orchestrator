@@ -4,12 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "jb-webhook-notifier"
-version = "0.1.0.dev0"
+version = "0.1.0"
 description = "Generic signed JSON webhook notification provider for jb-orchestrator."
 requires-python = ">=3.12"
 dependencies = [
   "httpx>=0.28,<1",
-  "jb-orchestrator>=0.1.0.dev0",
+  "jb-orchestrator>=0.1.0,<0.2",
   "pydantic-settings>=2.7,<3",
 ]
 

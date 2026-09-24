@@ -10,6 +10,11 @@ from uuid import UUID
 from jb_orchestrator.application.commands import DispatchProjectRequest, NodeSkillAddon
 from jb_orchestrator.application.exceptions import ResourceConflict, ResourceNotFound
 from jb_orchestrator.application.unit_of_work import UnitOfWork
+from jb_orchestrator.application.workflow_compatibility import (
+    WorkflowCompatibility,
+    assess_workflow_compatibility,
+    incompatible_workflow_message,
+)
 from jb_orchestrator.application.workflow_services import WorkflowService
 from jb_orchestrator.domain import (
     DomainEvent,
@@ -58,6 +63,7 @@ class WorkflowComposition:
     definition: WorkflowDefinition
     phase_packs: tuple[PhasePackDefinition, ...]
     skills: tuple[SkillDefinition, ...]
+    compatibility: WorkflowCompatibility
 
     @property
     def key(self) -> str:
@@ -280,6 +286,7 @@ class RequestDispatchService:
             definition=definition,
             phase_packs=tuple(phase_packs),
             skills=tuple(skills),
+            compatibility=assess_workflow_compatibility(definition),
         )
 
     async def dispatch(self, command: DispatchProjectRequest) -> DispatchedRequest:
@@ -393,6 +400,9 @@ class RequestDispatchService:
                 selection_source = "project_binding"
 
             definition = await self._apply_skill_addons(unit_of_work, definition, normalized_addons)
+            compatibility = assess_workflow_compatibility(definition)
+            if not compatibility.compatible:
+                raise ResourceConflict(incompatible_workflow_message(compatibility))
 
             request = UserRequest(
                 project_id=project.id,

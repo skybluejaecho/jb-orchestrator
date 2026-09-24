@@ -374,6 +374,10 @@ ORCH-044 exposes external agent ownership in Jarvis:
 
 ORCH-045 adds opt-in Git worktree isolation for OpenClaw tasks:
 
+> This pre-release design is superseded for the v0.1 Gateway adapter by ADR 0085. The pinned
+> OpenClaw Gateway permits dynamic `cwd` only for plugin-owned subagent runs, so v0.1 uses
+> preconfigured agent workspaces and rejects `cwd`/`git_worktree` workflows before dispatch.
+
 - mutating parallel nodes can run in deterministic execution/node/visit-specific worktrees
 - retries validate and reuse the same branch and path instead of creating duplicate workspaces
 - repository access is restricted to configured roots and worktrees must live outside repositories
@@ -808,6 +812,8 @@ uv run jb-notification-worker --automatic-retry-limit 2 `
 두 구성은 서로 독립적으로 실행되며 Jarvis는 원격 서버에 UI port를 만들지 않습니다.
 컨테이너 버전 발행 및 운영 host 갱신 절차는
 [`docs/operations/container-image-release.md`](docs/operations/container-image-release.md)를 따릅니다.
+첫 정식 릴리스 후보의 지원 범위와 Go/No-Go 게이트는
+[`docs/releases/v0.1.0.md`](docs/releases/v0.1.0.md)에 기록합니다.
 
 원격 클라이언트를 연결하려면 먼저 서비스 계정을 발급합니다. Token 원문은 이 명령에서만
 표시되므로 즉시 안전한 secret 저장소에 보관해야 합니다.

@@ -19,17 +19,16 @@ const DEFAULT_GATEWAY_URL = "ws://127.0.0.1:18789";
 const CONNECT_TIMEOUT_MS = 20_000;
 
 export function connectionAuth(env, storedToken) {
-  const bootstrapToken = env.OPENCLAW_GATEWAY_TOKEN?.trim();
+  const gatewayToken = env.OPENCLAW_GATEWAY_TOKEN?.trim();
   const password = env.OPENCLAW_GATEWAY_PASSWORD?.trim();
-  if (!storedToken && !bootstrapToken && !password) {
+  if (!storedToken && !gatewayToken && !password) {
     throw new Error(
       "a stored device token, OPENCLAW_GATEWAY_TOKEN, or OPENCLAW_GATEWAY_PASSWORD is required",
     );
   }
   return {
-    bootstrapToken: bootstrapToken || undefined,
+    token: storedToken ? undefined : gatewayToken || undefined,
     password: storedToken ? undefined : password || undefined,
-    preferBootstrapToken: Boolean(bootstrapToken && !storedToken),
   };
 }
 

@@ -1,8 +1,7 @@
 import subprocess
-from dataclasses import replace
 from pathlib import Path
 
-from jb_openclaw_executor.workspace import OpenClawWorkspaceManager
+from jb_openclaw_executor.workspace import OpenClawWorkspaceManager, WorkspaceAssignment
 from jb_openclaw_executor.workspace_runtime import WorkspaceOperationRuntime
 
 from jb_orchestrator.application import ExternalExecutionService, WorkspaceOperationService
@@ -24,6 +23,25 @@ def _git(cwd: Path, *arguments: str) -> str:
     return result.stdout.strip()
 
 
+def _legacy_worktree_assignment(
+    manager: OpenClawWorkspaceManager,
+    repository: Path,
+    workspace: Path,
+) -> WorkspaceAssignment:
+    base_commit = _git(repository, "rev-parse", "develop")
+    branch = "jb/execution/review-v1"
+    workspace.parent.mkdir(parents=True, exist_ok=True)
+    _git(repository, "worktree", "add", "-b", branch, str(workspace), base_commit)
+    return WorkspaceAssignment(
+        cwd=str(workspace),
+        path=str(workspace),
+        repository_path=str(repository),
+        branch=branch,
+        base_ref=base_commit,
+        scope=manager.scope,
+    )
+
+
 async def test_runtime_inspects_then_releases_merged_workspace(tmp_path: Path) -> None:
     repositories = tmp_path / "repositories"
     repository = repositories / "project"
@@ -38,15 +56,12 @@ async def test_runtime_inspects_then_releases_merged_workspace(tmp_path: Path) -
         workspace_root=tmp_path / "worktrees",
         repository_roots=(repositories,),
     )
-    claim = replace(
-        task_claim(),
-        configuration={
-            "cwd": str(repository),
-            "workspace_mode": "git_worktree",
-            "workspace_base_ref": "develop",
-        },
+    claim = task_claim()
+    assignment = _legacy_worktree_assignment(
+        manager,
+        repository,
+        tmp_path / "worktrees" / "review-v1",
     )
-    assignment = await manager.prepare(claim)
     workspace = Path(assignment.path or "")
     (workspace / "result.txt").write_text("done\n", encoding="utf-8")
     _git(workspace, "add", "result.txt")

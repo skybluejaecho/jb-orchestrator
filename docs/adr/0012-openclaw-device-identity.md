@@ -5,7 +5,7 @@
 
 ## Context
 
-Shared Gateway tokens are bootstrap credentials, not durable per-client identities. Reusing them in
+Shared Gateway tokens are initial pairing credentials, not durable per-client identities. Reusing them in
 every short-lived Bridge process prevents device-scoped revocation and leaves a high-value shared
 secret in the steady-state worker environment. The official Gateway client delegates identity,
 signing, and device-token storage to its host.
@@ -16,9 +16,10 @@ The Node Bridge owns one persistent Ed25519 key pair in `JB_OPENCLAW_DEVICE_STAT
 is the SHA-256 digest of the raw 32-byte public key, matching the OpenClaw identity contract. Every
 challenge payload is signed with the private key through `GatewayClientHostDeps`.
 
-The shared Gateway credential is supplied as a one-time bootstrap credential. After the operator
+The shared Gateway credential is supplied through protocol `auth.token` for initial pairing. It must
+not be confused with the short-lived setup-code field `auth.bootstrapToken`. After the operator
 approves the exact pairing request, the Bridge stores the Gateway-issued token keyed by device ID
-and role. Later processes prefer that scoped device token and can run without the bootstrap secret.
+and role. Later processes prefer that scoped device token and can run without the shared credential.
 Token rotation replaces the stored value atomically; authentication rejection can clear it through
 the official client callback.
 
@@ -33,7 +34,7 @@ process arguments.
 ## Consequences
 
 - A paired worker has a stable, independently revocable identity across Bridge processes.
-- The shared bootstrap credential can be removed after successful pairing.
+- The shared Gateway credential can be removed after successful pairing.
 - Workflow backups cannot leak Gateway credentials because secrets remain outside the database.
 - Losing the device state directory requires a new pairing approval.
 - Multi-host workers must use separate state directories and device identities.

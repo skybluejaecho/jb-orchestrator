@@ -162,6 +162,12 @@ jobs:
         if: matrix.component == 'runtime'
         run: docker run --rm jb-orchestrator-runtime:ci jb version
 
+      - name: Verify Runtime Git tooling
+        if: matrix.component == 'runtime'
+        run: |
+          docker run --rm --network none jb-orchestrator-runtime:ci git --version
+          docker run --rm --network none jb-orchestrator-runtime:ci ssh -V
+
       - name: Verify Jarvis Node.js runtime
         if: matrix.component == 'jarvis'
         run: docker run --rm --entrypoint node jb-orchestrator-jarvis:ci --version

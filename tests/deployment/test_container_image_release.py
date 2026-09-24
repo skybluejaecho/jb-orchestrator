@@ -18,7 +18,9 @@ def load_workflow(path: Path) -> dict[str, object]:
     return loaded
 
 
-def write_component_versions(root: Path, runtime: str, jarvis: str) -> None:
+def write_component_versions(
+    root: Path, runtime: str, jarvis: str, adapter_versions: dict[str, str] | None = None
+) -> None:
     (root / "apps" / "jarvis").mkdir(parents=True, exist_ok=True)
     (root / "pyproject.toml").write_text(
         f'[project]\nname = "fixture"\nversion = "{runtime}"\n', encoding="utf-8"
@@ -26,19 +28,37 @@ def write_component_versions(root: Path, runtime: str, jarvis: str) -> None:
     (root / "apps" / "jarvis" / "package.json").write_text(
         json.dumps({"version": jarvis}), encoding="utf-8"
     )
+    for adapter in ("openclaw", "github", "webhook"):
+        adapter_root = root / "adapters" / adapter
+        adapter_root.mkdir(parents=True, exist_ok=True)
+        version = (adapter_versions or {}).get(adapter, runtime)
+        (adapter_root / "pyproject.toml").write_text(
+            f'[project]\nname = "fixture-{adapter}"\nversion = "{version}"\n',
+            encoding="utf-8",
+        )
 
 
 def test_release_version_requires_a_stable_matching_version(tmp_path: Path) -> None:
     write_component_versions(tmp_path, "1.2.3", "1.2.3")
 
     assert verify_version("v1.2.3", tmp_path) == "1.2.3"
-    assert component_versions(tmp_path) == {"runtime": "1.2.3", "jarvis": "1.2.3"}
+    assert component_versions(tmp_path) == {
+        "runtime": "1.2.3",
+        "jarvis": "1.2.3",
+        "openclaw": "1.2.3",
+        "github": "1.2.3",
+        "webhook": "1.2.3",
+    }
 
     with pytest.raises(ValueError, match="stable SemVer"):
         verify_version("v1.2.3-rc.1", tmp_path)
 
     write_component_versions(tmp_path, "1.2.3", "1.2.4")
     with pytest.raises(ValueError, match=r"jarvis=1\.2\.4"):
+        verify_version("v1.2.3", tmp_path)
+
+    write_component_versions(tmp_path, "1.2.3", "1.2.3", adapter_versions={"webhook": "1.2.3.dev0"})
+    with pytest.raises(ValueError, match=r"webhook=1\.2\.3\.dev0"):
         verify_version("v1.2.3", tmp_path)
 
 
@@ -66,6 +86,19 @@ def test_runtime_image_uses_the_hash_locked_dependency_export() -> None:
     assert "python -m pip check" in dockerfile
 
 
+def test_runtime_image_includes_git_worktree_tooling() -> None:
+    dockerfile = RUNTIME_DOCKERFILE.read_text(encoding="utf-8")
+    jobs = load_workflow(CI_WORKFLOW)["jobs"]
+    assert isinstance(jobs, dict)
+    container_steps = jobs["container-build"]["steps"]
+    commands = "\n".join(step.get("run", "") for step in container_steps)
+
+    assert "git" in dockerfile
+    assert "openssh-client" in dockerfile
+    assert "git --version" in commands
+    assert "ssh -V" in commands
+
+
 def test_release_publishes_only_versioned_and_commit_tags() -> None:
     workflow = load_workflow(RELEASE_WORKFLOW)
     trigger = workflow["on"]
@@ -85,3 +118,17 @@ def test_release_publishes_only_versioned_and_commit_tags() -> None:
 
     image_names = {entry["image"] for entry in publish["strategy"]["matrix"]["include"]}
     assert image_names == {"jb-orchestrator-runtime", "jb-orchestrator-jarvis"}
+
+
+def test_release_publishes_amd64_and_arm64_images() -> None:
+    workflow = load_workflow(RELEASE_WORKFLOW)
+    jobs = workflow["jobs"]
+    assert isinstance(jobs, dict)
+    publish = jobs["publish"]
+    steps = publish["steps"]
+
+    assert any(step.get("uses", "").startswith("docker/setup-qemu-action@") for step in steps)
+    build = next(
+        step for step in steps if step.get("uses", "").startswith("docker/build-push-action@")
+    )
+    assert build["with"]["platforms"] == "linux/amd64,linux/arm64"
