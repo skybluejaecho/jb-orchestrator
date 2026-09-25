@@ -23,6 +23,10 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import {
+  presentStructuredContent,
+  summarizeExecutionProgress,
+} from '@/lib/execution-presentation';
 import { cn } from '@/lib/utils';
 import { ExecutionCancellation } from '@/components/execution-cancellation';
 import { ScmPublications } from '@/components/scm-publications';
@@ -125,6 +129,47 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+function StructuredResult({ content }: { content: Record<string, unknown> }) {
+  const { headline, fields } = presentStructuredContent(content);
+
+  return (
+    <div className="mt-3 space-y-3 text-sm leading-6 text-white/70">
+      {headline && (
+        <p className="whitespace-pre-wrap font-medium text-white/85">
+          {headline}
+        </p>
+      )}
+      {fields.map((field) => (
+        <div key={field.label}>
+          <p className="text-xs font-medium text-white/40">{field.label}</p>
+          {field.values.length === 1 ? (
+            <p className="whitespace-pre-wrap break-words">{field.values[0]}</p>
+          ) : (
+            <ul className="list-disc space-y-1 pl-5">
+              {field.values.map((value, index) => (
+                <li
+                  key={`${index}-${value}`}
+                  className="whitespace-pre-wrap break-words"
+                >
+                  {value}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ))}
+      <details className="rounded-md border border-white/8 bg-black/15 px-3 py-2">
+        <summary className="cursor-pointer text-xs text-white/50">
+          원본 JSON 보기
+        </summary>
+        <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-white/55">
+          {JSON.stringify(content, null, 2)}
+        </pre>
+      </details>
+    </div>
+  );
+}
+
 async function readJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const problem = (await response.json().catch(() => ({}))) as Problem;
@@ -205,6 +250,21 @@ export function ExecutionInspector({
     }
   };
 
+  const progress = detail
+    ? summarizeExecutionProgress(
+        detail.execution.status,
+        detail.execution.nodes,
+      )
+    : null;
+  const latestArtifact = detail?.artifacts.reduce<Artifact | null>(
+    (latest, artifact) =>
+      !latest || artifact.created_at > latest.created_at ? artifact : latest,
+    null,
+  );
+  const latestResult = latestArtifact
+    ? presentStructuredContent(latestArtifact.content)
+    : null;
+
   return (
     <Card className="border border-cyan-300/12 bg-card/90 ring-0">
       <CardHeader className="border-b border-white/7 pb-4">
@@ -270,6 +330,34 @@ export function ExecutionInspector({
                 run {detail.execution.run_id.slice(0, 8)}
               </p>
             </div>
+
+            {progress && (
+              <section
+                aria-label="실행 진행 요약"
+                className="rounded-lg border border-cyan-300/15 bg-cyan-300/5 p-4"
+              >
+                <p className="text-xs font-medium text-cyan-100/65">
+                  현재 진행 상황
+                </p>
+                <p className="mt-1 text-base font-medium text-white/90">
+                  {progress.message}
+                </p>
+                <p className="mt-1 text-xs text-white/45">
+                  완료된 단계 {progress.completed}/{progress.total}
+                </p>
+                {latestArtifact && (
+                  <div className="mt-3 border-t border-cyan-300/10 pt-3">
+                    <p className="text-xs text-cyan-100/60">
+                      최근 산출물 · {latestArtifact.producer_node_key}
+                    </p>
+                    <p className="mt-1 whitespace-pre-wrap break-words text-sm text-white/75">
+                      {latestResult?.headline ??
+                        '아래 산출물에서 세부 내용을 확인하세요.'}
+                    </p>
+                  </div>
+                )}
+              </section>
+            )}
 
             {detail.execution.failure_reason && (
               <p className="rounded-lg border border-red-300/20 bg-red-300/6 p-3 text-sm text-red-100">
@@ -435,11 +523,7 @@ export function ExecutionInspector({
                       </span>
                     </div>
 
-                    {node.output && (
-                      <pre className="mt-3 max-h-48 overflow-auto rounded-md bg-black/25 p-3 text-xs leading-5 text-white/55">
-                        {JSON.stringify(node.output, null, 2)}
-                      </pre>
-                    )}
+                    {node.output && <StructuredResult content={node.output} />}
 
                     {node.status === 'awaiting_approval' && (
                       <div className="mt-3 border-t border-white/7 pt-3">
@@ -542,9 +626,7 @@ export function ExecutionInspector({
                           visit {artifact.visit_count}
                         </span>
                       </div>
-                      <pre className="max-h-56 overflow-auto rounded-md bg-black/25 p-3 text-xs leading-5 text-white/55">
-                        {JSON.stringify(artifact.content, null, 2)}
-                      </pre>
+                      <StructuredResult content={artifact.content} />
                     </article>
                   ))}
                 </div>

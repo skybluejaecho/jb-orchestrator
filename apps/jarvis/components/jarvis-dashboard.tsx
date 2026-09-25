@@ -12,7 +12,7 @@ import {
   type LucideIcon,
   Workflow,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -197,10 +197,12 @@ export function JarvisDashboard() {
   const [dispatchNotice, setDispatchNotice] = useState<{
     projectId: string;
     title: string;
+    replayed: boolean;
   } | null>(null);
   const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(
     null,
   );
+  const executionFocusRef = useRef<HTMLDivElement>(null);
   const [eventRevision, setEventRevision] = useState(0);
 
   const loadProjects = useCallback(async () => {
@@ -267,6 +269,15 @@ export function JarvisDashboard() {
     };
   }, [loadOverview, selectedProjectId]);
 
+  useEffect(() => {
+    if (!selectedExecutionId) return;
+    const frame = requestAnimationFrame(() => {
+      executionFocusRef.current?.scrollIntoView({ block: 'start' });
+      executionFocusRef.current?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [selectedExecutionId]);
+
   const metrics = useMemo(() => {
     const requests = overview?.requests ?? [];
     const workflows = overview?.workflows ?? [];
@@ -321,12 +332,24 @@ export function JarvisDashboard() {
   const selectedProject =
     projects.find((project) => project.id === selectedProjectId) ?? null;
 
+  const selectExecution = (executionId: string) => {
+    setSelectedExecutionId(executionId);
+    if (executionId === selectedExecutionId) {
+      requestAnimationFrame(() => {
+        executionFocusRef.current?.scrollIntoView({ block: 'start' });
+        executionFocusRef.current?.focus({ preventScroll: true });
+      });
+    }
+  };
+
   const handleDispatched = (result: DispatchResult) => {
     if (!selectedProjectId) return;
     setDispatchNotice({
       projectId: selectedProjectId,
       title: result.request.title || result.request.prompt,
+      replayed: result.replayed,
     });
+    selectExecution(result.workflow.id);
     void loadOverview(selectedProjectId);
   };
 
@@ -439,7 +462,11 @@ export function JarvisDashboard() {
                   className="size-5 shrink-0 text-emerald-200"
                 />
                 <p className="min-w-0 truncate text-sm">
-                  <span className="font-medium">요청을 등록했습니다.</span>{' '}
+                  <span className="font-medium">
+                    {dispatchNotice.replayed
+                      ? '기존 요청의 실행을 열었습니다.'
+                      : '요청을 등록하고 실행을 열었습니다.'}
+                  </span>{' '}
                   <span className="text-emerald-50/55">
                     {dispatchNotice.title}
                   </span>
@@ -497,6 +524,24 @@ export function JarvisDashboard() {
               </div>
             )}
           </div>
+
+          {selectedExecutionId && (
+            <div
+              ref={executionFocusRef}
+              tabIndex={-1}
+              className="scroll-mt-4 outline-none"
+            >
+              <ExecutionInspector
+                key={selectedExecutionId}
+                executionId={selectedExecutionId}
+                revision={eventRevision}
+                onChanged={() =>
+                  selectedProjectId && void loadOverview(selectedProjectId)
+                }
+                onClose={() => setSelectedExecutionId(null)}
+              />
+            </div>
+          )}
 
           <RequestComposer
             key={selectedProject?.id ?? 'no-project'}
@@ -579,9 +624,7 @@ export function JarvisDashboard() {
                               type="button"
                               aria-label={`${workflow.definition_key} 실행 상세 보기`}
                               aria-pressed={selectedExecutionId === workflow.id}
-                              onClick={() =>
-                                setSelectedExecutionId(workflow.id)
-                              }
+                              onClick={() => selectExecution(workflow.id)}
                               className="rounded-md text-left outline-none hover:text-cyan-100 focus-visible:ring-2 focus-visible:ring-cyan-300/50"
                             >
                               <span className="block font-medium">
@@ -670,18 +713,6 @@ export function JarvisDashboard() {
                 onChanged={() => loadOverview(selectedProjectId)}
               />
             </div>
-          )}
-
-          {selectedExecutionId && (
-            <ExecutionInspector
-              key={selectedExecutionId}
-              executionId={selectedExecutionId}
-              revision={eventRevision}
-              onChanged={() =>
-                selectedProjectId && void loadOverview(selectedProjectId)
-              }
-              onClose={() => setSelectedExecutionId(null)}
-            />
           )}
         </section>
       </div>
